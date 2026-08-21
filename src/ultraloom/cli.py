@@ -109,7 +109,7 @@ def _check(kind: str, config: Config, threshold: int | None) -> int:
         # (spec 9.4). Unresolvable checks come back as failures, not silence.
         results = run_all(config)
         for result in results:
-            _report(result, "")
+            _report(result)
         return _EXIT_OK if all(result.ok for result in results) else _EXIT_FAIL
 
     try:
@@ -118,12 +118,19 @@ def _check(kind: str, config: Config, threshold: int | None) -> int:
         print(str(error), file=sys.stderr)
         return _EXIT_FAIL
 
-    detail = f" (threshold {config.coverage_threshold}%)" if kind == "coverage" else ""
-    _report(result, detail)
+    _report(result)
+    if kind == "coverage":
+        # Deliberately its own line, and never part of the verdict: nothing in
+        # ultraloom folds the threshold into the coverage command, so a line
+        # reading "ok (threshold 90%)" would claim a check that never happened.
+        print(
+            f"note: the configured coverage threshold is {config.coverage_threshold}%; "
+            "ultraloom does not enforce it — the coverage tool's own settings decide"
+        )
     return _EXIT_OK if result.ok else _EXIT_FAIL
 
 
-def _report(result: CheckResult, detail: str) -> None:
+def _report(result: CheckResult) -> None:
     """One line per check, with the source named.
 
     The source is on the line because "ok" from a preset and "ok" from a
@@ -131,7 +138,7 @@ def _report(result: CheckResult, detail: str) -> None:
     `error` are red lines that a bare "failed" would hide.
     """
     verdict = "ok" if result.ok else "failed"
-    print(f"{result.kind}: {verdict} [{result.source}]{detail}")
+    print(f"{result.kind}: {verdict} [{result.source}]")
     if result.output:
         print(result.output.rstrip("\n"))
 

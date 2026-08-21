@@ -47,10 +47,10 @@ strict = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-# Der Adapter für das optionale agent-Extra kommt erst mit Task 14; bis dahin
-# muss cli._model, das ihn zur Laufzeit optional importiert, trotzdem prüfbar
-# sein. Als Override statt als `type: ignore`, weil der Kommentar unbenutzt
-# würde — und damit selbst zum Fehler —, sobald das Modul existiert.
+# The adapter for the optional agent extra only arrives with Task 14; until
+# then cli._model, which imports it optionally at runtime, must still type
+# check. An override rather than a `type: ignore`, because the ignore would
+# become unused — and so an error itself — once the module exists.
 module = ["ultraloom.model.agent_sdk"]
 ignore_missing_imports = true
 
