@@ -13,3 +13,6 @@ htmlcov/
 
 # Isolated workspaces for plan execution.
 /.worktrees/
+
+# Run journals are traces of single runs, not source.
+.ultraloom/runs/
