@@ -456,12 +456,18 @@ verlangt, wird nicht installiert — auch nicht von einem Projekt, das zunächst
 Hooks möchte. Deshalb ein Paket mit einem Extra:
 
 ```
-pip install ultraloom            # Prüfkette, keine LLM-Abhängigkeit
-pip install ultraloom[agent]     # zusätzlich der Graph-Harness
+uvx ultraloom check lint            # Prüfung ohne jede Installation
+uv add ultraloom                    # Prüfkette als Abhängigkeit
+uv add "ultraloom[agent]"           # zusätzlich der Graph-Harness
 ```
 
-`ultraloom run` ohne das Extra bricht mit einer klaren Meldung ab, die zur
-Installation von `ultraloom[agent]` auffordert — nicht mit einem `ImportError`.
+Der Hauptfall ist die erste Zeile: ein Hook ruft `uvx ultraloom check lint` auf,
+und das Projekt braucht ultraloom nirgends eingetragen — genau so, wie Abschnitt
+9.2 `uvx ruff` und `uvx gdlint` aufruft. Damit zahlt sich die Extras-Trennung
+doppelt aus, weil `uvx` nur das Nötige holt und das Agent SDK nie anfasst.
+
+`ultraloom run` ohne das Extra bricht mit einer klaren Meldung ab, die zu
+`uv add "ultraloom[agent]"` auffordert — nicht mit einem `ImportError`.
 
 Ein Repo, ein Name, eine Testsuite. Eine spätere Aufspaltung in zwei Pakete
 bleibt möglich, weil `checks.py` und `config.py` ohnehin getrennt liegen; die
