@@ -1,0 +1,151 @@
+"""Tests for reading .ultraloom/config.toml."""
+
+from pathlib import Path
+
+import pytest
+
+from ultraloom.config import CONFIG_NAME, Config, ConfigError, load_config
+
+
+def write_config(root: Path, body: str) -> None:
+    target = root / ".ultraloom" / "config.toml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
+
+
+def test_a_project_without_a_config_gets_empty_defaults(tmp_path: Path) -> None:
+    config = load_config(tmp_path)
+
+    assert config.root == tmp_path
+    assert config.commands == {}
+    assert config.exec_prefix == ()
+    assert config.coverage_report is None
+    assert config.coverage_threshold == 100
+    assert config.mcp_servers == ()
+
+
+def test_check_commands_are_read(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify]\nlint = "uvx gdlint ."\ntest = "godot --headless"\n')
+
+    config = load_config(tmp_path)
+
+    assert config.commands["lint"] == "uvx gdlint ."
+    assert config.commands["test"] == "godot --headless"
+
+
+def test_a_command_of_an_unknown_kind_is_ignored(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify]\nlint = "ruff check ."\ndeploy = "ship it"\n')
+
+    assert load_config(tmp_path).commands == {"lint": "ruff check ."}
+
+
+def test_the_exec_prefix_is_split_into_argv(tmp_path: Path) -> None:
+    write_config(tmp_path, '[exec]\nprefix = "docker compose exec -T frontend"\n')
+
+    assert load_config(tmp_path).exec_prefix == ("docker", "compose", "exec", "-T", "frontend")
+
+
+def test_coverage_report_and_threshold_are_read(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        '[verify]\n[verify.coverage]\nreport = "coverage-report/lcov.info"\nthreshold = 90\n',
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.coverage_report == "coverage-report/lcov.info"
+    assert config.coverage_threshold == 90
+
+
+def test_mcp_servers_are_read(tmp_path: Path) -> None:
+    write_config(tmp_path, '[agent]\nmcp_servers = ["ultra-brain"]\n')
+
+    assert load_config(tmp_path).mcp_servers == ("ultra-brain",)
+
+
+def test_broken_toml_is_reported_with_the_path(tmp_path: Path) -> None:
+    write_config(tmp_path, "this is not toml =\n")
+
+    with pytest.raises(ConfigError, match=r"config\.toml"):
+        load_config(tmp_path)
+
+
+def test_a_non_string_command_is_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify]\nlint = 7\n")
+
+    with pytest.raises(ConfigError, match="lint"):
+        load_config(tmp_path)
+
+
+def test_a_non_integer_threshold_is_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify]\n[verify.coverage]\nthreshold = "all of it"\n')
+
+    with pytest.raises(ConfigError, match="threshold"):
+        load_config(tmp_path)
+
+
+def test_a_boolean_threshold_is_refused(tmp_path: Path) -> None:
+    """TOML's true is an int to Python, and a threshold of one percent is nobody's intent."""
+    write_config(tmp_path, "[verify]\n[verify.coverage]\nthreshold = true\n")
+
+    with pytest.raises(ConfigError, match="threshold"):
+        load_config(tmp_path)
+
+
+def test_a_non_string_coverage_report_is_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify]\n[verify.coverage]\nreport = 3\n")
+
+    with pytest.raises(ConfigError, match="report"):
+        load_config(tmp_path)
+
+
+def test_a_non_string_exec_prefix_is_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, '[exec]\nprefix = ["docker", "compose"]\n')
+
+    with pytest.raises(ConfigError, match="prefix"):
+        load_config(tmp_path)
+
+
+def test_mcp_servers_that_are_not_a_list_of_strings_are_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, "[agent]\nmcp_servers = [1]\n")
+
+    with pytest.raises(ConfigError, match="mcp_servers"):
+        load_config(tmp_path)
+
+
+def test_mcp_servers_given_as_a_bare_string_are_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, '[agent]\nmcp_servers = "ultra-brain"\n')
+
+    with pytest.raises(ConfigError, match="mcp_servers"):
+        load_config(tmp_path)
+
+
+def test_a_section_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, 'verify = "everything"\n')
+
+    with pytest.raises(ConfigError, match=r"\[verify\]"):
+        load_config(tmp_path)
+
+
+def test_a_coverage_key_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify]\ncoverage = "yes please"\n')
+
+    with pytest.raises(ConfigError, match=r"\[coverage\]"):
+        load_config(tmp_path)
+
+
+def test_the_config_module_does_not_import_the_harness() -> None:
+    """Spec 15.2: the check side must stay installable without the agent extra."""
+    import ultraloom.config as module
+
+    assert module.__file__ is not None
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    for forbidden in ("from ultraloom.graph", "from ultraloom.runner", "from ultraloom.model"):
+        assert forbidden not in source
+
+
+def test_a_config_path_that_is_a_directory_is_not_a_config(tmp_path: Path) -> None:
+    """`exists()` is true for a directory, and read_text would raise past every handler."""
+    (tmp_path / CONFIG_NAME).mkdir(parents=True)
+
+    assert load_config(tmp_path) == Config(tmp_path)
