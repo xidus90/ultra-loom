@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import assert_never
 
+from ultraloom.gate import pending_gate
 from ultraloom.graph import END, AgentNode, CodeNode, GateNode, Graph, GraphError, Node, node_kind
 from ultraloom.journal import Entry, Journal, input_hash
 from ultraloom.model.port import Model, Request
@@ -57,6 +58,33 @@ class Runner[T]:
         except GraphError as error:
             return Result("error", State(data), None, None, str(error))
         return self._walk(State(data), self._graph.start)
+
+    def resume(self, data: T, answer: str | None = None) -> Result[T]:
+        """Carry a paused run onward, applying the answer to its open gate.
+
+        Without an answer the gate pauses again: treating a missing answer as
+        consent would make the approval point decorative.
+        """
+        try:
+            self._graph.validate()
+        except GraphError as error:
+            return Result("error", State(data), None, None, str(error))
+
+        gate = pending_gate(self._journal)
+        if gate is None or answer is None:
+            return self._walk(State(data), self._graph.start)
+
+        node = self._graph.node(gate.node)
+        if not isinstance(node, GateNode):
+            return Result("error", State(data), gate.node, None, f"{gate.node!r} is not a gate")
+
+        state = State(data).merged(node.apply(data, answer))
+        self._write(node, state, {}, "ok", 0, 0.0, f"answered: {answer}")
+        try:
+            name = self._graph.next_name(gate.node, state.data)
+        except GraphError as error:
+            return Result("error", state, gate.node, None, str(error))
+        return self._walk(state, name)
 
     def _walk(self, state: State[T], name: str) -> Result[T]:
         while name != END:
