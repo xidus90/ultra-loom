@@ -33,6 +33,9 @@ class AgentNode[T]:
     name: str
     prompt: Callable[[T], str]
     schema: type
+    # The reply is typed only by `schema`, which the type system cannot tie to
+    # this callable's parameter; the flow narrows it where it knows the type.
+    apply: Callable[[T, object], Delta] = lambda _data, _reply: {}
     tools: str = "read_only"
     effort: Effort = "high"
     max_visits: int = 1
@@ -68,6 +71,7 @@ def node_kind[T](node: Node[T]) -> str:
 class _Edge[T]:
     dst: str
     when: Callable[[T], bool] | None
+    on_error: bool = False
 
 
 @dataclass(slots=True)
@@ -85,9 +89,20 @@ class Graph[T]:
             raise GraphError(f"node {node.name!r} was already added")
         self._nodes[node.name] = node
 
-    def edge(self, src: str, dst: str, when: Callable[[T], bool] | None = None) -> None:
-        """Join two nodes. Without a condition the edge always holds."""
-        self._edges.setdefault(src, []).append(_Edge(dst, when))
+    def edge(
+        self,
+        src: str,
+        dst: str,
+        when: Callable[[T], bool] | None = None,
+        on_error: bool = False,
+    ) -> None:
+        """Join two nodes. Without a condition the edge always holds.
+
+        An on_error edge is taken only when the source node raised; it is
+        invisible to the normal path, so a fallback is a visible edge in the
+        flow rather than hidden retry logic in the runner.
+        """
+        self._edges.setdefault(src, []).append(_Edge(dst, when, on_error))
 
     def node(self, name: str) -> Node[T]:
         """Look a node up by name."""
@@ -99,9 +114,18 @@ class Graph[T]:
     def next_name(self, current: str, data: T) -> str:
         """The name of the node after `current`, or END."""
         for candidate in self._edges.get(current, []):
+            if candidate.on_error:
+                continue
             if candidate.when is None or candidate.when(data):
                 return candidate.dst
         raise GraphError(f"no edge out of {current!r} applies to the current state")
+
+    def error_name(self, current: str) -> str | None:
+        """Where to go when `current` raised, or None to end the run."""
+        for candidate in self._edges.get(current, []):
+            if candidate.on_error:
+                return candidate.dst
+        return None
 
     def validate(self) -> None:
         """Refuse a graph that cannot run, before the first node runs."""
@@ -115,8 +139,10 @@ class Graph[T]:
                 if candidate.dst != END and candidate.dst not in self._nodes:
                     raise GraphError(f"edge from {src!r} to unknown node {candidate.dst!r}")
 
+        # An error edge alone is not an exit: a node whose only way out is the
+        # fallback would run once and then have nowhere to go on success.
         for name in self._nodes:
-            if not self._edges.get(name):
+            if not [edge for edge in self._edges.get(name, []) if not edge.on_error]:
                 raise GraphError(f"node {name!r} has no outgoing edge")
 
         unreachable = sorted(set(self._nodes) - self._reachable())

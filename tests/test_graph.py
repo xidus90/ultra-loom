@@ -155,3 +155,35 @@ def test_node_looks_up_by_name() -> None:
 
     with pytest.raises(GraphError, match="unknown"):
         graph.node("missing")
+
+
+def test_an_error_edge_alone_does_not_count_as_an_outgoing_edge() -> None:
+    graph: Graph[Data] = Graph("onlyerror", start="first")
+    graph.add(code("first"))
+    graph.add(code("fallback"))
+    graph.edge("first", "fallback", on_error=True)
+    graph.edge("fallback", END)
+
+    with pytest.raises(GraphError, match="no outgoing edge"):
+        graph.validate()
+
+
+def test_next_name_ignores_error_edges_and_error_name_finds_them() -> None:
+    graph: Graph[Data] = Graph("both", start="first")
+    graph.add(code("first"))
+    graph.add(code("fallback"))
+    # The error edge comes first, so next_name has to skip past it rather than
+    # merely stop before reaching it.
+    graph.edge("first", "fallback", on_error=True)
+    graph.edge("first", END)
+    graph.edge("fallback", END)
+
+    assert graph.next_name("first", Data()) == END
+    assert graph.error_name("first") == "fallback"
+    assert graph.error_name("fallback") is None
+
+
+def test_an_agent_node_defaults_to_a_delta_free_apply() -> None:
+    node: AgentNode[Data] = AgentNode("review", lambda _d: "ask", schema=Data)
+
+    assert node.apply(Data(), object()) == {}

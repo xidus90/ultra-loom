@@ -1,0 +1,174 @@
+"""The execution loop: pick the next node, run it, journal it, carry on."""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import assert_never
+
+from ultraloom.graph import END, AgentNode, CodeNode, GateNode, Graph, GraphError, Node, node_kind
+from ultraloom.journal import Entry, Journal, input_hash
+from ultraloom.model.port import Model, Request
+from ultraloom.state import Delta, State
+from ultraloom.tools import resolve_tools
+
+type Clock = Callable[[], float]
+
+
+class VisitLimitError(RuntimeError):
+    """Raised when a node ran more often than its max_visits allows."""
+
+
+@dataclass(frozen=True, slots=True)
+class Result[T]:
+    """How a run ended, and where."""
+
+    status: str
+    state: State[T]
+    node: str | None
+    question: str | None
+    detail: str | None
+
+
+class Runner[T]:
+    """Walks a graph, journalling every step."""
+
+    def __init__(
+        self,
+        graph: Graph[T],
+        journal: Journal,
+        model: Model | None = None,
+        clock: Clock | None = None,
+        mcp_servers: Sequence[str] = (),
+    ) -> None:
+        self._graph = graph
+        self._journal = journal
+        self._model = model
+        # An injected clock keeps durations deterministic, which is what makes
+        # the golden-journal test in task 8 a real test.
+        self._clock = clock if clock is not None else _monotonic
+        self._mcp_servers = tuple(mcp_servers)
+
+    def run(self, data: T) -> Result[T]:
+        """Run the flow from its start node."""
+        try:
+            self._graph.validate()
+        except GraphError as error:
+            return Result("error", State(data), None, None, str(error))
+        return self._walk(State(data), self._graph.start)
+
+    def _walk(self, state: State[T], name: str) -> Result[T]:
+        while name != END:
+            node = self._graph.node(name)
+            state = state.with_visit(name)
+            if state.visit_count(name) > node.max_visits:
+                # The exception type is the vocabulary for a caller that wants
+                # to tell a runaway loop from a node failure; the run itself
+                # still ends as a Result, so the journal stays the record.
+                limit = VisitLimitError(f"node {name!r} exceeded max_visits={node.max_visits}")
+                self._write(node, state, {}, "error", 0, 0.0, str(limit))
+                return Result("error", state, name, None, str(limit))
+
+            outcome = self._step(node, state)
+            if outcome.paused:
+                return Result("paused", outcome.state, name, outcome.question, None)
+            if outcome.failed:
+                fallback = self._graph.error_name(name)
+                if fallback is None:
+                    return Result("error", outcome.state, name, None, outcome.detail)
+                state, name = outcome.state, fallback
+                continue
+
+            state = outcome.state
+            try:
+                name = self._graph.next_name(name, state.data)
+            except GraphError as error:
+                return Result("error", state, name, None, str(error))
+        return Result("done", state, None, None, None)
+
+    def _step(self, node: Node[T], state: State[T]) -> _Step[T]:
+        started = self._clock()
+        try:
+            delta, tokens = self._invoke(node, state)
+        # A node runs arbitrary project code, so anything may come out of it.
+        # A crash here would lose the journal entry that explains the failure.
+        # It is turned into an error outcome here, never swallowed.
+        except Exception as error:
+            seconds = self._clock() - started
+            self._write(node, state, {}, "error", 0, seconds, str(error))
+            return _Step(state, failed=True, detail=str(error))
+
+        seconds = self._clock() - started
+        if isinstance(node, GateNode):
+            question = node.question(state.data)
+            self._write(node, state, {}, "paused", 0, seconds, question)
+            return _Step(state, paused=True, question=question)
+
+        self._write(node, state, delta, "ok", tokens, seconds, None)
+        return _Step(state.merged(delta))
+
+    def _invoke(self, node: Node[T], state: State[T]) -> tuple[Delta, int]:
+        match node:
+            case CodeNode():
+                return node.run(state.data), 0
+            case AgentNode():
+                if self._model is None:
+                    raise RuntimeError(f"node {node.name!r} needs a model but no model was given")
+                reply = self._model.ask(
+                    Request(
+                        prompt=node.prompt(state.data),
+                        tools=resolve_tools(node.tools, self._mcp_servers),
+                        effort=node.effort,
+                        schema=node.schema,
+                    )
+                )
+                return node.apply(state.data, reply.value), reply.tokens
+            case GateNode():
+                # A gate contributes no delta of its own; the answer that
+                # resumes it does, once there is one.
+                return {}, 0
+            case _:  # pragma: no cover  # the Node union is exhaustive; mypy proves it here
+                assert_never(node)
+
+    def _write(
+        self,
+        node: Node[T],
+        state: State[T],
+        delta: Delta,
+        outcome: str,
+        tokens: int,
+        seconds: float,
+        detail: str | None,
+    ) -> None:
+        agent = node if isinstance(node, AgentNode) else None
+        self._journal.append(
+            Entry(
+                node=node.name,
+                kind=node_kind(node),
+                input_hash=input_hash(node.name, state.data),
+                delta=dict(delta),
+                outcome=outcome,
+                # The profile name, not the resolved list: the list is derived
+                # from it plus the mcp servers, and the name is what a resume
+                # needs to recognise the node it is looking at.
+                tools=agent.tools if agent else None,
+                effort=agent.effort if agent else None,
+                tokens=tokens,
+                seconds=seconds,
+                detail=detail,
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _Step[T]:
+    state: State[T]
+    paused: bool = False
+    failed: bool = False
+    question: str | None = None
+    detail: str | None = None
+
+
+def _monotonic() -> float:  # pragma: no cover  # the default clock; tests inject their own
+    return time.monotonic()
