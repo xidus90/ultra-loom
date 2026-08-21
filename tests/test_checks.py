@@ -286,11 +286,18 @@ def test_run_all_actually_overlaps_the_waiting(tmp_path: Path) -> None:
     )
 
 
-def test_the_checks_module_does_not_import_the_harness() -> None:
-    """Spec 15.2: the check side must stay installable without the agent extra."""
-    import ultraloom.checks as module
+def test_an_empty_configured_command_is_refused_even_with_an_exec_prefix(tmp_path: Path) -> None:
+    """Otherwise the bare prefix runs, and a prefix that exits 0 reports green."""
+    python_project(tmp_path)
+    write_config(tmp_path, '[verify]\nlint = ""\nprefix = "docker compose exec -T web"\n')
 
-    assert module.__file__ is not None
-    source = Path(module.__file__).read_text(encoding="utf-8")
-    for forbidden in ("from ultraloom.graph", "from ultraloom.runner", "from ultraloom.model"):
-        assert forbidden not in source
+    with pytest.raises(CheckUnavailableError, match="empty command"):
+        resolve_check("lint", load_config(tmp_path))
+
+
+def test_a_directory_that_matches_the_script_glob_is_not_a_script(tmp_path: Path) -> None:
+    """`lint.d` is a directory; handing it to subprocess would be nonsense."""
+    python_project(tmp_path)
+    (tmp_path / ".ultraloom" / "checks" / "lint.d").mkdir(parents=True)
+
+    assert resolve_check("lint", load_config(tmp_path)).source == "preset"

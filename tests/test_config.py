@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.config import ConfigError, load_config
+from ultraloom.config import CONFIG_NAME, Config, ConfigError, load_config
 
 
 def write_config(root: Path, body: str) -> None:
@@ -142,3 +142,10 @@ def test_the_config_module_does_not_import_the_harness() -> None:
     source = Path(module.__file__).read_text(encoding="utf-8")
     for forbidden in ("from ultraloom.graph", "from ultraloom.runner", "from ultraloom.model"):
         assert forbidden not in source
+
+
+def test_a_config_path_that_is_a_directory_is_not_a_config(tmp_path: Path) -> None:
+    """`exists()` is true for a directory, and read_text would raise past every handler."""
+    (tmp_path / CONFIG_NAME).mkdir(parents=True)
+
+    assert load_config(tmp_path) == Config(tmp_path)

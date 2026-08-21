@@ -75,12 +75,16 @@ def resolve_check(kind: str, config: Config) -> Command:
         raise CheckUnavailableError(f"unknown check {kind!r}; known: {', '.join(KINDS)}")
 
     if kind in config.commands:
-        argv = config.exec_prefix + tuple(shlex.split(config.commands[kind]))
-        if not argv:
-            # A blank config line configures *nothing*, and an empty argv is
-            # what subprocess turns into an IndexError deep inside Popen.
+        words = tuple(shlex.split(config.commands[kind]))
+        if not words:
+            # Checked before the prefix is prepended, not after: with a prefix
+            # configured, a blank command line leaves the bare prefix, and
+            # ultraloom would run *that* and report its exit code as the
+            # check's. A prefix that exits 0 would turn a check nobody
+            # configured into a green line -- the one failure in this system
+            # that actually does damage.
             raise CheckUnavailableError(f"empty command configured for check {kind!r}")
-        return Command(kind, argv, "config")
+        return Command(kind, config.exec_prefix + words, "config")
 
     script = _script_for(kind, config.root)
     if script is not None:
@@ -159,15 +163,24 @@ def _script_for(kind: str, root: Path) -> tuple[str, ...] | None:
 
     A named path, deliberately not a search for anything that looks like a
     check script — that would be guessing.
+
+    The extension is free, so `lint.py` and `lint.bat` can both exist. The
+    tie-break is the first by name, which puts `.bat` before `.py`; a project
+    that cares should keep one script per check rather than rely on that.
+    A `.py` script is run with the interpreter ultraloom itself runs under.
     """
     directory = root / ".ultraloom" / "checks"
     if not directory.is_dir():
         return None
-    for candidate in sorted(directory.glob(f"{kind}.*")):
-        if candidate.suffix == ".py":
-            return (sys.executable, str(candidate))
-        return (str(candidate),)
-    return None
+    # is_file(), because a directory called `lint.d` matches the glob and would
+    # otherwise be handed to subprocess as a command.
+    candidates = sorted(path for path in directory.glob(f"{kind}.*") if path.is_file())
+    if not candidates:
+        return None
+    script = candidates[0]
+    if script.suffix == ".py":
+        return (sys.executable, str(script))
+    return (str(script),)
 
 
 def _marker(root: Path) -> str | None:

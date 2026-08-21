@@ -38,7 +38,9 @@ class Config:
 def load_config(root: Path) -> Config:
     """Read the project's configuration, or return empty defaults."""
     path = root / CONFIG_NAME
-    if not path.exists():
+    # is_file() and not exists(): a *directory* of that name exists, and
+    # read_text would raise IsADirectoryError past every ConfigError handler.
+    if not path.is_file():
         return Config(root)
 
     try:
