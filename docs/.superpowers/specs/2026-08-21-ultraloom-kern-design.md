@@ -268,7 +268,7 @@ Projekt „sauber" heißt.
 ```
 ultraloom check lint       # Rückgabewert 0 oder 1, Meldungen auf stderr
 ultraloom check types
-ultraloom check tests
+ultraloom check test
 ultraloom check coverage --threshold 100
 ```
 
@@ -371,7 +371,7 @@ Ein angehaltener Lauf braucht eine Adresse.
 | `ultraloom show <run-id>` | Journal lesbar, mit Tokens und Dauer pro Knoten |
 | `ultraloom resume <run-id> [--answer ...]` | Nach Gate oder Abbruch weiter |
 | `ultraloom replay <run-id>` | Alles aus dem Journal, ohne einen Modellaufruf |
-| `ultraloom check <lint\|types\|tests\|coverage>` | Eine Prüfung nach Abschnitt 9, auch außerhalb eines Laufs |
+| `ultraloom check <lint\|types\|test\|coverage>` | Eine Prüfung nach Abschnitt 9, auch außerhalb eines Laufs |
 
 `replay` erlaubt, ein Fehlverhalten zu untersuchen, ohne es erneut zu bezahlen.
 `check` ist der Einstieg für Claude-Code-Hooks (Abschnitt 14).
