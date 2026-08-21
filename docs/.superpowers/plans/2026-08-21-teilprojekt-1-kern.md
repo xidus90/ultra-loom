@@ -2608,6 +2608,7 @@ git commit -m "Read a project's checks and its execution prefix as separate thin
   - `class CheckResult` (frozen) mit `kind: str`, `ok: bool`, `output: str`, `source: str`
   - `resolve_check(kind: str, config: Config) -> Command`
   - `run_check(kind: str, config: Config) -> CheckResult`
+  - `run_all(config: Config) -> tuple[CheckResult, ...]`
   - `class CheckUnavailableError(RuntimeError)`
   - `PRESETS: Mapping[str, Mapping[str, tuple[str, ...]]]`
 
@@ -2933,12 +2934,133 @@ uv run mypy
 
 Expected: alle Tests PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: `check all` nebenläufig ergänzen (Spec 9.4)**
+
+Der Aufschlag fällt pro Aufruf an, nicht pro Prüfung: gemessen 265 ms für
+`run.sh` samt `uv run --script`, davon 40 ms Interpreterstart. Vier einzelne
+Aufrufe zahlen ihn viermal. Ein Sammelaufruf zahlt ihn einmal und wartet
+nebenläufig — Threads genügen, weil `subprocess.run` den GIL freigibt (gemessen
+3,83x von 4,00x).
+
+Schreibe zuerst die Tests, in `tests/test_checks.py`:
+
+```python
+def test_run_all_reports_every_resolvable_check(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        f'[verify]\nlint = "{sys.executable} -c pass"\ntypes = "{sys.executable} -c pass"\n',
+    )
+
+    results = run_all(load_config(tmp_path))
+
+    assert {result.kind for result in results} == {"lint", "types"}
+    assert all(result.ok for result in results)
+
+
+def test_run_all_keeps_a_fixed_order_whatever_finishes_first(tmp_path: Path) -> None:
+    """A report whose line order depends on timing cannot be compared."""
+    slow = f'{sys.executable} -c "import time; time.sleep(0.4)"'
+    write_config(
+        tmp_path,
+        f'[verify]\nlint = "{slow}"\ntypes = "{sys.executable} -c pass"\n',
+    )
+
+    order = [result.kind for result in run_all(load_config(tmp_path))]
+
+    assert order == ["lint", "types"], "output order must follow KINDS, not completion"
+
+
+def test_run_all_skips_a_check_it_cannot_resolve_and_says_which(tmp_path: Path) -> None:
+    """An unresolvable check is reported as unavailable, never as passed."""
+    write_config(tmp_path, f'[verify]\nlint = "{sys.executable} -c pass"\n')
+
+    results = run_all(load_config(tmp_path))
+
+    unavailable = [result for result in results if result.source == "unavailable"]
+    assert unavailable, "the checks with no preset must appear, not vanish"
+    assert all(result.ok is False for result in unavailable)
+
+
+def test_run_all_is_not_ok_when_one_check_fails(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        f"[verify]\nlint = \"{sys.executable} -c pass\"\n"
+        f"types = \"{sys.executable} -c 'import sys; sys.exit(1)'\"\n",
+    )
+
+    results = run_all(load_config(tmp_path))
+
+    assert any(result.ok is False for result in results)
+
+
+def test_run_all_actually_overlaps_the_waiting(tmp_path: Path) -> None:
+    """The whole point: four 400 ms checks must not take 1.6 s."""
+    slow = f'{sys.executable} -c "import time; time.sleep(0.4)"'
+    write_config(
+        tmp_path,
+        f'[verify]\nlint = "{slow}"\ntypes = "{slow}"\ntest = "{slow}"\ncoverage = "{slow}"\n',
+    )
+    started = time.perf_counter()
+
+    run_all(load_config(tmp_path))
+
+    elapsed = time.perf_counter() - started
+    assert elapsed < 1.2, f"four 0.4 s checks took {elapsed:.2f}s; they did not overlap"
+```
+
+Ergänze oben in `tests/test_checks.py`:
+
+```python
+import time
+
+from ultraloom.checks import run_all
+```
+
+Run: `uv run pytest tests/test_checks.py -k run_all -v`
+Expected: FAIL mit `ImportError: cannot import name 'run_all'`
+
+Implementiere in `src/ultraloom/checks.py` — Import oben ergänzen:
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+```
+
+Und die Funktion am Ende:
+
+```python
+def run_all(config: Config) -> tuple[CheckResult, ...]:
+    """Run every resolvable check at once, and report them in a fixed order.
+
+    Concurrent with plain threads: subprocess.run releases the GIL while it
+    waits, so parallel waiting reaches 96% of its ceiling without a special
+    interpreter (spec 9.4). The order of the result is KINDS, never the order
+    in which the checks happened to finish — a report whose lines move around
+    between runs cannot be compared.
+    """
+    with ThreadPoolExecutor(max_workers=len(KINDS)) as pool:
+        return tuple(pool.map(lambda kind: _run_or_report(kind, config), KINDS))
+
+
+def _run_or_report(kind: str, config: Config) -> CheckResult:
+    """One check, with an unresolvable one turned into a visible failure."""
+    try:
+        return run_check(kind, config)
+    except CheckUnavailableError as error:
+        # Reported, not skipped: a run that looks green because nothing ran is
+        # the one failure in this system that actually does damage.
+        return CheckResult(kind, False, str(error), "unavailable")
+```
+
+Run: `uv run pytest tests/test_checks.py -v`
+Expected: alle Tests PASS.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/ultraloom/checks.py tests/test_checks.py
 git commit -m "Resolve a check in four stages and refuse to guess at the last one"
 ```
+
 
 ---
 
@@ -3234,6 +3356,7 @@ def test_a_module_without_an_initial_state_is_refused(tmp_path: Path) -> None:
 """Tests for the command line."""
 
 import sys
+import time
 from pathlib import Path
 
 from ultraloom.cli import main, next_run_id
@@ -3419,6 +3542,43 @@ def test_check_honours_the_coverage_threshold_flag(tmp_path: Path, capsys) -> No
     assert "90" in capsys.readouterr().out
 
 
+def test_check_all_reports_the_resolvable_and_the_unavailable_alike(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    write_config(
+        tmp_path,
+        f'[verify]
+lint = "{sys.executable} -c pass"
+types = "{sys.executable} -c pass"
+',
+    )
+
+    code = main(["check", "all", "--root", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 1, "the unresolvable checks must keep the exit code non-zero"
+    assert "lint: ok" in out
+    assert "types: ok" in out
+    assert "unavailable" in out, "a check that cannot run must be visible, not silent"
+
+
+def test_check_all_is_faster_than_four_separate_calls(tmp_path: Path) -> None:
+    """The reason `all` exists: one startup cost, and the waiting overlaps."""
+    slow = f'{sys.executable} -c "import time; time.sleep(0.4)"'
+    write_config(
+        tmp_path,
+        f'[verify]
+lint = "{slow}"
+types = "{slow}"
+test = "{slow}"
+coverage = "{slow}"
+',
+    )
+    started = time.perf_counter()
+
+    main(["check", "all", "--root", str(tmp_path)])
+
+    assert time.perf_counter() - started < 1.2
+
+
 def test_no_subcommand_prints_usage_and_fails(capsys) -> None:  # type: ignore[no-untyped-def]
     code = main([])
 
@@ -3473,7 +3633,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from ultraloom.checks import CheckUnavailableError, run_check
+from ultraloom.checks import CheckUnavailableError, run_all, run_check
 from ultraloom.config import load_config
 
 RUN_DIR = ".ultraloom/runs"
@@ -3525,8 +3685,8 @@ def _parser() -> argparse.ArgumentParser:
     resume.add_argument("run_id")
     resume.add_argument("--answer", default=None, help="the answer to the run's open gate")
 
-    check = subparsers.add_parser("check", help="run one of the project's checks")
-    check.add_argument("kind", choices=("lint", "types", "test", "coverage"))
+    check = subparsers.add_parser("check", help="run one or all of the project's checks")
+    check.add_argument("kind", choices=("lint", "types", "test", "coverage", "all"))
     check.add_argument("--threshold", type=int, default=None, help="coverage threshold in percent")
 
     return parser
@@ -3536,6 +3696,19 @@ def _check(kind: str, root: Path, threshold: int | None) -> int:
     config = load_config(root)
     if threshold is not None:
         config = dataclasses.replace(config, coverage_threshold=threshold)
+
+    if kind == "all":
+        # One process pays the startup cost once and waits concurrently
+        # (spec 9.4). Unresolvable checks come back as failures, not silence.
+        results = run_all(config)
+        for result in results:
+            print(f"{result.kind}: {'ok' if result.ok else 'failed'} [{result.source}]")
+            if result.output:
+                print(result.output, end="" if result.output.endswith("
+") else "
+")
+        return _EXIT_OK if all(result.ok for result in results) else _EXIT_FAIL
+
     try:
         result = run_check(kind, config)
     except CheckUnavailableError as error:
@@ -4181,6 +4354,7 @@ Damit beim Ausführen nichts hineinwächst, was nicht hierher gehört:
 | 7 Drei Ebenen der Ablage | Aufgabe 11 (`.ultraloom/flows`), 9 (`config.toml`) |
 | 8 Werkzeugprofile, lesender Standard, kein Fallback | Aufgabe 5, 2, 6 |
 | 9 `ultraloom check`, Werkzeug × Ort, vier Stufen | Aufgabe 9, 10, 12 |
+| 9.4 `check all`, nebenläufig, feste Reihenfolge | Aufgabe 10 (Schritt 6), 12 |
 | 10 Effort-Eskalation als Kante | Aufgabe 2 (`effort` je Knoten); Muster in Teilprojekt 2 |
 | 11 Drei Fehlersorten | Aufgabe 6 (`on_error`, Werkzeugfehler als Daten), 2 (Graphfehler) |
 | 12 Bedienung | Aufgabe 12 |

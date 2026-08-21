@@ -74,7 +74,9 @@ eines Laufs anbieten.
   das Projekt, dem OKF gehört.
 - Werkzeuge bauen. Datei, Bash, Suche und MCP kommen vom Claude Agent SDK.
 - Nebenläufigkeit über mehrere Knoten hinweg. Kanten sind sequentiell mit
-  Verzweigung und Rückkanten. Fan-out kommt, wenn ein Ablauf es fordert.
+  Verzweigung und Rückkanten. Fan-out kommt, wenn ein Ablauf es fordert. Die
+  nebenläufigen Prüfungen in `check all` sind davon nicht berührt — sie teilen
+  keinen Zustand; die Abgrenzung steht in Abschnitt 9.4.
 - Scheduler, Weboberfläche, verteilte Ausführung.
 
 Die vier Abläufe, für die ultraloom gebaut wird — Spec→Code→Wiki-Kreis,
@@ -270,6 +272,7 @@ ultraloom check lint       # Rückgabewert 0 oder 1, Meldungen auf stderr
 ultraloom check types
 ultraloom check test
 ultraloom check coverage --threshold 100
+ultraloom check all        # jede auflösbare Prüfung, nebenläufig, ein Prozess
 ```
 
 Das ist kein zweiter Zweck des Projekts, sondern derselbe von zwei Seiten
@@ -325,6 +328,54 @@ ersten Nutzen Arbeit verlangt, wird beim dritten Projekt nicht mehr benutzt.
 ausgelassene Prüfwerkzeug landet als solches im Journal, und ein Lauf mit
 ausgelassener Prüfung erreicht den Endzustand „grün" nie.
 
+### 9.4 `check all`: ein Aufruf, nebenläufige Prüfungen
+
+Der Aufschlag eines Prüfaufrufs fällt **pro Aufruf** an, nicht pro Prüfung.
+Gemessen an space am 2026-08-21 (Windows 11, warmer Cache, Median aus mehreren
+Läufen): `bash run.sh` samt `uv run --script` auf ein leeres Skript kostet
+265 ms, ein nackter Python-Start davon 40 ms. Vier Hooks zahlen diesen
+Aufschlag viermal — knapp eine Sekunde, bevor irgendetwas geprüft ist.
+
+Deshalb ein Sammelaufruf:
+
+```
+ultraloom check all        # jede auflösbare Prüfung, nebenläufig, ein Prozess
+```
+
+Der Rückgabewert ist 0, wenn jede ausgeführte Prüfung grün war, sonst 1. Die
+Ausgaben werden gesammelt und in fester Reihenfolge ausgegeben — nicht in der
+Reihenfolge, in der die Prüfungen fertig werden, denn ein Bericht, dessen
+Zeilenfolge vom Zufall der Laufzeiten abhängt, ist nicht vergleichbar.
+
+**Nebenläufig mit gewöhnlichen Threads, nicht mit einem besonderen
+Interpreter.** Gemessen am selben Tag, Python 3.14.7 mit aktivem GIL:
+
+| Was | Sequenziell | Vier Threads | Speedup | Obergrenze |
+|---|---|---|---|---|
+| Viermal auf einen Subprozess warten | 1 408 ms | 368 ms | **3,83x** | 4,00x |
+| Viermal eine CPU-Schleife in reinem Python | 702 ms | 619 ms | 1,13x | 4,00x |
+
+`subprocess.run` gibt den GIL frei, solange es wartet. Paralleles Warten
+erreicht damit 96 % des Maximums, ohne dass am Interpreter etwas geändert wird.
+Die zweite Zeile zeigt, wo der GIL wirklich bremst — bei CPU-gebundenem
+Python-Code, den eine Prüfkette nicht hat: `ruff` rechnet in Rust, `gdlint` in
+einem eigenen Prozess, Godot in C++.
+
+Ein frei-threadender Interpreter (`3.14t`) ist deshalb ausdrücklich **nicht**
+vorgesehen. Er könnte hier höchstens die fehlenden 4 % holen und kostet dafür
+Einbußen bei einzelnen Threads, ein schmaleres Rad-Ökosystem bei
+C-Erweiterungen und eine Untergrenze, die kein gewöhnliches Python mehr wäre.
+Aus dem gleichen Grund wird nichts in C++ geschrieben und nichts compiliert:
+der Interpreterstart ist 40 ms von 265 ms Aufschlag und 2 % einer echten
+Prüfrunde. Die Sprache ist hier nicht der Hebel.
+
+**Abgrenzung zu Abschnitt 4.** Dass Graph-Knoten nicht nebenläufig laufen,
+bleibt unverändert. Das ist eine andere Frage: Knoten teilen Zustand, Journal
+und Kanten, und Nebenläufigkeit dort bräuchte eine Ordnung für all das. Die
+Prüfungen innerhalb von `check all` teilen nichts — vier Subprozesse, vier
+Rückgabewerte, kein gemeinsamer Zustand. Deshalb ist das eine erlaubt und das
+andere aufgeschoben.
+
 ---
 
 ## 10. Effort-Eskalation
@@ -372,6 +423,7 @@ Ein angehaltener Lauf braucht eine Adresse.
 | `ultraloom resume <run-id> [--answer ...]` | Nach Gate oder Abbruch weiter |
 | `ultraloom replay <run-id>` | Alles aus dem Journal, ohne einen Modellaufruf |
 | `ultraloom check <lint\|types\|test\|coverage>` | Eine Prüfung nach Abschnitt 9, auch außerhalb eines Laufs |
+| `ultraloom check all` | Jede auflösbare Prüfung, nebenläufig in einem Prozess (Abschnitt 9.4) |
 
 `replay` erlaubt, ein Fehlverhalten zu untersuchen, ohne es erneut zu bezahlen.
 `check` ist der Einstieg für Claude-Code-Hooks (Abschnitt 14).
