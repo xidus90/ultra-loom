@@ -21,6 +21,10 @@ class VisitLimitError(RuntimeError):
     """Raised when a node ran more often than its max_visits allows."""
 
 
+class ReplayGapError(RuntimeError):
+    """Raised in replay mode for a node the journal does not cover."""
+
+
 @dataclass(frozen=True, slots=True)
 class Result[T]:
     """How a run ended, and where."""
@@ -42,6 +46,7 @@ class Runner[T]:
         model: Model | None = None,
         clock: Clock | None = None,
         mcp_servers: Sequence[str] = (),
+        replay: bool = False,
     ) -> None:
         self._graph = graph
         self._journal = journal
@@ -50,6 +55,7 @@ class Runner[T]:
         # the golden-journal test in task 8 a real test.
         self._clock = clock if clock is not None else _monotonic
         self._mcp_servers = tuple(mcp_servers)
+        self._replay = replay
 
     def run(self, data: T) -> Result[T]:
         """Run the flow from its start node."""
@@ -114,7 +120,10 @@ class Runner[T]:
                 self._write(node, state, {}, "error", 0, 0.0, str(error))
                 return Result("error", state, name, None, str(error))
 
-            outcome = self._step(node, state)
+            try:
+                outcome = self._step(node, state)
+            except ReplayGapError as error:
+                return Result("error", state, name, None, str(error))
             if outcome.paused:
                 return Result("paused", outcome.state, name, outcome.question, None)
             if outcome.failed:
@@ -132,6 +141,21 @@ class Runner[T]:
         return Result("done", state, None, None, None)
 
     def _step(self, node: Node[T], state: State[T]) -> _Step[T]:
+        # The most recent *successful* entry, not the most recent one: both the
+        # visit-limit path and a gate's pause write a non-ok entry under the key
+        # of an entry that succeeded, and taking the latest match would re-run a
+        # node that is already done — for an agent node, a real model call.
+        # This holds outside replay mode too: without it, resuming a paused run
+        # from the start would pay again for every node before the gate.
+        cached = self._journal.lookup(node.name, input_hash(node.name, state.data), outcome="ok")
+        if cached is not None:
+            return _Step(state.merged(cached.delta))
+        if self._replay:
+            # Not an error outcome: an error outcome would be offered the node's
+            # on_error edge, and taking a fallback the original run never took
+            # would make a broken replay look like a run that handled a failure.
+            raise ReplayGapError(f"node {node.name!r} is not in the journal")
+
         started = self._clock()
         try:
             delta, tokens = self._invoke(node, state)
@@ -185,6 +209,11 @@ class Runner[T]:
         seconds: float,
         detail: str | None,
     ) -> None:
+        # A replay reproduces a run; one that appended to the journal it is
+        # reading would not be reproducing it. The guard sits here rather than
+        # at each call site so no path — visit limit, pause, error — escapes it.
+        if self._replay:
+            return
         agent = node if isinstance(node, AgentNode) else None
         self._journal.append(
             Entry(

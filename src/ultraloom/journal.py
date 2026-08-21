@@ -99,9 +99,18 @@ class Journal:
                 raise JournalError(message) from error
         return tuple(found)
 
-    def lookup(self, node: str, node_input_hash: str) -> Entry | None:
-        """The most recent entry for this node and this input, if any."""
+    def lookup(self, node: str, node_input_hash: str, outcome: str | None = None) -> Entry | None:
+        """The most recent entry for this node and this input, if any.
+
+        With `outcome` the search skips entries that ended otherwise instead of
+        stopping at the first match. A caller that wants only a success cannot
+        get there by testing the most recent entry: the visit-limit path and a
+        gate's pause both write non-ok entries under the key of an entry that
+        succeeded, so the latest match may be a decoy hiding the real result.
+        """
         for entry in reversed(self.entries()):
-            if entry.node == node and entry.input_hash == node_input_hash:
+            if entry.node != node or entry.input_hash != node_input_hash:
+                continue
+            if outcome is None or entry.outcome == outcome:
                 return entry
         return None
