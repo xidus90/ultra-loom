@@ -45,3 +45,9 @@ def test_every_profile_is_sorted_and_free_of_duplicates() -> None:
     """The tool list feeds a prompt cache prefix; unstable order would break it."""
     for name, tools in PROFILES.items():
         assert list(tools) == sorted(set(tools)), f"profile {name} is unsorted or repeats a tool"
+
+
+def test_the_profile_table_cannot_be_widened_at_runtime() -> None:
+    """With `dontAsk`, these profiles are the only ceiling an agent node has."""
+    with pytest.raises(TypeError):
+        PROFILES["read_only"] = ("Bash",)  # type: ignore[index]  # the point of the test

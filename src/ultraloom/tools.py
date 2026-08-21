@@ -8,18 +8,26 @@ the tool is absent, not because the node is well behaved.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 
 _READ = ("Glob", "Grep", "Read")
 
 # Every profile is stored sorted and duplicate-free: the tool list becomes part
 # of a prompt cache prefix and of a journal entry, so set iteration order must
 # never leak into it.
-PROFILES: Mapping[str, tuple[str, ...]] = {
-    "read_only": _READ,
-    "edit": tuple(sorted({*_READ, "Edit", "Write"})),
-    "shell": tuple(sorted({*_READ, "Bash"})),
-    "mcp": _READ,
-}
+# A proxy and not a plain dict: with permission_mode="dontAsk" these profiles
+# are the only thing between an agent node and Bash or Write. A runtime write --
+# a flow module, a plugin, a test that forgets to restore -- would widen that
+# ceiling for the whole process silently, and the journal records the profile
+# *name*, not the resolved list, so nothing would show it afterwards.
+PROFILES: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "read_only": _READ,
+        "edit": tuple(sorted({*_READ, "Edit", "Write"})),
+        "shell": tuple(sorted({*_READ, "Bash"})),
+        "mcp": _READ,
+    }
+)
 
 _TAKES_SERVERS = frozenset({"mcp"})
 

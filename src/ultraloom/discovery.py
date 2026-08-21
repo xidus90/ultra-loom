@@ -43,6 +43,13 @@ def list_flows(root: Path) -> tuple[str, ...]:
 
 def find_flow(name: str, root: Path) -> LoadedFlow:
     """Load one flow by name, with the state it starts from."""
+    # The name is interpolated into a path that is then executed, and it reaches
+    # here from the command line and from a run's `.flow` marker file alike.
+    # A flow is a module, so an identifier is exactly what it may be -- which
+    # also happens to be what "../../evil" is not.
+    if not name.isidentifier():
+        raise FlowNotFoundError(f"{name!r} is not a valid flow name; a flow name is an identifier")
+
     path = root / FLOW_DIR / f"{name}.py"
     if not path.is_file():
         available = ", ".join(list_flows(root)) or "none"

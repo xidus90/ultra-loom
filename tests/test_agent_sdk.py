@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import sys
+import typing
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -281,15 +282,27 @@ def test_an_option_the_sdk_rejects_becomes_a_model_error(stub_sdk: StubSdk, tmp_
 def test_every_name_the_adapter_uses_exists_on_the_installed_sdk(tmp_path: Path) -> None:
     """The guard the stubs cannot be: the stub declares whatever it is asked for.
 
-    Skipped where the optional extra is absent, so the default suite still
-    needs neither the extra nor a network.
+    `claude-agent-sdk` is in the dev group precisely so this runs. The
+    importorskip stays for an installation that resolved without it — but a
+    skip here is a guard that proves nothing, not a passing check.
     """
     sdk = pytest.importorskip("claude_agent_sdk")
     from ultraloom.model.agent_sdk import RESULT_FIELDS, AgentSdkModel
 
     option_fields = {field.name for field in dataclasses.fields(sdk.ClaudeAgentOptions)}
-    passed = set(AgentSdkModel(cwd=tmp_path)._options_for(a_request()))
+    options = AgentSdkModel(cwd=tmp_path)._options_for(a_request())
+    passed = set(options)
     assert passed <= option_fields, f"the SDK no longer takes {sorted(passed - option_fields)}"
+
+    # Names are not enough. An unrecognised permission mode is the difference
+    # between "denied at once" and whatever the SDK falls back to, and the
+    # harness runs unattended, where that difference is the whole guarantee.
+    modes = typing.get_args(
+        _unwrapped(typing.get_type_hints(sdk.ClaudeAgentOptions)["permission_mode"])
+    )
+    assert options["permission_mode"] in modes, (
+        f"the SDK no longer knows permission_mode={options['permission_mode']!r}; known: {modes}"
+    )
 
     result_fields = {field.name for field in dataclasses.fields(sdk.ResultMessage)}
     assert set(RESULT_FIELDS) <= result_fields, (
@@ -313,6 +326,12 @@ def test_a_missing_sdk_is_reported_with_the_install_command(
 
     with pytest.raises(ModelError, match=r"ultraloom\[agent\]"):
         _ask(tmp_path)
+
+
+def _unwrapped(annotation: object) -> object:
+    """The Literal inside an `X | None`, or the annotation itself."""
+    args = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+    return args[0] if len(args) == 1 else annotation
 
 
 @pytest.mark.contract

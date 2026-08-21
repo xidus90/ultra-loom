@@ -126,3 +126,10 @@ def test_a_module_without_an_initial_state_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(FlowLoadError, match="initial"):
         find_flow("noinit", tmp_path)
+
+
+@pytest.mark.parametrize("name", ["../../evil", "with space", "", "sub/flow"])
+def test_a_flow_name_that_is_not_an_identifier_is_refused(name: str, tmp_path: Path) -> None:
+    """The name is interpolated into a path that gets executed."""
+    with pytest.raises(FlowNotFoundError, match="is not a valid flow name"):
+        find_flow(name, tmp_path)
