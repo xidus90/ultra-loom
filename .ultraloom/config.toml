@@ -1,5 +1,8 @@
-# ultraloom checks itself with its own tool. The Python preset would find these
-# commands anyway; spelling them out makes the dogfooding visible.
+# ultraloom checks itself with its own tool. These commands are not the Python
+# preset spelled out: the preset reaches for `uvx ruff` and `uvx mypy`, which
+# resolve to whatever version uvx happens to fetch. `uv run` resolves the dev
+# dependencies this project pins, so the checks the flow runs are the same ones
+# the gates run.
 [verify]
 lint  = "uv run ruff check ."
 types = "uv run mypy"
