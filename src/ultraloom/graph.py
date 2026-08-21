@@ -19,7 +19,15 @@ class GraphError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class CodeNode[T]:
-    """A plain function. Costs no tokens and is reproducible byte for byte."""
+    """A plain function. Costs no tokens and is reproducible byte for byte.
+
+    `max_visits` raises the ceiling so this node may sit on a cycle. It does
+    not make a cycle work on its own: the runner serves any node whose name and
+    input already have a successful journal entry from that entry instead of
+    executing it. A loop whose passes leave the payload unchanged therefore
+    runs **once** and then spins on the cache until the ceiling stops it. Every
+    pass of a bounded cycle has to advance the payload.
+    """
 
     name: str
     run: Callable[[T], Delta]
@@ -157,15 +165,18 @@ class Graph[T]:
                 if candidate.dst != END and candidate.dst not in self._nodes:
                     raise GraphError(f"edge from {src!r} to unknown node {candidate.dst!r}")
 
+        # Reachability first: an island with no edges at all is unreachable
+        # *and* has no way out, and "no outgoing edge" would send its author
+        # looking for a missing edge instead of a missing path to the node.
+        unreachable = sorted(set(self._nodes) - self._reachable())
+        if unreachable:
+            raise GraphError(f"unreachable node(s): {', '.join(unreachable)}")
+
         # An error edge alone is not an exit: a node whose only way out is the
         # fallback would run once and then have nowhere to go on success.
         for name in self._nodes:
             if not [edge for edge in self._edges.get(name, []) if not edge.on_error]:
                 raise GraphError(f"node {name!r} has no outgoing edge")
-
-        unreachable = sorted(set(self._nodes) - self._reachable())
-        if unreachable:
-            raise GraphError(f"unreachable node(s): {', '.join(unreachable)}")
 
         self._check_cycles_are_bounded()
 

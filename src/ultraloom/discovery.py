@@ -10,10 +10,15 @@ import hashlib
 import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from ultraloom.graph import Graph
 
 FLOW_DIR = ".ultraloom/flows"
+
+# A module may legitimately bind `flow = None`; `None` is therefore not the
+# same answer as "the module never bound it".
+_ABSENT: Final = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,15 +79,18 @@ def find_flow(name: str, root: Path) -> LoadedFlow:
     except Exception as error:
         raise FlowLoadError(f"{path}: {error}") from error
 
-    flow: object = getattr(module, "flow", None)
-    if flow is None:
+    # A sentinel and not None: a module that binds `flow = None` defines one,
+    # and telling its author it defines none sends them to look in the wrong
+    # place. The type error below is the honest report.
+    flow: object = getattr(module, "flow", _ABSENT)
+    if flow is _ABSENT:
         raise FlowLoadError(f"{path}: defines no module-level `flow`")
     if not isinstance(flow, Graph):
         raise FlowLoadError(f"{path}: `flow` must be a Graph, got {type(flow).__name__}")
 
     # An executor needs both halves: a graph says what to do, the initial state
     # says what it starts from, and only the flow's own module knows the latter.
-    initial = getattr(module, "initial", None)
-    if initial is None:
+    initial = getattr(module, "initial", _ABSENT)
+    if initial is _ABSENT:
         raise FlowLoadError(f"{path}: defines no module-level `initial` state")
     return LoadedFlow(flow, initial)

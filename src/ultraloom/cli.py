@@ -26,7 +26,9 @@ RUN_DIR = ".ultraloom/runs"
 
 _EXIT_OK = 0
 _EXIT_FAIL = 1
-_EXIT_PAUSED = 2
+# Not 2: argparse exits 2 on a usage error, and a caller scripting against the
+# exit code must be able to tell "waiting at a gate" from "you typed it wrong".
+_EXIT_PAUSED = 3
 
 # checks.KINDS carries "coverage" but config's [verify] table does not, so the
 # obvious spelling fails with an error about a table. Name the two real places.
@@ -46,6 +48,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _EXIT_FAIL
 
     root = Path(args.root).resolve()
+    if args.command == "show":
+        # Before the config is read at all: `show` touches only the journal, and
+        # reading a past run is the command you most want working when the
+        # project is broken -- which is often exactly why you are reading it.
+        return _show(root, args.run_id)
+
     try:
         config = load_config(root)
     except ConfigError as error:
@@ -151,9 +159,6 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
     from ultraloom.gate import pending_gate
     from ultraloom.journal import Journal
     from ultraloom.runner import Runner
-
-    if args.command == "show":
-        return _show(root, args.run_id)
 
     if args.command == "replay" and args.answer is not None:
         # Refused here because the runner never sees the combination from any

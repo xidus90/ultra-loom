@@ -364,3 +364,37 @@ def test_the_default_clock_is_the_monotonic_clock() -> None:
 
     assert isinstance(first, float)
     assert second >= first, "a monotonic clock never runs backwards"
+
+
+def test_a_loop_that_never_advances_its_payload_is_told_why_it_did_nothing(
+    tmp_path: Path,
+) -> None:
+    """The bare count reads as "ran too often" for a loop that ran exactly once."""
+    ran: list[str] = []
+    graph: Graph[Data] = Graph("spinning", start="probe")
+
+    def probe(_data: Data) -> dict[str, object]:
+        ran.append("probe")
+        return {}
+
+    graph.add(CodeNode("probe", probe, max_visits=5))
+    graph.edge("probe", "probe")
+
+    result = Runner(graph, a_journal(tmp_path), clock=ticking_clock()).run(Data())
+
+    assert result.status == "error"
+    assert ran == ["probe"], "the cache serves every pass after the first"
+    assert result.detail is not None
+    assert "advance its payload" in result.detail
+
+
+def test_a_loop_that_does_advance_gets_the_plain_visit_limit(tmp_path: Path) -> None:
+    """The explanation must not be attached to a loop that really did run."""
+    graph: Graph[Data] = Graph("counting", start="bump")
+    graph.add(CodeNode("bump", lambda d: {"attempts": d.attempts + 1}, max_visits=3))
+    graph.edge("bump", "bump")
+
+    result = Runner(graph, a_journal(tmp_path), clock=ticking_clock()).run(Data())
+
+    assert result.status == "error"
+    assert result.detail == "node 'bump' exceeded max_visits=3"

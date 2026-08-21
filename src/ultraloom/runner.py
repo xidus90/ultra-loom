@@ -37,7 +37,20 @@ class Result[T]:
 
 
 class Runner[T]:
-    """Walks a graph, journalling every step."""
+    """Walks a graph, journalling every step.
+
+    Every method reads the journal first. A node whose name and input already
+    have a successful entry is *not* executed: its recorded delta is returned.
+    That is what makes a resume cheap, and it applies to `run` exactly as much
+    as to `resume` — a `run` over a journal that already covers the flow
+    executes nothing at all.
+
+    So a node is recognised by its name and the input it saw, never by its
+    implementation. Editing a node's body and running again over the same
+    journal replays the old result for the new code. That is the price of the
+    alternative: hashing a function body would throw a journal away on a
+    cosmetic edit. Start a fresh run when a node changes.
+    """
 
     def __init__(
         self,
@@ -58,7 +71,11 @@ class Runner[T]:
         self._replay = replay
 
     def run(self, data: T) -> Result[T]:
-        """Run the flow from its start node."""
+        """Run the flow from its start node.
+
+        Subject to the journal cache described on the class: this is not a
+        guarantee that anything executes.
+        """
         try:
             self._graph.validate()
         except GraphError as error:
@@ -71,17 +88,15 @@ class Runner[T]:
         Without an answer the gate pauses again: treating a missing answer as
         consent would make the approval point decorative.
 
+        The journal cache described on the class governs here too: nothing
+        before the gate is executed a second time.
+
         With an answer the walk still starts at `graph.start`, so every node
         before the gate is reconstructed from the journal and the gate's `apply`
         sees the payload the gate actually saw. Jumping straight to the gate
         with the caller's initial payload would hand `apply` a state that never
         existed, and would key the answer under a hash no replay can find.
 
-        A node is recognised by its name and the input it saw, never by its
-        implementation, so editing a node's body and resuming replays the old
-        result for the new code. That is the price of the alternative: hashing a
-        function body would throw a journal away on a cosmetic edit. Start a
-        fresh run when a node changes.
         """
         if self._replay and answer is not None:
             # Refused here and not only at the CLI: `Runner` is published, so an
@@ -127,8 +142,9 @@ class Runner[T]:
                 # be told from a node failure. It is converted here, where the
                 # state still exists: exceeding max_visits is an outcome of the
                 # flow, not a crash of the harness, so nothing leaves `run`.
-                self._write(node, state, {}, "error", 0, 0.0, str(error))
-                return Result("error", state, name, None, str(error))
+                detail = str(error) + self._why_it_looped(node, state)
+                self._write(node, state, {}, "error", 0, 0.0, detail)
+                return Result("error", state, name, None, detail)
 
             # The answer is consumed by the node it was given for, once. A
             # gate on a cycle would otherwise apply the same answer every pass.
@@ -155,6 +171,23 @@ class Runner[T]:
             except GraphError as error:
                 return Result("error", state, name, None, str(error))
         return Result("done", state, None, None, None)
+
+    def _why_it_looped(self, node: Node[T], state: State[T]) -> str:
+        """The half of a visit-limit report the bare count does not carry.
+
+        A cycle whose passes leave the payload alone hits the same
+        `(node, input_hash)` key every time, so the journal serves the first
+        pass's delta and the node never runs again. Without this the author
+        reads "exceeded max_visits" and looks for a loop that ran too often,
+        when in fact it ran once and spun.
+        """
+        served = self._journal.lookup(node.name, input_hash(node.name, state.data), outcome="ok")
+        if served is None:
+            return ""
+        return (
+            "; every visit saw the same payload, so the journal served the first pass "
+            "and the node never ran again — a bounded cycle has to advance its payload"
+        )
 
     def _step(self, node: Node[T], state: State[T], answer: str | None = None) -> _Step[T]:
         # The most recent *successful* entry, not the most recent one: both the

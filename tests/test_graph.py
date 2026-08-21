@@ -197,3 +197,14 @@ def test_an_error_edge_refuses_a_condition() -> None:
 
     with pytest.raises(GraphError, match="unconditional"):
         graph.edge("first", "fallback", when=lambda d: d.green, on_error=True)
+
+
+def test_an_island_is_reported_as_unreachable_not_as_a_missing_edge() -> None:
+    """Both are true of a node nothing points at; only one is the author's problem."""
+    graph: Graph[Data] = Graph("islands", start="a")
+    graph.add(CodeNode("a", lambda _d: {}))
+    graph.add(CodeNode("orphan", lambda _d: {}))
+    graph.edge("a", END)
+
+    with pytest.raises(GraphError, match="unreachable node"):
+        graph.validate()

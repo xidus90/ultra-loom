@@ -143,7 +143,7 @@ def test_run_reports_a_pause_and_the_question(
 
     code = main(["run", "gated", "--root", str(tmp_path)])
 
-    assert code == 2, "a pause is neither success nor failure"
+    assert code == 3, "a pause is neither success nor failure — nor a usage error"
     assert "Proceed?" in capsys.readouterr().out
 
 
@@ -408,3 +408,34 @@ def test_the_agent_extra_is_used_when_it_is_installed(
     assert code == 0
     assert len(asked) == 1
     assert "done" in capsys.readouterr().out
+
+
+def test_the_pause_code_does_not_collide_with_argparses_usage_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A script reading the exit code must tell a gate from a typo."""
+    write_flow(tmp_path, "gated", A_GATED_FLOW)
+    paused = main(["run", "gated", "--root", str(tmp_path)])
+
+    with pytest.raises(SystemExit) as raised:
+        main(["run", "--root", str(tmp_path)])
+
+    assert paused != raised.value.code
+    assert raised.value.code == 2, "argparse's own convention, left alone"
+
+
+def test_show_works_when_the_config_is_unreadable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Reading a past run is what you want most when the project is broken."""
+    write_flow(tmp_path, "plain", A_FLOW)
+    main(["run", "plain", "--root", str(tmp_path)])
+    config = tmp_path / ".ultraloom" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("this is not = = toml\n", encoding="utf-8")
+    capsys.readouterr()
+
+    code = main(["show", "0001", "--root", str(tmp_path)])
+
+    assert code == 0
+    assert "mark" in capsys.readouterr().out

@@ -133,3 +133,13 @@ def test_a_flow_name_that_is_not_an_identifier_is_refused(name: str, tmp_path: P
     """The name is interpolated into a path that gets executed."""
     with pytest.raises(FlowNotFoundError, match="is not a valid flow name"):
         find_flow(name, tmp_path)
+
+
+def test_a_flow_bound_to_none_is_reported_as_the_wrong_type(tmp_path: Path) -> None:
+    """It defines `flow`; saying it defines none sends the author to the wrong line."""
+    directory = tmp_path / ".ultraloom" / "flows"
+    directory.mkdir(parents=True)
+    (directory / "empty.py").write_text("flow = None\ninitial = None\n", encoding="utf-8")
+
+    with pytest.raises(FlowLoadError, match="`flow` must be a Graph, got NoneType"):
+        find_flow("empty", tmp_path)
