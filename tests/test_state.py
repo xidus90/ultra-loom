@@ -13,6 +13,11 @@ class Data:
     attempts: int = 0
 
 
+@dataclass
+class MutableData:
+    green: bool = False
+
+
 def test_merged_returns_a_new_state_and_leaves_the_old_one_alone() -> None:
     first = State(Data())
     second = first.merged({"green": True})
@@ -59,3 +64,17 @@ def test_a_non_dataclass_payload_is_refused_at_construction() -> None:
         # A dict binds T just fine for the type checker; the refusal is a
         # runtime guarantee, which is exactly why it needs a test.
         State({"green": True})
+
+
+def test_a_mutable_dataclass_payload_is_refused_at_construction() -> None:
+    # A payload a node could write into in place would make the journal's
+    # record of the input stop describing what the node actually saw.
+    with pytest.raises(NotADataclassError):
+        State(MutableData())
+
+
+def test_the_data_class_itself_is_not_a_payload() -> None:
+    # The guard inspects the payload's type, so passing the class instead of
+    # an instance has to be refused rather than mistaken for a dataclass.
+    with pytest.raises(NotADataclassError):
+        State(Data)

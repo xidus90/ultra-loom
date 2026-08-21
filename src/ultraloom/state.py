@@ -27,9 +27,18 @@ class State[T]:
     visits: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # T cannot be bound to "is a dataclass" in the type system, so the
-        # guarantee `merged` relies on is checked once, here, at the door.
-        if not dataclasses.is_dataclass(self.data) or isinstance(self.data, type):
+        # T cannot be bound to "is a frozen dataclass" in the type system, so
+        # the guarantee `merged` relies on is checked once, here, at the door.
+        # Frozen is not decoration: a payload a node could write into in place
+        # would leave the journal's record of the input describing something
+        # other than what the node saw, and a resume would replay a fiction.
+        # `__dataclass_params__` is where the decorator records the frozen
+        # flag, and its absence on the payload's *type* is exactly the "not a
+        # dataclass instance at all" case — a class object passed instead of
+        # an instance lands here too, since `type` carries no such attribute.
+        # Neither fact has a public accessor.
+        params = getattr(type(self.data), "__dataclass_params__", None)
+        if params is None or not params.frozen:
             raise NotADataclassError(
                 f"a flow's payload must be a frozen dataclass instance, "
                 f"got {type(self.data).__name__}"
