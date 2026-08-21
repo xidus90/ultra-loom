@@ -232,3 +232,24 @@ def test_the_answered_entry_keys_on_the_data_the_gate_saw(tmp_path: Path) -> Non
 
     paused, answered = journal.entries()[0], journal.entries()[1]
     assert answered.input_hash == paused.input_hash == input_hash("ask", Data())
+
+
+def test_an_answer_for_a_run_that_is_not_paused_fails_visibly(tmp_path: Path) -> None:
+    """A user's answer must never evaporate into a full re-run of the flow."""
+    ran: list[str] = []
+    graph: Graph[Data] = Graph("plain", start="write")
+
+    def write(_d: Data) -> dict[str, str]:
+        ran.append("write")
+        return {"note": "done"}
+
+    graph.add(CodeNode("write", write))
+    graph.edge("write", END)
+
+    result = Runner(graph, Journal(tmp_path / "r.jsonl"), clock=ticking_clock()).resume(
+        Data(), answer="yes"
+    )
+
+    assert result.status == "error"
+    assert result.detail == "no gate is waiting for an answer"
+    assert ran == [], "an answer for an unpaused run must not re-execute the flow"

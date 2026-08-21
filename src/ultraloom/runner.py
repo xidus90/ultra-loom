@@ -71,8 +71,13 @@ class Runner[T]:
             return Result("error", State(data), None, None, str(error))
 
         gate = pending_gate(self._journal)
-        if gate is None or answer is None:
+        if answer is None:
             return self._walk(State(data), self._graph.start)
+        if gate is None:
+            # An answer with nothing to answer is a mistake worth reporting: a
+            # silent re-run from the start would discard the answer and charge
+            # for every node again, which is the worst reading of a user's "yes".
+            return Result("error", State(data), None, None, "no gate is waiting for an answer")
 
         node = self._graph.node(gate.node)
         if not isinstance(node, GateNode):
