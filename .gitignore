@@ -10,3 +10,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# Isolated workspaces for plan execution.
+/.worktrees/
