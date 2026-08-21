@@ -65,7 +65,8 @@ Claude Code besser aufgehoben als in ultraloom.
 **Der Kern kann:** einen Graphen validieren und ausführen, Zustand halten und
 fortschreiben, an Freigabepunkten anhalten, jeden Schritt journalisieren, einen
 Lauf wiederaufnehmen und aus dem Journal wiedergeben, Werkzeugprofile
-durchsetzen, Prüfwerkzeuge auflösen.
+durchsetzen, Prüfwerkzeuge auflösen und als `ultraloom check` auch außerhalb
+eines Laufs anbieten.
 
 **Der Kern kann ausdrücklich nicht** und soll es auch nicht:
 
@@ -78,7 +79,8 @@ durchsetzen, Prüfwerkzeuge auflösen.
 
 Die vier Abläufe, für die ultraloom gebaut wird — Spec→Code→Wiki-Kreis,
 Prüfschleife bis grün, Wissenspflege im Wiki, Pläne autonom abarbeiten — sind
-Teilprojekte 2 bis 5. Jedes bekommt eine eigene Spec und einen eigenen Plan.
+Teilprojekte 2 bis 5, die Hook- und OKF-Arbeit ist Teilprojekt 6 und 7
+(Abschnitt 15). Jedes bekommt eine eigene Spec und einen eigenen Plan.
 
 ---
 
@@ -254,9 +256,53 @@ war, hat die Sicherung ausgehebelt — und man sieht es erst im Diff.
 
 ---
 
-## 9. Auflösung der Prüfwerkzeuge
+## 9. Prüfwerkzeuge: `ultraloom check`
 
-Vierstufig, erster Treffer gewinnt:
+Die Prüfkette ist nicht nur ein Innenteil des Ausführers, sondern ein
+öffentliches Unterkommando. Sie wird für Stufe 3 unten ohnehin gebaut; sie von
+außen aufrufbar zu machen kostet fast nichts und macht sie an zwei Stellen
+nutzbar — als `CodeNode` in einem Graphen und als Claude-Code-Hook in einer
+interaktiven Sitzung. Damit gibt es genau eine Wahrheit darüber, was in einem
+Projekt „sauber" heißt.
+
+```
+ultraloom check lint       # Rückgabewert 0 oder 1, Meldungen auf stderr
+ultraloom check types
+ultraloom check tests
+ultraloom check coverage --threshold 100
+```
+
+Das ist kein zweiter Zweck des Projekts, sondern derselbe von zwei Seiten
+aufgerufen.
+
+### 9.1 Zwei unabhängige Achsen: Werkzeug und Ausführungsort
+
+Ein Prüfkommando besteht aus zwei Teilen, die getrennt bestimmt werden. Das
+Werkzeug kommt aus der Sprachvoreinstellung, der Ausführungsort aus dem Projekt:
+
+```toml
+# <projekt>/.ultraloom/config.toml
+[exec]
+prefix = "docker compose exec -T frontend"
+```
+
+Ohne diese Trennung müsste ein Projekt, das durch eine Container-Grenze prüft,
+jedes Kommando vollständig ausschreiben — und hätte von den Voreinstellungen
+keinen Nutzen mehr. Genau dann schreibt man wieder alles selbst, und der
+Vervielfältigung ist nichts entgegengesetzt.
+
+### 9.2 Sprachvoreinstellungen
+
+| Erkannt an | Lint | Typen | Tests / Coverage |
+|---|---|---|---|
+| `pyproject.toml` | `uvx ruff check`, `uvx ruff format --check` | `uvx mypy` | `uvx coverage` |
+| `package.json` | `eslint .` | `tsc --noEmit` | `vitest run --coverage` |
+| `project.godot` | `uvx gdlint` | — (GDScript hat keine) | Godot-Headless-Aufruf |
+
+Fehlt eine Fähigkeit in einer Sprache — GDScript hat keinen Typechecker —, wird
+das als bekannte Einschränkung gemeldet, nicht als bestandene Prüfung.
+
+### 9.3 Auflösung, vierstufig — erster Treffer gewinnt
 
 1. **`.ultraloom/config.toml`** im Projekt. Explizit gesetzt schlägt alles.
 2. **Prüfskripte an einem konventionellen Ort:** ausführbare Dateien
@@ -266,9 +312,7 @@ Vierstufig, erster Treffer gewinnt:
    dort einen einzeiligen Aufruf ab. Das ist Konvention über einen benannten
    Pfad, **nicht** Absuchen des Projekts nach etwas, das nach einem Prüfskript
    aussieht: Letzteres wäre Raten und fällt unter Grundsatz 4.
-3. **Eingebaute Sprachvoreinstellung** aus erkannten Merkmalen: `pyproject.toml`
-   → `uvx ruff check`, `uvx ruff format --check`, `uvx mypy`, `uvx coverage`;
-   `project.godot` → `uvx gdlint` und der Godot-Headless-Aufruf.
+3. **Sprachvoreinstellung** aus 9.2, mit dem Präfix aus 9.1.
 4. **Fehler.** Erkennt ultraloom nichts, bricht es ab und sagt, was es nicht
    wusste. Es rät nicht.
 
@@ -327,8 +371,10 @@ Ein angehaltener Lauf braucht eine Adresse.
 | `ultraloom show <run-id>` | Journal lesbar, mit Tokens und Dauer pro Knoten |
 | `ultraloom resume <run-id> [--answer ...]` | Nach Gate oder Abbruch weiter |
 | `ultraloom replay <run-id>` | Alles aus dem Journal, ohne einen Modellaufruf |
+| `ultraloom check <lint\|types\|tests\|coverage>` | Eine Prüfung nach Abschnitt 9, auch außerhalb eines Laufs |
 
 `replay` erlaubt, ein Fehlverhalten zu untersuchen, ohne es erneut zu bezahlen.
+`check` ist der Einstieg für Claude-Code-Hooks (Abschnitt 14).
 
 ---
 
@@ -348,23 +394,81 @@ Ein angehaltener Lauf braucht eine Adresse.
 
 ---
 
-## 14. Reihenfolge
+## 14. Bestehende Hooks: Inventar und Zuordnung
 
-| Teilprojekt | Inhalt |
-|---|---|
-| 1 | **Dieser Kern** |
-| 2 | Prüfschleife bis grün — der einfachste echte Ablauf, klare Abbruchbedingung |
-| 3 | Spec→Code→Wiki-Kreis für space |
-| 4 | Pläne autonom abarbeiten, mit Freigabepunkten |
-| 5 | Wissenspflege im Wiki — braucht den ultra-brain-MCP, um gut zu werden |
+Stand 2026-08-21, erhoben über alle Repositories unter `#GIT`:
+
+| Projekt | Claude-Code-Hooks | Ereignisse | Weitere |
+|---|---|---|---|
+| space | 13 Dateien, 5123 Zeilen | SessionStart, PostToolUse, Stop | `.githooks/` |
+| iam_backend | 5 Dateien, 1439 Zeilen | PreToolUse, PostToolUse, Stop | `docker/hooks/`, `hooks/` |
+| iam_frontend | 1 Datei, 440 Zeilen | Stop | `.husky/pre-commit` |
+| iam_workers | 1 Datei, 440 Zeilen | Stop | — |
+| iam_wiki | — | `hooks: {}` (leer) | — |
+| ultra-brain | keine | — | — |
+| `~/.claude/` global | keine | — | — |
+
+Zwei Befunde tragen Entscheidungen dieser Spec:
+
+**`wiki_gate.py` liegt dreimal** — 476, 440 und 440 Zeilen, drei verschiedene
+Hashes. Das ist keine Ähnlichkeit, sondern eine kopierte und auseinandergedriftete
+Datei; welche Fassung die richtige ist, weiß niemand mehr. Das ist der stärkste
+vorliegende Beleg dafür, dass Mechanik einen Ort braucht.
+
+**iam_frontend prüft durch eine Container-Grenze** (`docker compose exec -T
+frontend npx eslint .` und so weiter). Daraus folgt die Trennung von Werkzeug und
+Ausführungsort in Abschnitt 9.1 — ohne sie wäre dieses Projekt von den
+Voreinstellungen ausgeschlossen.
+
+### Zuordnung
+
+| Was | Wohin | Warum |
+|---|---|---|
+| Ablauf-Mechanik | ultraloom (Teilprojekt 1) | Kern |
+| Qualitätsprüfungen als Werkzeug × Ort | `ultraloom check` (Abschnitt 9) | Fällt aus dem Kern fast heraus |
+| OKF-Mechanik: Frontmatter, Typ→Ordner, Index, Log-Zwang | **ultra-brain** | Dort wohnt die Wiki-Schicht und das OKF-Format schon; über den geplanten MCP später auch für Agenten erreichbar |
+| Vokabular: Typen, Tags, Ordner, Ausführungspräfix | Projekt | Projektwissen bleibt im Projekt |
+| Verdrahtung: welcher Hook wann feuert | `~/.claude/settings.json` | Global gesetzt gilt in jedem Projekt, auch in denen, die heute keinen Hook haben |
+
+Die Wissens-Gates gehören ausdrücklich **nicht** nach ultraloom. Ein
+Agent-Harness, der OKF-Frontmatter validiert, hätte einen zweiten Zweck — und
+jedes Projekt, das ihn installiert, schleppte ein fremdes Weltbild mit.
+
+**Nicht in ultraloom gehören auch Skills.** Ein Skill ist Prompt-Wissen für eine
+Sitzung mit einem Menschen darin; ein Knoten-Prompt ist Anweisung für einen
+unbeaufsichtigten Lauf mit erzwungenem Ausgabeschema. Das klingt nach derselben
+Sache und ist es nicht — ein Prompt, der beides bedienen muss, bedient keines
+gut. Skills bleiben in `~/.claude/skills/` und `<projekt>/.claude/skills/`.
+
+---
+
+## 15. Reihenfolge
+
+| Teilprojekt | Inhalt | Repo |
+|---|---|---|
+| 1 | **Dieser Kern**, samt `ultraloom check` | ultraloom |
+| 2 | Prüfschleife bis grün — der einfachste echte Ablauf | ultraloom |
+| 3 | Spec→Code→Wiki-Kreis für space | space |
+| 4 | Pläne autonom abarbeiten, mit Freigabepunkten | ultraloom |
+| 5 | Wissenspflege im Wiki — braucht den ultra-brain-MCP | space, ultra-brain |
+| 6 | Hook-Migration: Generisches nach `ultraloom check`, Verdrahtung global | ultraloom, `~/.claude/` |
+| 7 | OKF-Mechanik vereinheitlichen, `wiki_gate.py`-Drift auflösen | ultra-brain |
 
 Teilprojekt 2 ist absichtlich der erste Ablauf: es fordert Rückkanten,
 Werkzeugprofile, Prüfwerkzeug-Auflösung und Journal, aber kaum Urteilsvermögen.
 Ein Fehler dort liegt am Kern, nicht am Ablauf.
 
+Teilprojekt 6 verlangt Vorsicht: space' 5123 Zeilen Hooks **laufen heute**. Das
+ist der teuerste Zustand, um etwas versehentlich zu brechen. Erster Schritt ist
+deshalb eine Bestandsaufnahme Zeile für Zeile — was ist generisch, was nicht —,
+nicht ein Umbau.
+
+Teilprojekt 7 gehört in ein anderes Repo und hat dort seine eigene Reihenfolge.
+Es steht hier nur, damit die Zuordnung aus Abschnitt 14 nicht verloren geht.
+
 ---
 
-## 15. Offene Punkte
+## 16. Offene Punkte
 
 Bewusst offengelassen, weil noch kein Ablauf sie fordert:
 
