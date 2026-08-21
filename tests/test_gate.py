@@ -320,6 +320,20 @@ def test_a_resumed_run_behind_another_node_replays_cleanly(tmp_path: Path) -> No
     assert replayed.state.data.note == "pY!"
 
 
+def test_replay_mode_refuses_an_answer_in_the_runner(tmp_path: Path) -> None:
+    """`Runner` is published, so the CLI's refusal cannot be the only one."""
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = approval_flow()
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+    before = (tmp_path / "r.jsonl").read_text(encoding="utf-8")
+
+    result = Runner(graph, journal, clock=ticking_clock(), replay=True).resume(Data(), answer="yes")
+
+    assert result.status == "error"
+    assert result.detail == "a replay cannot take an answer; resume the run instead"
+    assert (tmp_path / "r.jsonl").read_text(encoding="utf-8") == before
+
+
 def test_a_gate_on_a_cycle_consumes_its_answer_only_once(tmp_path: Path) -> None:
     """A second pass must pause again rather than reuse the first pass's answer."""
     journal = Journal(tmp_path / "r.jsonl")

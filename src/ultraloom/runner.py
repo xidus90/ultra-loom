@@ -83,6 +83,19 @@ class Runner[T]:
         function body would throw a journal away on a cosmetic edit. Start a
         fresh run when a node changes.
         """
+        if self._replay and answer is not None:
+            # Refused here and not only at the CLI: `Runner` is published, so an
+            # invariant enforced by another module is not an invariant. Applying
+            # an answer calls the gate's `apply` live, which is precisely the
+            # promise a replay makes it will not do.
+            return Result(
+                "error",
+                State(data),
+                None,
+                None,
+                "a replay cannot take an answer; resume the run instead",
+            )
+
         try:
             self._graph.validate()
         except GraphError as error:
