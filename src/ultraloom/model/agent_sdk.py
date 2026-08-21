@@ -66,6 +66,11 @@ class AgentSdkModel:
             result = asyncio.run(
                 _last_result(sdk.ResultMessage, sdk.query(prompt=request.prompt, options=options))
             )
+        except ModelError:
+            # A schema this adapter cannot describe is our own refusal, and
+            # dressing it as "the agent SDK failed" would send the reader to
+            # look for a fault in the SDK.
+            raise
         except Exception as error:
             raise ModelError(f"the agent SDK failed: {error}") from error
 
@@ -123,16 +128,44 @@ def _sdk() -> Any:  # the SDK ships no stubs ultraloom could narrow this against
     return claude_agent_sdk
 
 
+_JSON_TYPES: Final = {"str": "string", "int": "integer", "float": "number", "bool": "boolean"}
+
+
 def _schema_of(schema: type) -> dict[str, Any]:
-    """A JSON-schema-shaped description of a frozen dataclass."""
-    properties = {
-        field.name: {"type": _json_type(field.type)} for field in dataclasses.fields(schema)
+    """A JSON-schema-shaped description of a frozen dataclass of scalar fields."""
+    fields = dataclasses.fields(schema)
+    properties = {field.name: {"type": _json_type(schema, field)} for field in fields}
+    # Every field the dataclass does not default is required. Without this the
+    # model may omit a mandatory field, `schema(**payload)` fills the default,
+    # and a value nobody produced enters the flow state and the journal.
+    required = [field.name for field in fields if not _has_default(field)]
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
     }
-    return {"type": "object", "properties": properties, "additionalProperties": False}
 
 
-def _json_type(annotation: object) -> str:
-    text = annotation if isinstance(annotation, str) else getattr(annotation, "__name__", "str")
-    return {"str": "string", "int": "integer", "float": "number", "bool": "boolean"}.get(
-        text, "string"
+def _has_default(field: dataclasses.Field[Any]) -> bool:
+    return (
+        field.default is not dataclasses.MISSING or field.default_factory is not dataclasses.MISSING
     )
+
+
+def _json_type(schema: type, field: dataclasses.Field[Any]) -> str:
+    """The JSON type for one field, or a refusal.
+
+    Deliberately not a fallback to "string": dataclasses do not check field
+    types, so a `list[str]` described as a string would be accepted by
+    `schema(**payload)` and carry a wrong-typed value into the state and the
+    journal with nothing raising anywhere.
+    """
+    annotation = field.type
+    text = annotation if isinstance(annotation, str) else getattr(annotation, "__name__", "")
+    if text not in _JSON_TYPES:
+        raise ModelError(
+            f"{schema.__name__}.{field.name}: ultraloom cannot describe {text or annotation!r} "
+            "to the model; a schema is a frozen dataclass of str, int, float and bool fields"
+        )
+    return _JSON_TYPES[text]

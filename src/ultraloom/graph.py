@@ -28,7 +28,15 @@ class CodeNode[T]:
 
 @dataclass(frozen=True, slots=True)
 class AgentNode[T]:
-    """A model call with its own prompt, tool profile, effort and output schema."""
+    """A model call with its own prompt, tool profile, effort and output schema.
+
+    `schema` must be a frozen dataclass whose fields are all `str`, `int`,
+    `float` or `bool`. That is what a model adapter can describe as a JSON
+    schema, and a dataclass checks no field types when it is built from the
+    reply — so anything wider would let a wrong-typed value into the state and
+    the journal unnoticed. A field without a default is asked of the model as
+    required.
+    """
 
     name: str
     prompt: Callable[[T], str]

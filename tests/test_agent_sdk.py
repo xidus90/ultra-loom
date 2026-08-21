@@ -174,6 +174,7 @@ def test_the_schema_travels_as_a_json_schema(stub_sdk: StubSdk, tmp_path: Path) 
         "schema": {
             "type": "object",
             "properties": {"fix": {"type": "string"}},
+            "required": [],
             "additionalProperties": False,
         },
     }
@@ -186,7 +187,6 @@ def test_every_field_type_the_schema_knows_is_translated(stub_sdk: StubSdk, tmp_
         count: int = 0
         ratio: float = 0.0
         done: bool = False
-        other: Path = Path()
 
     stub_sdk.answers_with(_ResultMessage(structured_output={}))
     _ask(tmp_path, Request(prompt="p", tools=(), effort="low", schema=Wide))
@@ -199,8 +199,52 @@ def test_every_field_type_the_schema_knows_is_translated(stub_sdk: StubSdk, tmp_
         "integer",
         "number",
         "boolean",
-        "string",
     ]
+
+
+def test_a_field_the_adapter_cannot_describe_is_refused(stub_sdk: StubSdk, tmp_path: Path) -> None:
+    """A dataclass checks no field types, so a mistyped schema corrupts silently."""
+
+    @dataclass(frozen=True, slots=True)
+    class Wide:
+        text: str = ""
+        other: Path = Path()
+
+    with pytest.raises(ModelError, match=r"Wide.other: ultraloom cannot describe"):
+        _ask(tmp_path, Request(prompt="p", tools=(), effort="low", schema=Wide))
+
+    assert stub_sdk.calls == [], "the request must not go out at all"
+
+
+def test_a_field_without_a_default_is_required_of_the_model(
+    stub_sdk: StubSdk, tmp_path: Path
+) -> None:
+    """Otherwise an omitted field silently takes the dataclass default."""
+
+    @dataclass(frozen=True, slots=True)
+    class Both:
+        must: str
+        may: str = ""
+
+    stub_sdk.answers_with(_ResultMessage(structured_output={"must": "x"}))
+    _ask(tmp_path, Request(prompt="p", tools=(), effort="low", schema=Both))
+
+    _prompt, options = stub_sdk.calls[0]
+    assert options.output_format is not None
+    assert options.output_format["schema"]["required"] == ["must"]
+
+
+def test_a_field_with_a_default_factory_is_not_required(stub_sdk: StubSdk, tmp_path: Path) -> None:
+    @dataclass(frozen=True, slots=True)
+    class Made:
+        text: str = dataclasses.field(default_factory=str)
+
+    stub_sdk.answers_with(_ResultMessage(structured_output={}))
+    _ask(tmp_path, Request(prompt="p", tools=(), effort="low", schema=Made))
+
+    _prompt, options = stub_sdk.calls[0]
+    assert options.output_format is not None
+    assert options.output_format["schema"]["required"] == []
 
 
 def test_the_reply_is_built_into_the_schema_and_carries_its_tokens(
