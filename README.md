@@ -23,6 +23,10 @@ Runs a flow as a graph: nodes are steps, edges are transitions with
 conditions. It journals every step, stops at approval points, and resumes an
 aborted run from where it stopped.
 
+A resume keys on a node's *input* — its name and the data it saw — not on its
+code. Edit a node in the middle of a run and resume, and you get the old result
+back from the journal. Start a fresh run when a node changes.
+
 ## Licence
 
 AGPL-3.0-or-later. See `LICENSE`.

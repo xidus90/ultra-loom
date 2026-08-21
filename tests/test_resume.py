@@ -9,7 +9,7 @@ from ultraloom.graph import END, AgentNode, CodeNode, GateNode, Graph
 from ultraloom.journal import Journal
 from ultraloom.model.fake import FakeModel
 from ultraloom.model.port import Reply
-from ultraloom.runner import ReplayGapError, Runner
+from ultraloom.runner import Runner
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,8 +282,23 @@ def test_the_same_flow_and_the_same_fake_produce_the_same_journal(tmp_path: Path
     assert one_run("a") == one_run("b")
 
 
-def test_replay_gap_error_names_the_node() -> None:
-    assert "second" in str(ReplayGapError("node 'second' is not in the journal"))
+def test_a_replay_gap_names_the_missing_node(tmp_path: Path) -> None:
+    """The gap must say *which* node is missing, on the Result the runner built."""
+    path = tmp_path / "r.jsonl"
+    journal = Journal(path)
+    log: list[str] = []
+    Runner(counting_flow(log), journal, clock=ticking_clock()).run(Data())
+
+    kept = path.read_text(encoding="utf-8").splitlines()[:1]
+    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+    log.clear()
+    result = Runner(counting_flow(log), journal, clock=ticking_clock(), replay=True).run(Data())
+
+    assert result.status == "error"
+    assert result.node == "second", "the run stops at the node the journal lacks"
+    assert result.detail == "node 'second' is not in the journal"
+    assert log == [], "the cached node must not rerun, the missing one must not run at all"
 
 
 def _asking_flow() -> Graph[Data]:

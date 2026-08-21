@@ -70,6 +70,12 @@ class Runner[T]:
 
         Without an answer the gate pauses again: treating a missing answer as
         consent would make the approval point decorative.
+
+        A node is recognised by its name and the input it saw, never by its
+        implementation, so editing a node's body and resuming replays the old
+        result for the new code. That is the price of the alternative: hashing a
+        function body would throw a journal away on a cosmetic edit. Start a
+        fresh run when a node changes.
         """
         try:
             self._graph.validate()
