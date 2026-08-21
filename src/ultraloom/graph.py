@@ -101,7 +101,17 @@ class Graph[T]:
         An on_error edge is taken only when the source node raised; it is
         invisible to the normal path, so a fallback is a visible edge in the
         flow rather than hidden retry logic in the runner.
+
+        Raises:
+            GraphError: if a condition is put on an error edge. `error_name`
+                does not evaluate one, so accepting it would let an author's
+                condition be ignored with nothing to reveal it.
         """
+        if when is not None and on_error:
+            raise GraphError(
+                f"the error edge from {src!r} to {dst!r} cannot carry a condition; "
+                f"an error edge is unconditional"
+            )
         self._edges.setdefault(src, []).append(_Edge(dst, when, on_error))
 
     def node(self, name: str) -> Node[T]:

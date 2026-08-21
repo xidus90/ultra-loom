@@ -187,3 +187,13 @@ def test_an_agent_node_defaults_to_a_delta_free_apply() -> None:
     node: AgentNode[Data] = AgentNode("review", lambda _d: "ask", schema=Data)
 
     assert node.apply(Data(), object()) == {}
+
+
+def test_an_error_edge_refuses_a_condition() -> None:
+    """A condition on an error edge would be silently ignored, so it is refused."""
+    graph: Graph[Data] = Graph("conditional", start="first")
+    graph.add(code("first"))
+    graph.add(code("fallback"))
+
+    with pytest.raises(GraphError, match="unconditional"):
+        graph.edge("first", "fallback", when=lambda d: d.green, on_error=True)
