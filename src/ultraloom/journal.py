@@ -15,7 +15,18 @@ from pathlib import Path
 
 
 class JournalError(ValueError):
-    """Raised for a journal file that cannot be read."""
+    """Raised for a journal file that cannot be read or written."""
+
+
+def _unserializable(value: object) -> object:
+    """Refuse a value JSON cannot express, instead of inventing one for it.
+
+    The tempting fallback is `repr`, but a default `repr` carries the object's
+    memory address: the same payload would hash differently in a new process, so
+    a resume would silently redo finished work — and a collision would silently
+    skip a node. Both are invisible, so the journal says so at write time.
+    """
+    raise JournalError(f"cannot serialize a value of type {type(value).__name__}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,11 +51,14 @@ def input_hash(node: str, data: object) -> str:
     Keys are sorted, so a hash never depends on field ordering — a resume that
     turned on dict order would replay the wrong node without saying so. Python's
     own `hash()` is salted per process and deliberately not used here.
+
+    Raises:
+        JournalError: if the payload holds a value JSON cannot express.
     """
     payload: object = data
     if dataclasses.is_dataclass(data) and not isinstance(data, type):
         payload = dataclasses.asdict(data)
-    blob = json.dumps({"node": node, "data": payload}, sort_keys=True, default=repr)
+    blob = json.dumps({"node": node, "data": payload}, sort_keys=True, default=_unserializable)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -55,10 +69,18 @@ class Journal:
     path: Path
 
     def append(self, entry: Entry) -> None:
-        """Add one line. Creates the file and its parents on first write."""
+        """Add one line. Creates the file and its parents on first write.
+
+        Raises:
+            JournalError: if the entry holds a value JSON cannot express. It is
+                refused before the file is touched, so a bad entry leaves no
+                half-written line behind.
+        """
+        line = json.dumps(dataclasses.asdict(entry), sort_keys=True, default=_unserializable)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(dataclasses.asdict(entry), sort_keys=True)
-        with self.path.open("a", encoding="utf-8") as handle:
+        # LF regardless of platform: the journal is a data format whose bytes a
+        # resume and the golden-journal test compare, not a text document.
+        with self.path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(line + "\n")
 
     def entries(self) -> tuple[Entry, ...]:
@@ -66,7 +88,7 @@ class Journal:
         if not self.path.exists():
             return ()
         found: list[Entry] = []
-        text = self.path.read_text(encoding="utf-8")
+        text = self.path.read_text(encoding="utf-8", newline="\n")
         for number, line in enumerate(text.splitlines(), start=1):
             if not line.strip():
                 continue

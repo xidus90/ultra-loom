@@ -8,11 +8,22 @@ import pytest
 
 from ultraloom.journal import Entry, Journal, JournalError, input_hash
 
+# Fixtures write the same LF bytes the journal writes; text mode on Windows
+# would turn them into CRLF and test something the journal never produces.
+LF = chr(10)
+
 
 @dataclass(frozen=True, slots=True)
 class Data:
     green: bool = False
     attempts: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Opaque:
+    """A payload holding something JSON has no representation for."""
+
+    thing: object = object()
 
 
 def an_entry(node: str = "run_tests", outcome: str = "ok", **kw: object) -> Entry:
@@ -56,9 +67,16 @@ def test_a_plain_payload_hashes_too() -> None:
     assert input_hash("n", {"green": True}) == input_hash("n", {"green": True})
 
 
-def test_an_unserializable_payload_still_hashes() -> None:
-    """A payload JSON cannot express must not crash the journal."""
-    assert input_hash("n", Data) == input_hash("n", Data)
+def test_an_unserializable_payload_is_refused() -> None:
+    """Hashing an address would make the same payload hash differently twice."""
+    with pytest.raises(JournalError, match="object"):
+        input_hash("n", Opaque())
+
+
+def test_a_payload_that_is_a_class_is_refused() -> None:
+    """A class object is not an instance, so it is not unpacked, and JSON balks."""
+    with pytest.raises(JournalError, match="type"):
+        input_hash("n", Data)
 
 
 def test_an_appended_entry_reads_back(tmp_path: Path) -> None:
@@ -124,7 +142,7 @@ def test_lookup_returns_the_last_entry_for_a_repeated_node(tmp_path: Path) -> No
 def test_a_corrupt_line_is_reported_with_its_number(tmp_path: Path) -> None:
     path = tmp_path / "run.jsonl"
     Journal(path).append(an_entry())
-    with path.open("a", encoding="utf-8") as handle:
+    with path.open("a", encoding="utf-8", newline=LF) as handle:
         handle.write("not json\n")
 
     with pytest.raises(JournalError, match="line 2"):
@@ -140,6 +158,26 @@ def test_a_line_with_the_wrong_fields_is_reported(tmp_path: Path) -> None:
         Journal(path).entries()
 
 
+def test_an_entry_with_an_unserializable_delta_is_refused(tmp_path: Path) -> None:
+    """A delta the journal cannot express must not reach the file either."""
+    path = tmp_path / "run.jsonl"
+
+    with pytest.raises(JournalError, match="object"):
+        Journal(path).append(an_entry(delta={"thing": object()}))
+
+    assert not path.exists()
+
+
+def test_lines_end_with_lf_on_every_platform(tmp_path: Path) -> None:
+    """Read as bytes on purpose: text mode would hide a CRLF and pass anyway."""
+    journal = Journal(tmp_path / "run.jsonl")
+    journal.append(an_entry())
+
+    raw = journal.path.read_bytes()
+    assert raw.endswith(b"\n")
+    assert b"\r" not in raw
+
+
 def test_blank_lines_are_skipped(tmp_path: Path) -> None:
     journal = Journal(tmp_path / "run.jsonl")
     journal.append(an_entry())
@@ -153,5 +191,5 @@ def test_a_line_is_written_with_sorted_fields(tmp_path: Path) -> None:
     journal = Journal(tmp_path / "run.jsonl")
     journal.append(an_entry())
 
-    line = journal.path.read_text(encoding="utf-8").splitlines()[0]
+    line = journal.path.read_text(encoding="utf-8", newline=LF).splitlines()[0]
     assert list(json.loads(line)) == sorted(json.loads(line))
