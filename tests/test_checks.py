@@ -2,6 +2,7 @@
 
 import json
 import shlex
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -217,6 +218,42 @@ def test_run_all_skips_a_check_it_cannot_resolve_and_says_which(tmp_path: Path) 
     assert all("could not tell" in result.output for result in unavailable)
 
 
+def test_an_empty_configured_command_is_refused(tmp_path: Path) -> None:
+    """A blank config line must never reach subprocess as an empty argv."""
+    python_project(tmp_path)
+    write_config(tmp_path, '[verify]\nlint = ""\n')
+
+    with pytest.raises(CheckUnavailableError, match="empty command"):
+        resolve_check("lint", load_config(tmp_path))
+
+
+def test_an_empty_configured_command_does_not_take_the_chain_down(tmp_path: Path) -> None:
+    verify_config(tmp_path, lint="", types=py("pass"))
+
+    results = {result.kind: result for result in run_all(load_config(tmp_path))}
+
+    assert results["lint"].source == "unavailable"
+    assert results["types"].ok is True
+
+
+def test_an_unexpected_failure_in_one_check_is_reported_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One check blowing up must not discard the results of the others."""
+    verify_config(tmp_path, lint=py("pass"))
+
+    def explode(*args: object, **kwargs: object) -> object:
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "tool wrote binary")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    results = {result.kind: result for result in run_all(load_config(tmp_path))}
+
+    assert set(results) == set(KINDS), "the other checks must still be reported"
+    assert results["lint"].source == "error"
+    assert results["lint"].ok is False
+    assert "tool wrote binary" in results["lint"].output
+
+
 def test_run_all_is_not_ok_when_one_check_fails(tmp_path: Path) -> None:
     verify_config(tmp_path, lint=py("pass"), types=py("import sys; sys.exit(1)"))
 
@@ -226,15 +263,27 @@ def test_run_all_is_not_ok_when_one_check_fails(tmp_path: Path) -> None:
 
 
 def test_run_all_actually_overlaps_the_waiting(tmp_path: Path) -> None:
-    """The whole point: three 400 ms checks must not take 1.2 s."""
+    """Three identical slow checks must cost far less than three times one.
+
+    Measured against one serial run of the same command rather than against a
+    wall-clock constant: an absolute bound would encode this machine's process
+    start-up cost, which on a loaded runner is the same order as the sleep.
+    """
     slow = py("import time; time.sleep(0.4)")
     verify_config(tmp_path, lint=slow, types=slow, test=slow)
+    config = load_config(tmp_path)
+
     started = time.perf_counter()
+    run_check("lint", config)
+    one = time.perf_counter() - started
 
-    run_all(load_config(tmp_path))
+    started = time.perf_counter()
+    run_all(config)
+    three = time.perf_counter() - started
 
-    elapsed = time.perf_counter() - started
-    assert elapsed < 1.0, f"three 0.4 s checks took {elapsed:.2f}s; they did not overlap"
+    assert three < 2 * one + 0.3, (
+        f"one check took {one:.2f}s, three concurrent took {three:.2f}s; they did not overlap"
+    )
 
 
 def test_the_checks_module_does_not_import_the_harness() -> None:

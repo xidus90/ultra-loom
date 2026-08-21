@@ -76,6 +76,10 @@ def resolve_check(kind: str, config: Config) -> Command:
 
     if kind in config.commands:
         argv = config.exec_prefix + tuple(shlex.split(config.commands[kind]))
+        if not argv:
+            # A blank config line configures *nothing*, and an empty argv is
+            # what subprocess turns into an IndexError deep inside Popen.
+            raise CheckUnavailableError(f"empty command configured for check {kind!r}")
         return Command(kind, argv, "config")
 
     script = _script_for(kind, config.root)
@@ -111,7 +115,9 @@ def run_check(kind: str, config: Config) -> CheckResult:
     except OSError as error:
         # A tool that is not installed must read as a failed check, not as a
         # traceback that takes the whole chain down with it.
-        detail = f"could not run {command.argv[0]!r}: {error}"
+        # shlex.join rather than argv[0]: the handler must survive any argv,
+        # including one this module never expected to build.
+        detail = f"could not run {shlex.join(command.argv)!r}: {error}"
         return CheckResult(kind, False, detail, command.source)
     output = completed.stdout + completed.stderr
     return CheckResult(kind, completed.returncode == 0, output, command.source)
@@ -131,13 +137,21 @@ def run_all(config: Config) -> tuple[CheckResult, ...]:
 
 
 def _run_or_report(kind: str, config: Config) -> CheckResult:
-    """One check, with an unresolvable one turned into a visible failure."""
+    """One check, with any failure of its own turned into a visible result.
+
+    Broad on purpose. `pool.map` re-raises the first exception when the tuple
+    is built, so one check blowing up would discard the results of every check
+    that already succeeded. `Exception`, deliberately not `BaseException`:
+    KeyboardInterrupt and SystemExit must still stop the run.
+    """
     try:
         return run_check(kind, config)
     except CheckUnavailableError as error:
         # Reported, not skipped: a run that looks green because nothing ran is
         # the one failure in this system that actually does damage.
         return CheckResult(kind, False, str(error), "unavailable")
+    except Exception as error:
+        return CheckResult(kind, False, f"{type(error).__name__}: {error}", "error")
 
 
 def _script_for(kind: str, root: Path) -> tuple[str, ...] | None:
