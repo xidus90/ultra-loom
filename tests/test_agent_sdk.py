@@ -7,6 +7,8 @@ the real SDK and stays out of the default run.
 
 from __future__ import annotations
 
+import dataclasses
+import inspect
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -262,6 +264,39 @@ def test_an_error_result_without_a_message_still_names_its_subtype(
 
     with pytest.raises(ModelError, match="error_max_turns"):
         _ask(tmp_path)
+
+
+def test_an_option_the_sdk_rejects_becomes_a_model_error(stub_sdk: StubSdk, tmp_path: Path) -> None:
+    """A renamed option field is a broken SDK call, not a TypeError mid-run."""
+
+    def refuse(**_fields: object) -> _Options:
+        raise TypeError("unexpected keyword argument 'permission_mode'")
+
+    stub_sdk.module.ClaudeAgentOptions = refuse  # type: ignore[attr-defined]  # a stub module grows its attributes
+
+    with pytest.raises(ModelError, match="unexpected keyword argument"):
+        _ask(tmp_path)
+
+
+def test_every_name_the_adapter_uses_exists_on_the_installed_sdk(tmp_path: Path) -> None:
+    """The guard the stubs cannot be: the stub declares whatever it is asked for.
+
+    Skipped where the optional extra is absent, so the default suite still
+    needs neither the extra nor a network.
+    """
+    sdk = pytest.importorskip("claude_agent_sdk")
+    from ultraloom.model.agent_sdk import RESULT_FIELDS, AgentSdkModel
+
+    option_fields = {field.name for field in dataclasses.fields(sdk.ClaudeAgentOptions)}
+    passed = set(AgentSdkModel(cwd=tmp_path)._options_for(a_request()))
+    assert passed <= option_fields, f"the SDK no longer takes {sorted(passed - option_fields)}"
+
+    result_fields = {field.name for field in dataclasses.fields(sdk.ResultMessage)}
+    assert set(RESULT_FIELDS) <= result_fields, (
+        f"the SDK no longer reports {sorted(set(RESULT_FIELDS) - result_fields)}"
+    )
+
+    assert {"prompt", "options"} <= set(inspect.signature(sdk.query).parameters)
 
 
 def test_an_sdk_exception_becomes_a_model_error(stub_sdk: StubSdk, tmp_path: Path) -> None:

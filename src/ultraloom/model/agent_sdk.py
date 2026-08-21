@@ -11,7 +11,7 @@ import asyncio
 import dataclasses
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from ultraloom.model.port import ModelError, Reply, Request
 
@@ -22,6 +22,11 @@ _MISSING = 'the agent extra is missing; install it with uv add "ultraloom[agent]
 # third segment (`mcp__<server>__<tool>`), which ultraloom cannot know without
 # connecting first.
 _MCP_PREFIX = "mcp__"
+
+# Every attribute this adapter reads off a ResultMessage. Named here so the
+# guard test in test_agent_sdk.py can hold them against the installed SDK;
+# the stub the unit tests use declares whatever they ask of it.
+RESULT_FIELDS: Final = ("is_error", "subtype", "result", "usage", "structured_output")
 
 
 class AgentSdkModel:
@@ -52,23 +57,12 @@ class AgentSdkModel:
     def _call(self, request: Request) -> tuple[object, int]:
         """The one place that knows the SDK's surface. Returns payload and cost."""
         sdk = _sdk()
-        options = sdk.ClaudeAgentOptions(
-            # Two different questions, two different fields: `tools` is the
-            # ceiling on the built-in tools, `allowed_tools` decides what runs
-            # without asking. An `mcp__<server>` entry is a permission rule and
-            # would name no built-in tool, so it goes only into the second.
-            tools=[name for name in request.tools if not name.startswith(_MCP_PREFIX)],
-            allowed_tools=list(request.tools),
-            # A harness run is unattended. Anything outside allowed_tools must
-            # be denied at once rather than block the run on a prompt nobody
-            # is there to answer.
-            permission_mode="dontAsk",
-            effort=request.effort,
-            cwd=str(self._cwd),
-            output_format={"type": "json_schema", "schema": _schema_of(request.schema)},
-        )
-
+        # Inside the try, deliberately: building the options is as much a use
+        # of the SDK's surface as calling it, so a renamed field must reach the
+        # caller as the ModelError `ask` promises rather than as a TypeError
+        # from the middle of a run.
         try:
+            options = sdk.ClaudeAgentOptions(**self._options_for(request))
             result = asyncio.run(
                 _last_result(sdk.ResultMessage, sdk.query(prompt=request.prompt, options=options))
             )
@@ -81,6 +75,29 @@ class AgentSdkModel:
             raise ModelError(f"the agent SDK failed: {result.result or result.subtype}")
         usage = result.usage or {}
         return result.structured_output, int(usage.get("output_tokens", 0))
+
+    def _options_for(self, request: Request) -> dict[str, Any]:
+        """The option fields this adapter sets, by SDK name.
+
+        A dict rather than the call itself, so `test_agent_sdk.py` can check
+        these names against the installed ClaudeAgentOptions without a network
+        call — the unit tests run against a stub that would accept anything.
+        """
+        return {
+            # Two different questions, two different fields: `tools` is the
+            # ceiling on the built-in tools, `allowed_tools` decides what runs
+            # without asking. An `mcp__<server>` entry is a permission rule and
+            # would name no built-in tool, so it goes only into the second.
+            "tools": [name for name in request.tools if not name.startswith(_MCP_PREFIX)],
+            "allowed_tools": list(request.tools),
+            # A harness run is unattended. Anything outside allowed_tools must
+            # be denied at once rather than block the run on a prompt nobody
+            # is there to answer.
+            "permission_mode": "dontAsk",
+            "effort": request.effort,
+            "cwd": str(self._cwd),
+            "output_format": {"type": "json_schema", "schema": _schema_of(request.schema)},
+        }
 
 
 async def _last_result(result_type: type, stream: AsyncIterator[Any]) -> Any:
