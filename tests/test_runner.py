@@ -11,7 +11,8 @@ from ultraloom.graph import END, AgentNode, CodeNode, GateNode, Graph
 from ultraloom.journal import Journal
 from ultraloom.model.fake import FakeModel
 from ultraloom.model.port import ModelError, Reply
-from ultraloom.runner import Result, Runner, VisitLimitError
+from ultraloom.runner import Result, Runner, VisitLimitError, _guard_visits, _monotonic
+from ultraloom.state import State
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,8 @@ def test_exceeding_max_visits_ends_the_run_as_an_error(tmp_path: Path) -> None:
     assert result.status == "error"
     assert result.detail is not None
     assert "max_visits" in result.detail
+    assert "check" in result.detail, "the detail must name the node that hit its ceiling"
+    assert result.node == "check"
 
 
 def test_the_visit_limit_is_journalled_at_the_node_that_hit_it(tmp_path: Path) -> None:
@@ -321,13 +324,43 @@ def test_a_gate_node_pauses_the_run_with_its_question(tmp_path: Path) -> None:
     assert journal.entries()[1:] == ()
 
 
-def test_visit_limit_error_carries_the_node_name() -> None:
-    assert "check" in str(VisitLimitError("node 'check' exceeded max_visits"))
-
-
 def test_result_is_immutable() -> None:
-    from ultraloom.state import State
-
     result = Result("done", State(Data()), None, None, None)
     with pytest.raises(AttributeError):
         result.status = "error"  # type: ignore[misc]  # immutability is the point
+
+
+def test_an_unknown_tool_profile_ends_the_run_as_an_error(tmp_path: Path) -> None:
+    """A typo in a profile name must surface as a failed run, not a crash."""
+    graph: Graph[Data] = Graph("ask", start="review")
+    graph.add(AgentNode("review", lambda _d: "ask", schema=Verdict, tools="read-only"))
+    graph.edge("review", END)
+
+    result = Runner(
+        graph,
+        a_journal(tmp_path),
+        model=FakeModel([Reply(Verdict(), tokens=0)]),
+        clock=ticking_clock(),
+    ).run(Data())
+
+    assert result.status == "error"
+    assert result.node == "review"
+    assert result.detail is not None
+    assert "read-only" in result.detail
+
+
+def test_the_visit_guard_raises_the_error_named_in_the_contract() -> None:
+    node: CodeNode[Data] = CodeNode("check", lambda _d: {}, max_visits=1)
+    state = State(Data(), {"check": 2})
+
+    with pytest.raises(VisitLimitError, match="check"):
+        _guard_visits(node, state)
+
+
+def test_the_default_clock_is_the_monotonic_clock() -> None:
+    """The clock that ships to a caller who injects none must actually work."""
+    first = _monotonic()
+    second = _monotonic()
+
+    assert isinstance(first, float)
+    assert second >= first, "a monotonic clock never runs backwards"

@@ -62,13 +62,15 @@ class Runner[T]:
         while name != END:
             node = self._graph.node(name)
             state = state.with_visit(name)
-            if state.visit_count(name) > node.max_visits:
-                # The exception type is the vocabulary for a caller that wants
-                # to tell a runaway loop from a node failure; the run itself
-                # still ends as a Result, so the journal stays the record.
-                limit = VisitLimitError(f"node {name!r} exceeded max_visits={node.max_visits}")
-                self._write(node, state, {}, "error", 0, 0.0, str(limit))
-                return Result("error", state, name, None, str(limit))
+            try:
+                _guard_visits(node, state)
+            except VisitLimitError as error:
+                # The guard raises, so a runaway loop has its own type and can
+                # be told from a node failure. It is converted here, where the
+                # state still exists: exceeding max_visits is an outcome of the
+                # flow, not a crash of the harness, so nothing leaves `run`.
+                self._write(node, state, {}, "error", 0, 0.0, str(error))
+                return Result("error", state, name, None, str(error))
 
             outcome = self._step(node, state)
             if outcome.paused:
@@ -170,5 +172,12 @@ class _Step[T]:
     detail: str | None = None
 
 
-def _monotonic() -> float:  # pragma: no cover  # the default clock; tests inject their own
+def _guard_visits[T](node: Node[T], state: State[T]) -> None:
+    """Raise when a node has run more often than its ceiling allows."""
+    if state.visit_count(node.name) > node.max_visits:
+        raise VisitLimitError(f"node {node.name!r} exceeded max_visits={node.max_visits}")
+
+
+def _monotonic() -> float:
+    """The default clock. Monotonic, so a clock adjustment cannot shorten a step."""
     return time.monotonic()
