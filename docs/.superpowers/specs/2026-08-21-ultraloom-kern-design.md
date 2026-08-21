@@ -80,7 +80,7 @@ eines Laufs anbieten.
 Die vier Abläufe, für die ultraloom gebaut wird — Spec→Code→Wiki-Kreis,
 Prüfschleife bis grün, Wissenspflege im Wiki, Pläne autonom abarbeiten — sind
 Teilprojekte 2 bis 5, die Hook- und OKF-Arbeit ist Teilprojekt 6 und 7
-(Abschnitt 15). Jedes bekommt eine eigene Spec und einen eigenen Plan.
+(Abschnitt 16). Jedes bekommt eine eigene Spec und einen eigenen Plan.
 
 ---
 
@@ -389,6 +389,8 @@ Ein angehaltener Lauf braucht eine Adresse.
   gleiche Attrappe muss dasselbe Journal ergeben.
 - **Graph-Validierung** wird gegen kaputte Graphen getestet, nicht nur gegen
   gute.
+- **Die Modulgrenze** wird getestet: `ultraloom check` läuft in einer Umgebung
+  ohne installiertes Claude Agent SDK durch (Abschnitt 15.2).
 - TDD, 100 % Coverage, ruff und mypy sauber — nach den Projektregeln. Python
   ≥ 3.13, Abhängigkeiten über `uv`.
 
@@ -442,7 +444,111 @@ gut. Skills bleiben in `~/.claude/skills/` und `<projekt>/.claude/skills/`.
 
 ---
 
-## 15. Reihenfolge
+## 15. Veröffentlichung, Paketschnitt und Lizenz
+
+ultraloom soll öffentlich werden — nicht zu einem Termin, aber als Ziel, das
+Entscheidungen jetzt schon bindet.
+
+### 15.1 Die Prüfkette ist der öffentliche Teil, der Harness ist optional
+
+Ein Prüfwerkzeug, das beim Installieren ein LLM-SDK und einen API-Zugang
+verlangt, wird nicht installiert — auch nicht von einem Projekt, das zunächst nur
+Hooks möchte. Deshalb ein Paket mit einem Extra:
+
+```
+pip install ultraloom            # Prüfkette, keine LLM-Abhängigkeit
+pip install ultraloom[agent]     # zusätzlich der Graph-Harness
+```
+
+`ultraloom run` ohne das Extra bricht mit einer klaren Meldung ab, die zur
+Installation von `ultraloom[agent]` auffordert — nicht mit einem `ImportError`.
+
+Ein Repo, ein Name, eine Testsuite. Eine spätere Aufspaltung in zwei Pakete
+bleibt möglich, weil `checks.py` und `config.py` ohnehin getrennt liegen; die
+Gegenrichtung — zwei Pakete wieder zu einem machen — wäre die unangenehmere.
+
+Die Spannung wird nicht wegdefiniert: der Name `ultraloom` bewirbt den Harness,
+während der öffentlich nützliche Teil die Prüfkette ist. Das README erklärt
+deshalb die Prüfkette zuerst und den Harness als das Optionale.
+
+### 15.2 Die Modulgrenze, und wie sie gesichert wird
+
+Der Prüfteil — `checks.py`, `config.py` und der `check`-Zweig von `cli.py` —
+importiert nichts aus `graph.py`, `runner.py`, `state.py` oder `model/`. Das
+Claude Agent SDK wird ausschließlich in `model/agent_sdk.py` geladen, und dort
+lokal in der Funktion: der Fall „optionale Abhängigkeit" aus den Projektregeln,
+mit begründendem Kommentar.
+
+**Ein Test führt `ultraloom check lint` in einer Umgebung ohne installiertes Agent
+SDK aus.** Läuft er durch, hält die Grenze; bricht er, hat jemand einen Import an
+die falsche Stelle geschrieben. Das ist der wichtigste Test dieser Spec, weil er
+die Zusage „der Harness ist optional" gegen Erosion sichert — eine Zusage ohne
+Test verfällt.
+
+### 15.3 Lizenz: AGPL-3.0
+
+Nutzung ist jedem erlaubt, privat ohne jede Auflage. Wer ultraloom weitergibt
+oder als Netzwerkdienst betreibt, muss seinen Code offenlegen. Namensnennung ist
+eingebaut, weil Copyright-Hinweise erhalten bleiben müssen. Echtes,
+OSI-anerkanntes Open Source — Beiträge sind damit rechtlich sauber, was bei einer
+Nicht-kommerziell-Lizenz nicht der Fall wäre.
+
+Zwei Folgen, die man kennen muss:
+
+- **Die Prüfkette wird als Kommando aufgerufen** (`ultraloom check lint` aus einem
+  Hook). Das ist Ausführung, keine Verlinkung: das geprüfte Projekt wird davon
+  nicht berührt, so wie ein GPL-Compiler das Kompilierte nicht ansteckt. Für den
+  Teil, der öffentlich werden soll, ist Copyleft folgenlos.
+- **Der Harness wird importiert.** Ein Projekt, das Abläufe gegen `ultraloom`
+  schreibt und weitergegeben wird, ist betroffen. Solange der Urheber alleiniger
+  Rechteinhaber ist, kann er sich selbst andere Bedingungen geben; sobald fremde
+  Beiträge angenommen werden, verlangt das eine Beitragsvereinbarung. Diese
+  Entscheidung fällt beim ersten Fremdbeitrag, nicht vorher.
+
+### 15.4 Zwei Verteilwege, beide nötig
+
+| Was | Wie verteilt | Warum dieser Weg |
+|---|---|---|
+| Prüflogik | Python-Paket | Wird auch von `CodeNode`s im Graphen aufgerufen, nicht nur von Hooks |
+| Hook-Verdrahtung und Skills | Claude-Code-Plugin | Ein Plugin trägt Hook-Einträge und Skills; genau dafür vorgesehen |
+
+Ein Plugin lässt sich auch nur für den eigenen Rechner installieren. Es ersetzt
+damit den globalen Eintrag aus Abschnitt 14, sobald die Verdrahtung teilbar sein
+soll.
+
+### 15.5 Was die Bestandsaufnahme für die Veröffentlichung ergab
+
+Geprüft am 2026-08-21 über alle 20 Hook-Dateien in space und den iam-Projekten:
+
+- **Keine Geheimnisse.** Suche nach Key-, Token-, Passwort- und
+  Private-Key-Mustern: kein Treffer. Der einzige Fund ist ein Kommentar in
+  `iam_backend/guard_paths.py` — ein Hook, der Geheimnisse *schützt*.
+- **Die projektinternen Bezüge sind flach:** Repo-Namen und Pfade (`iam_wiki`,
+  `iam_backend`, `iam_frontend`, `iam_workers`), die Umgebungsvariable
+  `IAM_TEST`, zweimal `Kontari` in space. Kein eingewobenes Domänenwissen.
+  Extraktion ist Handarbeit, keine Archäologie.
+- **Lizenzdateien fehlen** in space, ultra-brain und allen iam-Projekten. Für
+  ultraloom ist sie mit dieser Spec gesetzt.
+- **Nicht geprüft:** die Sichtbarkeit der GitHub-Repositories — `gh` ist auf dem
+  Rechner nicht installiert. Wem der generische Anteil an Kundenarbeit gehört,
+  ist keine technische Frage und hier nicht entschieden.
+
+### 15.6 Bindende Vorgabe für die Hook-Migration
+
+**Generischen Hook-Code neu schreiben, nicht die Historie transplantieren.** Wer
+`git filter-repo` benutzt, um etwa `lint.py` samt Geschichte nach ultraloom zu
+holen, nimmt jeden Commit mit — samt Projektnamen und allem, was in diesen Zeilen
+je stand. Ein öffentliches Repo mit fremder Historie lässt sich nicht
+nachträglich reinigen, ohne alle Hashes zu brechen. Ein Neuschrieb gegen Tests
+kostet einmal Aufwand und ist danach frei von Vergangenheit.
+
+Ebenso bindend: Repo-Namen raus, Pfade in die Konfiguration, keine
+projektspezifische Umgebungsvariable im Kern. Grundsatz 3 ist damit keine
+Stilregel mehr, sondern eine Anforderung mit Zähnen.
+
+---
+
+## 16. Reihenfolge
 
 | Teilprojekt | Inhalt | Repo |
 |---|---|---|
@@ -468,7 +574,7 @@ Es steht hier nur, damit die Zuordnung aus Abschnitt 14 nicht verloren geht.
 
 ---
 
-## 16. Offene Punkte
+## 17. Offene Punkte
 
 Bewusst offengelassen, weil noch kein Ablauf sie fordert:
 
