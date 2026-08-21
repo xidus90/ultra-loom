@@ -188,7 +188,12 @@ class Runner[T]:
                 return node.run(state.data), 0
             case AgentNode():
                 if self._model is None:
-                    raise RuntimeError(f"node {node.name!r} needs a model but no model was given")
+                    # The message names the install, because "no model" leaves
+                    # the reader to guess that a model is something you add.
+                    raise RuntimeError(
+                        f"node {node.name!r} needs a model; install it with "
+                        'uv add "ultraloom[agent]"'
+                    )
                 reply = self._model.ask(
                     Request(
                         prompt=node.prompt(state.data),

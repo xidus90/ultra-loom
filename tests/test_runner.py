@@ -238,7 +238,7 @@ def test_an_agent_node_without_a_model_is_an_error_not_a_crash(tmp_path: Path) -
 
     assert result.status == "error"
     assert result.detail is not None
-    assert "no model" in result.detail
+    assert "needs a model" in result.detail
 
 
 def test_a_raising_node_ends_the_run_at_that_node(tmp_path: Path) -> None:
