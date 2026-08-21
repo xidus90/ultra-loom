@@ -1006,7 +1006,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "claude-agent-sdk", marker = "extra == 'agent'", specifier = ">=0.1" }]
+requires-dist = [{ name = "claude-agent-sdk", marker = "extra == 'agent'", specifier = ">=0.2.143" }]
 provides-extras = ["agent"]
 
 [package.metadata.requires-dev]
