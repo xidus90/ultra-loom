@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ultraloom.gate import pending_gate
 from ultraloom.graph import END, CodeNode, GateNode, Graph
-from ultraloom.journal import Entry, Journal
+from ultraloom.journal import Entry, Journal, input_hash
 from ultraloom.runner import Runner
 
 
@@ -207,3 +207,28 @@ def test_resume_reports_a_gate_with_no_applicable_edge(tmp_path: Path) -> None:
     assert result.node == "ask"
     assert result.detail is not None
     assert "no edge out of 'ask'" in result.detail
+
+
+def test_the_answers_effect_reaches_the_journal(tmp_path: Path) -> None:
+    """A replay has only the file; an entry without the delta destroys the answer."""
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = approval_flow()
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+
+    Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="yes")
+
+    answered = journal.entries()[1]
+    assert answered.delta == {"approved": "yes"}
+    assert answered.seconds == 0.0, "an answer from outside the process has no measured duration"
+
+
+def test_the_answered_entry_keys_on_the_data_the_gate_saw(tmp_path: Path) -> None:
+    """Both of the gate's entries must share the key a replay looks it up by."""
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = approval_flow()
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+
+    Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="yes")
+
+    paused, answered = journal.entries()[0], journal.entries()[1]
+    assert answered.input_hash == paused.input_hash == input_hash("ask", Data())

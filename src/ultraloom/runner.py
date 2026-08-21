@@ -78,8 +78,17 @@ class Runner[T]:
         if not isinstance(node, GateNode):
             return Result("error", State(data), gate.node, None, f"{gate.node!r} is not a gate")
 
-        state = State(data).merged(node.apply(data, answer))
-        self._write(node, state, {}, "ok", 0, 0.0, f"answered: {answer}")
+        delta = node.apply(data, answer)
+        # The delta goes into the entry, not an empty one: the journal is the
+        # only source a replay has, so an entry without the answer's effect
+        # would not postpone that information but destroy it.
+        # `seconds=0.0` because this entry records an answer that arrived from
+        # outside the process, not a step this run executed and timed; an entry
+        # that represents no measured execution carries no measured duration.
+        # The hash is taken over the data the gate saw, so this entry shares the
+        # key of the pause entry that a replay looks the gate up by.
+        self._write(node, State(data), delta, "ok", 0, 0.0, f"answered: {answer}")
+        state = State(data).merged(delta)
         try:
             name = self._graph.next_name(gate.node, state.data)
         except GraphError as error:
