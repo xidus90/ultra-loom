@@ -46,14 +46,6 @@ python_version = "3.13"
 strict = true
 files = ["src", "tests"]
 
-[[tool.mypy.overrides]]
-# The adapter for the optional agent extra only arrives with Task 14; until
-# then cli._model, which imports it optionally at runtime, must still type
-# check. An override rather than a `type: ignore`, because the ignore would
-# become unused — and so an error itself — once the module exists.
-module = ["ultraloom.model.agent_sdk"]
-ignore_missing_imports = true
-
 [tool.pytest.ini_options]
 # The contract test talks to the real Claude Agent SDK over the network. It
 # stays out of the default run and is asked for explicitly with `-m contract`.

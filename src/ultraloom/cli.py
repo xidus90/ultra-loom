@@ -253,16 +253,13 @@ def _remember_flow(root: Path, run_id: str, flow_name: str) -> None:
     marker.write_text(flow_name + "\n", encoding="utf-8")
 
 
-def _model(root: Path) -> Model | None:
-    """The real model, if the agent extra is installed."""
-    # Local import: the agent extra is optional, and a missing one must reach
-    # the user as the runner's install hint rather than as an ImportError.
-    try:
-        from ultraloom.model.agent_sdk import AgentSdkModel
-    except ImportError:
-        return None
-    # Annotated rather than returned directly: until Task 14 ships the adapter,
-    # mypy sees an absent module as Any, and an Any leaking out of here would
-    # take the runner's model type with it.
-    model: Model = AgentSdkModel(cwd=root)
-    return model
+def _model(root: Path) -> Model:
+    """The real model. A missing agent extra shows up the first time it is asked."""
+    # Local import: the adapter lives on the harness side, and `ultraloom
+    # check` must not pull it in (spec 15.2). The adapter itself imports the
+    # optional extra only inside `ask`, so a project without the extra still
+    # gets this far and then reads the install hint as a failed run -- never as
+    # an ImportError from a command that had already started.
+    from ultraloom.model.agent_sdk import AgentSdkModel
+
+    return AgentSdkModel(cwd=root)
