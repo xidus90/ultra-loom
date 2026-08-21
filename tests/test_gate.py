@@ -253,3 +253,92 @@ def test_an_answer_for_a_run_that_is_not_paused_fails_visibly(tmp_path: Path) ->
     assert result.status == "error"
     assert result.detail == "no gate is waiting for an answer"
     assert ran == [], "an answer for an unpaused run must not re-execute the flow"
+
+
+def staged_approval_flow() -> Graph[Data]:
+    """A gate with a state-changing node in front of it.
+
+    The branch's other gate fixtures put the gate at `graph.start`, where the
+    initial payload and the payload the gate sees coincide — and where a resume
+    that ignores the earlier nodes' deltas cannot be told from one that honours
+    them.
+    """
+    graph: Graph[Data] = Graph("staged", start="prepare")
+    graph.add(CodeNode("prepare", lambda d: {"note": d.note + "p"}))
+    graph.add(
+        GateNode(
+            "ask",
+            question=lambda _d: "May I write the wiki entry?",
+            apply=lambda d, answer: {"note": d.note + answer},
+        )
+    )
+    graph.add(CodeNode("write", lambda d: {"note": d.note + "!"}))
+    graph.edge("prepare", "ask")
+    graph.edge("ask", "write")
+    graph.edge("write", END)
+    return graph
+
+
+def test_a_gate_behind_another_node_applies_the_answer_to_the_state_it_saw(
+    tmp_path: Path,
+) -> None:
+    """The gate's `apply` must see the prepared payload, not the initial one."""
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = staged_approval_flow()
+    assert Runner(graph, journal, clock=ticking_clock()).run(Data()).status == "paused"
+
+    result = Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="Y")
+
+    assert result.status == "done"
+    assert result.state.data.note == "pY!"
+
+
+def test_a_gate_behind_another_node_keys_both_entries_on_the_gates_own_input(
+    tmp_path: Path,
+) -> None:
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = staged_approval_flow()
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+
+    Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="Y")
+
+    gate_entries = [entry for entry in journal.entries() if entry.node == "ask"]
+    assert [entry.outcome for entry in gate_entries] == ["paused", "ok"]
+    assert {entry.input_hash for entry in gate_entries} == {input_hash("ask", Data(note="p"))}
+
+
+def test_a_resumed_run_behind_another_node_replays_cleanly(tmp_path: Path) -> None:
+    """A resume that keys the answer wrongly leaves a journal no replay can walk."""
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = staged_approval_flow()
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+    Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="Y")
+
+    replayed = Runner(graph, journal, clock=ticking_clock(), replay=True).run(Data())
+
+    assert replayed.status == "done"
+    assert replayed.state.data.note == "pY!"
+
+
+def test_a_gate_on_a_cycle_consumes_its_answer_only_once(tmp_path: Path) -> None:
+    """A second pass must pause again rather than reuse the first pass's answer."""
+    journal = Journal(tmp_path / "r.jsonl")
+    graph: Graph[Data] = Graph("looping", start="ask")
+    graph.add(
+        GateNode(
+            "ask",
+            question=lambda d: f"again? {d.note}",
+            apply=lambda d, answer: {"note": d.note + answer},
+            max_visits=3,
+        )
+    )
+    graph.add(CodeNode("step", lambda d: {"note": d.note + "."}, max_visits=3))
+    graph.edge("ask", "step")
+    graph.edge("step", "ask")
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+
+    result = Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="y")
+
+    assert result.status == "paused"
+    assert result.state.data.note == "y."
+    assert result.question == "again? y."

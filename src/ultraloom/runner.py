@@ -71,6 +71,12 @@ class Runner[T]:
         Without an answer the gate pauses again: treating a missing answer as
         consent would make the approval point decorative.
 
+        With an answer the walk still starts at `graph.start`, so every node
+        before the gate is reconstructed from the journal and the gate's `apply`
+        sees the payload the gate actually saw. Jumping straight to the gate
+        with the caller's initial payload would hand `apply` a state that never
+        existed, and would key the answer under a hash no replay can find.
+
         A node is recognised by its name and the input it saw, never by its
         implementation, so editing a node's body and resuming replays the old
         result for the new code. That is the price of the alternative: hashing a
@@ -95,24 +101,9 @@ class Runner[T]:
         if not isinstance(node, GateNode):
             return Result("error", State(data), gate.node, None, f"{gate.node!r} is not a gate")
 
-        delta = node.apply(data, answer)
-        # The delta goes into the entry, not an empty one: the journal is the
-        # only source a replay has, so an entry without the answer's effect
-        # would not postpone that information but destroy it.
-        # `seconds=0.0` because this entry records an answer that arrived from
-        # outside the process, not a step this run executed and timed; an entry
-        # that represents no measured execution carries no measured duration.
-        # The hash is taken over the data the gate saw, so this entry shares the
-        # key of the pause entry that a replay looks the gate up by.
-        self._write(node, State(data), delta, "ok", 0, 0.0, f"answered: {answer}")
-        state = State(data).merged(delta)
-        try:
-            name = self._graph.next_name(gate.node, state.data)
-        except GraphError as error:
-            return Result("error", state, gate.node, None, str(error))
-        return self._walk(state, name)
+        return self._walk(State(data), self._graph.start, _Answer(gate.node, answer))
 
-    def _walk(self, state: State[T], name: str) -> Result[T]:
+    def _walk(self, state: State[T], name: str, answer: _Answer | None = None) -> Result[T]:
         while name != END:
             node = self._graph.node(name)
             state = state.with_visit(name)
@@ -126,8 +117,14 @@ class Runner[T]:
                 self._write(node, state, {}, "error", 0, 0.0, str(error))
                 return Result("error", state, name, None, str(error))
 
+            # The answer is consumed by the node it was given for, once. A
+            # gate on a cycle would otherwise apply the same answer every pass.
+            pending = answer.text if answer is not None and answer.node == name else None
+            if pending is not None:
+                answer = None
+
             try:
-                outcome = self._step(node, state)
+                outcome = self._step(node, state, pending)
             except ReplayGapError as error:
                 return Result("error", state, name, None, str(error))
             if outcome.paused:
@@ -146,7 +143,7 @@ class Runner[T]:
                 return Result("error", state, name, None, str(error))
         return Result("done", state, None, None, None)
 
-    def _step(self, node: Node[T], state: State[T]) -> _Step[T]:
+    def _step(self, node: Node[T], state: State[T], answer: str | None = None) -> _Step[T]:
         # The most recent *successful* entry, not the most recent one: both the
         # visit-limit path and a gate's pause write a non-ok entry under the key
         # of an entry that succeeded, and taking the latest match would re-run a
@@ -161,6 +158,9 @@ class Runner[T]:
             # on_error edge, and taking a fallback the original run never took
             # would make a broken replay look like a run that handled a failure.
             raise ReplayGapError(f"node {node.name!r} is not in the journal")
+
+        if answer is not None and isinstance(node, GateNode):
+            return self._answered(node, state, answer)
 
         started = self._clock()
         try:
@@ -180,6 +180,20 @@ class Runner[T]:
             return _Step(state, paused=True, question=question)
 
         self._write(node, state, delta, "ok", tokens, seconds, None)
+        return _Step(state.merged(delta))
+
+    def _answered(self, node: GateNode[T], state: State[T], answer: str) -> _Step[T]:
+        """Apply a gate's answer against the state the gate paused on."""
+        delta = node.apply(state.data, answer)
+        # The delta goes into the entry, not an empty one: the journal is the
+        # only source a replay has, so an entry without the answer's effect
+        # would not postpone that information but destroy it.
+        # `seconds=0.0` because this entry records an answer that arrived from
+        # outside the process, not a step this run executed and timed; an entry
+        # that represents no measured execution carries no measured duration.
+        # The hash is taken over the data the gate saw, so this entry shares the
+        # key of the pause entry that a replay looks the gate up by.
+        self._write(node, state, delta, "ok", 0, 0.0, f"answered: {answer}")
         return _Step(state.merged(delta))
 
     def _invoke(self, node: Node[T], state: State[T]) -> tuple[Delta, int]:
@@ -243,6 +257,14 @@ class Runner[T]:
                 detail=detail,
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _Answer:
+    """An answer waiting for the gate it belongs to, carried through the walk."""
+
+    node: str
+    text: str
 
 
 @dataclass(frozen=True, slots=True)
