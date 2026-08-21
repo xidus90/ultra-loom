@@ -313,3 +313,56 @@ def _asking_flow() -> Graph[Data]:
     )
     graph.edge("review", END)
     return graph
+
+
+def test_a_resume_without_an_answer_does_not_grow_the_journal(tmp_path: Path) -> None:
+    """Looking at what a gate asks must not change what the journal says.
+
+    The pause is already recorded under the gate's input hash. A second entry
+    with the same key records nothing new, and it makes the journal grow once
+    per look — a run that was checked on ten times would read as ten pauses.
+    """
+    journal = Journal(tmp_path / "r.jsonl")
+
+    graph: Graph[Data] = Graph("approve", start="gate")
+    graph.add(
+        GateNode(
+            "gate",
+            question=lambda _d: "ok to proceed?",
+            apply=lambda d, answer: {"steps": d.steps + answer},
+        )
+    )
+    graph.edge("gate", END)
+
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+    after_pause = journal.entries()
+
+    Runner(graph, journal, clock=ticking_clock()).resume(Data())
+    Runner(graph, journal, clock=ticking_clock()).resume(Data())
+
+    assert journal.entries() == after_pause, "a look at the open question writes nothing"
+
+
+def test_a_gate_on_a_cycle_still_records_each_pass_it_pauses_on(tmp_path: Path) -> None:
+    """The pause is keyed by the visit, so a second pass is a second entry."""
+    journal = Journal(tmp_path / "r.jsonl")
+
+    graph: Graph[Data] = Graph("approve", start="gate")
+    graph.add(
+        GateNode(
+            "gate",
+            question=lambda d: f"proceed from {d.steps!r}?",
+            apply=lambda d, answer: {"steps": d.steps + answer},
+            max_visits=3,
+        )
+    )
+    # A back edge, so the gate is asked once per pass.
+    graph.edge("gate", "gate", when=lambda d: len(d.steps) < 2)
+    graph.edge("gate", END)
+
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+    # The answer advances the payload, so the next pass hashes to a new key.
+    Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="a")
+
+    paused = [entry for entry in journal.entries() if entry.outcome == "paused"]
+    assert len({entry.input_hash for entry in paused}) == len(paused) > 1

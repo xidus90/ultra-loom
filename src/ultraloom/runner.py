@@ -229,7 +229,17 @@ class Runner[T]:
         seconds = self._clock() - started
         if isinstance(node, GateNode):
             question = node.question(state.data)
-            self._write(node, state, {}, "paused", 0, seconds, question)
+            # Only when this very visit is not already recorded as paused. A
+            # resume without an answer walks back to here, and a second entry
+            # under the same key records nothing the first does not -- while a
+            # run someone checked on ten times would read as ten pauses. The
+            # key is the visit, so a gate on a cycle still writes one entry per
+            # pass: each pass hashes a payload the pass before it advanced.
+            waiting = self._journal.lookup(
+                node.name, input_hash(node.name, state.data), outcome="paused"
+            )
+            if waiting is None:
+                self._write(node, state, {}, "paused", 0, seconds, question)
             return _Step(state, paused=True, question=question)
 
         self._write(node, state, delta, "ok", tokens, seconds, None)
