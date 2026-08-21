@@ -381,3 +381,32 @@ def test_a_failed_measuring_step_fails_the_check_and_stops_it(
     assert "the tests failed" in result.output
     assert not ran.exists(), "a report on data nobody measured is worse than no report"
 
+
+def test_a_relative_command_that_cannot_be_found_says_why(tmp_path: Path) -> None:
+    """The obvious config entry for a project-local venv, and it cannot work.
+
+    The OS resolves a command against the calling process and PATH, never
+    against `cwd`, so a path that is correct from the project root still fails
+    -- and a bare "file not found" sends its author looking for a typo.
+    """
+    python_project(tmp_path)
+    verify_config(tmp_path, test=".venv/bin/pytest -q")
+
+    result = run_check("test", load_config(tmp_path))
+
+    assert not result.ok
+    assert "relative path" in result.output
+    assert "uv run" in result.output
+
+
+def test_a_bare_command_that_is_not_installed_does_not_get_the_relative_path_hint(
+    tmp_path: Path,
+) -> None:
+    """`no-such-tool` is looked up on PATH, so the hint would misdiagnose it."""
+    python_project(tmp_path)
+    verify_config(tmp_path, test="ultraloom-no-such-tool --version")
+
+    result = run_check("test", load_config(tmp_path))
+
+    assert not result.ok
+    assert "relative path" not in result.output

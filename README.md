@@ -93,7 +93,16 @@ class Data:
 
 flow: Graph[Data] = Graph("greet", start="write")
 flow.add(CodeNode("write", lambda d: {"note": "hello"}))
-flow.edge("write", END)
+flow.add(
+    GateNode(
+        "approve",
+        question=lambda d: f"send {d.note!r}?",
+        apply=lambda d, answer: {"note": answer},
+    )
+)
+flow.edge("write", "approve")
+# Every node needs a way out, including the last one: it leaves towards END.
+flow.edge("approve", END)
 
 initial = Data()
 ```

@@ -163,6 +163,16 @@ def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> Check
         # shlex.join rather than argv[0]: the handler must survive any argv,
         # including one this module never expected to build.
         detail = f"could not run {shlex.join(argv)!r}: {error}"
+        if not Path(argv[0]).is_absolute() and len(Path(argv[0]).parts) > 1:
+            # A relative path to an executable is not resolved against `cwd`:
+            # the OS looks it up against the *calling* process's directory and
+            # along PATH. `.venv/bin/pytest` therefore fails here however
+            # correct it looks from the project root -- which is nobody's guess
+            # to make from a bare "file not found".
+            detail += (
+                f"\nhint: {argv[0]!r} is a relative path, and a command is not looked up "
+                f"relative to the project root. Use `uv run` (or an absolute path)."
+            )
         return CheckResult(kind, False, detail, source)
     output = completed.stdout + completed.stderr
     return CheckResult(kind, completed.returncode == 0, output, source)
