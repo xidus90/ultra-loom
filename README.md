@@ -21,6 +21,13 @@ ultraloom does not enforce it — your coverage tool's own configuration decides
 whether the run passes. A line reading "ok" for a threshold nobody checked is
 the one failure in this system that actually does damage.
 
+In Python, `check coverage` measures before it reports: `coverage report` only
+reads a file that some earlier run has to have written. That means the test
+suite runs twice in `check all`, once under `test` and once under `coverage`.
+The alternative would be to make the two checks depend on each other, and they
+run at the same time precisely because they do not. A project that minds the
+second run puts its own script at `.ultraloom/checks/coverage.py`.
+
 A check is resolved in this order, and ultraloom never guesses beyond it:
 
 1. `[verify].<kind>` in `.ultraloom/config.toml`

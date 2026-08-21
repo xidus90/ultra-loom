@@ -308,3 +308,76 @@ def test_a_directory_that_matches_the_script_glob_is_not_a_script(tmp_path: Path
     (tmp_path / ".ultraloom" / "checks" / "lint.d").mkdir(parents=True)
 
     assert resolve_check("lint", load_config(tmp_path)).source == "preset"
+
+
+def test_the_python_coverage_preset_measures_before_it_reports(tmp_path: Path) -> None:
+    """`coverage report` reads a file it does not create.
+
+    Without a measuring step the preset is red in every project that has not
+    run coverage by some other route -- and `run_all` cannot supply one, since
+    the four checks run at the same time and `test` measures nothing.
+    """
+    python_project(tmp_path)
+
+    command = resolve_check("coverage", load_config(tmp_path))
+
+    assert command.measure == ("uv", "run", "coverage", "run", "-m", "pytest")
+    assert command.argv == ("uv", "run", "coverage", "report")
+
+
+def test_the_exec_prefix_is_put_in_front_of_the_measuring_step_too(tmp_path: Path) -> None:
+    """A check that runs through a boundary runs *both* its steps through it."""
+    python_project(tmp_path)
+    write_config(tmp_path, '[exec]\nprefix = "docker compose exec -T app"\n')
+
+    command = resolve_check("coverage", load_config(tmp_path))
+
+    assert command.measure[:5] == ("docker", "compose", "exec", "-T", "app")
+    assert command.argv[:5] == ("docker", "compose", "exec", "-T", "app")
+
+
+def test_a_measuring_step_runs_before_the_check_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ultraloom.checks import PRESETS
+
+    python_project(tmp_path)
+    marker = tmp_path / "measured.txt"
+    monkeypatch.setitem(
+        PRESETS["pyproject.toml"],
+        "coverage",
+        (
+            tuple(shlex.split(py(f"open({str(marker)!r}, 'w').write('yes')"))),
+            tuple(shlex.split(py("import sys; print(open('measured.txt').read())"))),
+        ),
+    )
+
+    result = run_check("coverage", load_config(tmp_path))
+
+    assert result.ok
+    assert "yes" in result.output, "the report's output is what the caller sees"
+
+
+def test_a_failed_measuring_step_fails_the_check_and_stops_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The report would otherwise run on stale data and call it green."""
+    from ultraloom.checks import PRESETS
+
+    python_project(tmp_path)
+    ran = tmp_path / "reported.txt"
+    monkeypatch.setitem(
+        PRESETS["pyproject.toml"],
+        "coverage",
+        (
+            tuple(shlex.split(py("import sys; print('the tests failed'); sys.exit(1)"))),
+            tuple(shlex.split(py(f"open({str(ran)!r}, 'w').write('x')"))),
+        ),
+    )
+
+    result = run_check("coverage", load_config(tmp_path))
+
+    assert not result.ok
+    assert "the tests failed" in result.output
+    assert not ran.exists(), "a report on data nobody measured is worse than no report"
+

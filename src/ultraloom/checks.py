@@ -20,22 +20,37 @@ from ultraloom.config import Config
 KINDS = ("lint", "types", "test", "coverage")
 
 # marker file -> check kind -> the tool's argv
-PRESETS: Mapping[str, Mapping[str, tuple[str, ...]]] = {
+# A preset is a *sequence* of commands, because not every tool measures what
+# it reports. The last one is the check; anything before it prepares the data
+# the check reads. Only Python's coverage needs the distinction today, and it
+# is spelled out for every preset rather than special-cased at the one place
+# that has it.
+PRESETS: Mapping[str, Mapping[str, tuple[tuple[str, ...], ...]]] = {
     "pyproject.toml": {
-        "lint": ("uvx", "ruff", "check", "."),
-        "types": ("uvx", "mypy"),
-        "test": ("uv", "run", "pytest"),
-        "coverage": ("uv", "run", "coverage", "report"),
+        "lint": (("uvx", "ruff", "check", "."),),
+        "types": (("uvx", "mypy"),),
+        "test": (("uv", "run", "pytest"),),
+        # Two steps: `coverage report` reads .coverage and never writes it. A
+        # single-step preset is therefore red in every project that has not
+        # measured by some other route -- and `run_all` cannot supply one,
+        # because the four checks run at the same time and `test` measures
+        # nothing. The tests run twice, once here and once under `test`; that
+        # is the price of checks that stay independent of each other (spec 9.4).
+        "coverage": (
+            ("uv", "run", "coverage", "run", "-m", "pytest"),
+            ("uv", "run", "coverage", "report"),
+        ),
     },
     "package.json": {
-        "lint": ("eslint", "."),
-        "types": ("tsc", "--noEmit"),
-        "test": ("vitest", "run"),
-        "coverage": ("vitest", "run", "--coverage"),
+        "lint": (("eslint", "."),),
+        "types": (("tsc", "--noEmit"),),
+        "test": (("vitest", "run"),),
+        # One step: vitest measures and reports in the same run.
+        "coverage": (("vitest", "run", "--coverage"),),
     },
     "project.godot": {
-        "lint": ("uvx", "gdlint", "."),
-        "test": ("godot", "--headless", "--quit"),
+        "lint": (("uvx", "gdlint", "."),),
+        "test": (("godot", "--headless", "--quit"),),
     },
 }
 
@@ -52,11 +67,17 @@ class CheckUnavailableError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Command:
-    """A resolved check: what to run, and where the decision came from."""
+    """A resolved check: what to run, and where the decision came from.
+
+    `measure` is the step that prepares what `argv` then reads. It is empty for
+    every check that measures and reports in one go, which is all of them
+    except Python's coverage.
+    """
 
     kind: str
     argv: tuple[str, ...]
     source: str
+    measure: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,15 +123,35 @@ def resolve_check(kind: str, config: Config) -> Command:
         raise CheckUnavailableError(
             f"{_LANGUAGE_NAMES[marker]} has no {kind} tool — a known limitation, not a passed check"
         )
-    return Command(kind, config.exec_prefix + preset[kind], "preset")
+    steps = tuple(config.exec_prefix + step for step in preset[kind])
+    # A preset with more than two steps has no meaning here: the last one is
+    # the check, the one before it prepares its data, and a third would have
+    # nowhere to be reported from.
+    if len(steps) > 2:  # pragma: no cover  # guards the preset table, not any input
+        raise CheckUnavailableError(f"the {kind!r} preset has more than two steps")
+    return Command(kind, steps[-1], "preset", measure=steps[0] if len(steps) == 2 else ())
 
 
 def run_check(kind: str, config: Config) -> CheckResult:
-    """Run the check and report what it said."""
+    """Run the check and report what it said.
+
+    A check with a measuring step runs that first. Its failure is the check's
+    failure and stops the check there: a report over data nobody measured --
+    or over data left behind by an earlier run -- would be green for reasons
+    that have nothing to do with this one.
+    """
     command = resolve_check(kind, config)
+    if command.measure:
+        measured = _run(command.measure, kind, config, command.source)
+        if not measured.ok:
+            return measured
+    return _run(command.argv, kind, config, command.source)
+
+
+def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> CheckResult:
     try:
         completed = subprocess.run(
-            command.argv,
+            argv,
             cwd=config.root,
             capture_output=True,
             text=True,
@@ -121,10 +162,10 @@ def run_check(kind: str, config: Config) -> CheckResult:
         # traceback that takes the whole chain down with it.
         # shlex.join rather than argv[0]: the handler must survive any argv,
         # including one this module never expected to build.
-        detail = f"could not run {shlex.join(command.argv)!r}: {error}"
-        return CheckResult(kind, False, detail, command.source)
+        detail = f"could not run {shlex.join(argv)!r}: {error}"
+        return CheckResult(kind, False, detail, source)
     output = completed.stdout + completed.stderr
-    return CheckResult(kind, completed.returncode == 0, output, command.source)
+    return CheckResult(kind, completed.returncode == 0, output, source)
 
 
 def run_all(config: Config) -> tuple[CheckResult, ...]:
