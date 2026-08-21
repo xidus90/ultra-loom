@@ -289,10 +289,17 @@ def test_run_all_actually_overlaps_the_waiting(tmp_path: Path) -> None:
 def test_an_empty_configured_command_is_refused_even_with_an_exec_prefix(tmp_path: Path) -> None:
     """Otherwise the bare prefix runs, and a prefix that exits 0 reports green."""
     python_project(tmp_path)
-    write_config(tmp_path, '[verify]\nlint = ""\nprefix = "docker compose exec -T web"\n')
+    write_config(
+        tmp_path,
+        '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = ""\n',
+    )
+    config = load_config(tmp_path)
+    # Without this the test proves nothing: with an empty prefix the argv is
+    # empty either way, and the guard's position stops being observable.
+    assert config.exec_prefix, "the prefix must reach the resolver for this to be a test"
 
     with pytest.raises(CheckUnavailableError, match="empty command"):
-        resolve_check("lint", load_config(tmp_path))
+        resolve_check("lint", config)
 
 
 def test_a_directory_that_matches_the_script_glob_is_not_a_script(tmp_path: Path) -> None:

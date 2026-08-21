@@ -334,9 +334,8 @@ def test_replay_mode_refuses_an_answer_in_the_runner(tmp_path: Path) -> None:
     assert (tmp_path / "r.jsonl").read_text(encoding="utf-8") == before
 
 
-def test_a_gate_on_a_cycle_consumes_its_answer_only_once(tmp_path: Path) -> None:
-    """A second pass must pause again rather than reuse the first pass's answer."""
-    journal = Journal(tmp_path / "r.jsonl")
+def looping_gate_flow() -> Graph[Data]:
+    """A gate on a cycle, so the same node pauses once per pass."""
     graph: Graph[Data] = Graph("looping", start="ask")
     graph.add(
         GateNode(
@@ -349,10 +348,51 @@ def test_a_gate_on_a_cycle_consumes_its_answer_only_once(tmp_path: Path) -> None
     graph.add(CodeNode("step", lambda d: {"note": d.note + "."}, max_visits=3))
     graph.edge("ask", "step")
     graph.edge("step", "ask")
+    return graph
+
+
+def test_a_gate_visited_twice_can_be_answered_twice(tmp_path: Path) -> None:
+    """The answer belongs to the pause that is open, not to the node's name.
+
+    Keyed on the name, the second answer was spent on the first pass -- already
+    answered, so the journal cache short-circuited before the answer was read --
+    and vanished: the same question came back with nothing journalled.
+    """
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = looping_gate_flow()
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+    Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="y")
+
+    result = Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="z")
+
+    assert result.status == "paused"
+    assert result.state.data.note == "y.z.", "the second answer must reach the open pause"
+    assert result.question == "again? y.z."
+
+
+def test_a_second_answer_is_journalled_under_the_second_pause(tmp_path: Path) -> None:
+    """A dropped answer left two identical pause entries and no record of it."""
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = looping_gate_flow()
+    Runner(graph, journal, clock=ticking_clock()).run(Data())
+    Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="y")
+
+    Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="z")
+
+    answered = [entry for entry in journal.entries() if entry.detail == "answered: z"]
+    assert len(answered) == 1
+    assert answered[0].delta == {"note": "y.z"}
+    assert answered[0].input_hash == input_hash("ask", Data(note="y."))
+
+
+def test_an_answer_is_applied_to_exactly_one_pass(tmp_path: Path) -> None:
+    """One answer must not carry the loop further than the pause it belongs to."""
+    journal = Journal(tmp_path / "r.jsonl")
+    graph = looping_gate_flow()
     Runner(graph, journal, clock=ticking_clock()).run(Data())
 
     result = Runner(graph, journal, clock=ticking_clock()).resume(Data(), answer="y")
 
     assert result.status == "paused"
     assert result.state.data.note == "y."
-    assert result.question == "again? y."
+    assert [entry.detail for entry in journal.entries()].count("answered: y") == 1

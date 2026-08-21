@@ -42,7 +42,14 @@ def list_flows(root: Path) -> tuple[str, ...]:
     directory = root / FLOW_DIR
     if not directory.is_dir():
         return ()
-    names = (path.stem for path in directory.glob("*.py") if path.stem != "__init__")
+    # Filtered the way find_flow filters: a name that is not an identifier
+    # cannot be loaded, so listing it would advertise a flow that is refused
+    # the moment anyone asks for it.
+    names = (
+        path.stem
+        for path in directory.glob("*.py")
+        if path.stem != "__init__" and path.stem.isidentifier()
+    )
     return tuple(sorted(names))
 
 
@@ -93,4 +100,9 @@ def find_flow(name: str, root: Path) -> LoadedFlow:
     initial = getattr(module, "initial", _ABSENT)
     if initial is _ABSENT:
         raise FlowLoadError(f"{path}: defines no module-level `initial` state")
+    # `flow` has a type check below the sentinel; `initial` has none, and a
+    # payload of None would only surface inside the first node as whatever
+    # AttributeError that node happens to raise.
+    if initial is None:
+        raise FlowLoadError(f"{path}: `initial` must be the flow's starting state, not None")
     return LoadedFlow(flow, initial)

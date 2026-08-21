@@ -143,3 +143,21 @@ def test_a_flow_bound_to_none_is_reported_as_the_wrong_type(tmp_path: Path) -> N
 
     with pytest.raises(FlowLoadError, match="`flow` must be a Graph, got NoneType"):
         find_flow("empty", tmp_path)
+
+
+def test_an_initial_state_bound_to_none_is_refused(tmp_path: Path) -> None:
+    """Otherwise it surfaces inside the first node as an incidental AttributeError."""
+    write_flow(tmp_path, "nothing", A_FLOW.replace("initial = Data()", "initial = None"))
+
+    with pytest.raises(FlowLoadError, match="`initial` must be the flow"):
+        find_flow("nothing", tmp_path)
+
+
+def test_the_listing_does_not_advertise_a_name_find_flow_refuses(tmp_path: Path) -> None:
+    """`my-flow.py` would appear in an `available:` line and then be refused."""
+    directory = tmp_path / ".ultraloom" / "flows"
+    directory.mkdir(parents=True)
+    (directory / "good.py").write_text("", encoding="utf-8")
+    (directory / "my-flow.py").write_text("", encoding="utf-8")
+
+    assert list_flows(tmp_path) == ("good",)

@@ -129,7 +129,7 @@ class Runner[T]:
         if not isinstance(node, GateNode):
             return Result("error", State(data), gate.node, None, f"{gate.node!r} is not a gate")
 
-        return self._walk(State(data), self._graph.start, _Answer(gate.node, answer))
+        return self._walk(State(data), self._graph.start, _Answer(gate.input_hash, answer))
 
     def _walk(self, state: State[T], name: str, answer: _Answer | None = None) -> Result[T]:
         while name != END:
@@ -146,9 +146,16 @@ class Runner[T]:
                 self._write(node, state, {}, "error", 0, 0.0, detail)
                 return Result("error", state, name, None, detail)
 
-            # The answer is consumed by the node it was given for, once. A
-            # gate on a cycle would otherwise apply the same answer every pass.
-            pending = answer.text if answer is not None and answer.node == name else None
+            # Matched on the pause's own key, not on the node's name: a gate on
+            # a cycle pauses once per pass, and an earlier pass is already
+            # answered in the journal. Keying on the name would spend the answer
+            # there -- where the cache short-circuits before it is even read --
+            # and the open pause would be asked again with nothing recorded.
+            pending = (
+                answer.text
+                if answer is not None and answer.key == input_hash(name, state.data)
+                else None
+            )
             if pending is not None:
                 answer = None
 
@@ -307,9 +314,12 @@ class Runner[T]:
 
 @dataclass(frozen=True, slots=True)
 class _Answer:
-    """An answer waiting for the gate it belongs to, carried through the walk."""
+    """An answer waiting for the pause it belongs to, carried through the walk.
 
-    node: str
+    `key` is the paused entry's `input_hash`, which names one visit of one node.
+    """
+
+    key: str
     text: str
 
 

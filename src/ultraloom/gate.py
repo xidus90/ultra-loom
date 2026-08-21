@@ -13,10 +13,17 @@ from ultraloom.journal import Journal
 
 @dataclass(frozen=True, slots=True)
 class PendingGate:
-    """A gate that stopped a run and is waiting for an answer."""
+    """A gate that stopped a run and is waiting for an answer.
+
+    `input_hash` identifies the *visit*, not the node: a gate on a cycle pauses
+    once per pass, and an answer addressed only to the node name would be spent
+    on the first pass -- which the journal has already answered -- instead of on
+    the pause that is actually open.
+    """
 
     node: str
     question: str
+    input_hash: str
 
 
 def pending_gate(journal: Journal) -> PendingGate | None:
@@ -27,4 +34,4 @@ def pending_gate(journal: Journal) -> PendingGate | None:
     last = entries[-1]
     if last.outcome != "paused" or last.detail is None:
         return None
-    return PendingGate(last.node, last.detail)
+    return PendingGate(last.node, last.detail, last.input_hash)
