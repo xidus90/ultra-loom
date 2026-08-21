@@ -23,6 +23,8 @@ class Data:
 flow: Graph[Data] = Graph("smoke", start="mark")
 flow.add(CodeNode("mark", lambda _d: {"done": True}))
 flow.edge("mark", END)
+
+initial = Data()
 '''
 
 
@@ -35,7 +37,7 @@ def write_flow(root: Path, name: str, body: str = A_FLOW) -> None:
 def test_a_flow_is_found_by_file_name(tmp_path: Path) -> None:
     write_flow(tmp_path, "smoke")
 
-    assert find_flow("smoke", tmp_path).name == "smoke"
+    assert find_flow("smoke", tmp_path).graph.name == "smoke"
 
 
 def test_flows_are_listed_alphabetically(tmp_path: Path) -> None:
@@ -96,8 +98,8 @@ def test_two_flows_with_the_same_module_name_do_not_collide(tmp_path: Path) -> N
     write_flow(tmp_path, "smoke")
     write_flow(other, "smoke", A_FLOW.replace('Graph("smoke"', 'Graph("other-smoke"'))
 
-    assert find_flow("smoke", tmp_path).name == "smoke"
-    assert find_flow("smoke", other).name == "other-smoke"
+    assert find_flow("smoke", tmp_path).graph.name == "smoke"
+    assert find_flow("smoke", other).graph.name == "other-smoke"
 
 
 def test_a_loaded_flow_leaves_no_module_behind(tmp_path: Path) -> None:
@@ -108,3 +110,19 @@ def test_a_loaded_flow_leaves_no_module_behind(tmp_path: Path) -> None:
     find_flow("smoke", tmp_path)
 
     assert set(sys.modules) - before == set()
+
+
+def test_the_initial_state_comes_back_with_the_graph(tmp_path: Path) -> None:
+    write_flow(tmp_path, "smoke")
+
+    loaded = find_flow("smoke", tmp_path)
+
+    assert loaded.initial.__class__.__name__ == "Data"
+
+
+def test_a_module_without_an_initial_state_is_refused(tmp_path: Path) -> None:
+    body = A_FLOW.replace("initial = Data()", "")
+    write_flow(tmp_path, "noinit", body)
+
+    with pytest.raises(FlowLoadError, match="initial"):
+        find_flow("noinit", tmp_path)

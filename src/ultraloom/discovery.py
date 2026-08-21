@@ -8,11 +8,20 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+from dataclasses import dataclass
 from pathlib import Path
 
 from ultraloom.graph import Graph
 
 FLOW_DIR = ".ultraloom/flows"
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedFlow:
+    """A flow's graph together with the state it starts from."""
+
+    graph: Graph[object]
+    initial: object
 
 
 class FlowNotFoundError(LookupError):
@@ -32,8 +41,8 @@ def list_flows(root: Path) -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
-def find_flow(name: str, root: Path) -> Graph[object]:
-    """Load one flow by name."""
+def find_flow(name: str, root: Path) -> LoadedFlow:
+    """Load one flow by name, with the state it starts from."""
     path = root / FLOW_DIR / f"{name}.py"
     if not path.is_file():
         available = ", ".join(list_flows(root)) or "none"
@@ -63,4 +72,10 @@ def find_flow(name: str, root: Path) -> Graph[object]:
         raise FlowLoadError(f"{path}: defines no module-level `flow`")
     if not isinstance(flow, Graph):
         raise FlowLoadError(f"{path}: `flow` must be a Graph, got {type(flow).__name__}")
-    return flow
+
+    # An executor needs both halves: a graph says what to do, the initial state
+    # says what it starts from, and only the flow's own module knows the latter.
+    initial = getattr(module, "initial", None)
+    if initial is None:
+        raise FlowLoadError(f"{path}: defines no module-level `initial` state")
+    return LoadedFlow(flow, initial)
