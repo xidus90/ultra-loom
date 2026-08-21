@@ -285,15 +285,19 @@ def test_check_reports_an_unresolvable_check_as_a_failure(
     assert "could not tell" in capsys.readouterr().err
 
 
-def test_check_honours_the_coverage_threshold_flag(
+def test_the_coverage_threshold_is_reported_as_configuration_not_as_a_verdict(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Nothing folds the threshold into the command, so no verdict may carry it."""
     write_check_script(tmp_path, "coverage", "pass\n")
 
     code = main(["check", "coverage", "--threshold", "90", "--root", str(tmp_path)])
 
+    lines = capsys.readouterr().out.splitlines()
     assert code == 0
-    assert "90" in capsys.readouterr().out
+    assert lines[0] == "coverage: ok [script]", "a verdict naming the threshold would claim it"
+    assert "90" in lines[1]
+    assert "does not enforce" in lines[1]
 
 
 def test_a_coverage_command_under_verify_is_explained_not_just_refused(
