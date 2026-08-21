@@ -1,0 +1,12 @@
+# Work traces of plan execution: intermediate states of commits that follow.
+docs/.superpowers/sdd/
+# The sdd-workspace script of the plugin still writes here; sweep to docs/.
+/.superpowers/
+
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

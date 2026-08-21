@@ -1,0 +1,376 @@
+# ultraloom — Kern-Design
+
+**Stand:** 2026-08-21 · **Status:** zur Freigabe · **Zielgruppe:** intern (Entscheidungsgrundlage)
+
+Dieses Dokument ist der Vertrag für Teilprojekt 1. Taucht beim Bauen eine
+Streitfrage auf, gilt, was hier steht — nicht die Erinnerung und nicht die
+Auslegung durch ein Modell.
+
+---
+
+## 1. Zweck und zentrale Frage
+
+**Wie werden Entwicklungsabläufe, die heute an Disziplin hängen, zu Mechanik —
+ohne dass die Mechanik ihre eigene Verlässlichkeit verliert?**
+
+ultraloom ist ein Harness, der Abläufe als Graph ausführt: Knoten sind Schritte,
+Kanten sind Übergänge mit Bedingungen. Er läuft unbeaufsichtigt, hält an
+definierten Punkten für eine menschliche Entscheidung an, protokolliert jeden
+Schritt maschinenlesbar und nimmt einen abgebrochenen Lauf wieder auf.
+
+Er ersetzt Claude Code nicht. Interaktive Arbeit bleibt interaktiv. ultraloom ist
+für Abläufe, die wiederholbar, auswertbar oder unbeaufsichtigt laufen sollen.
+
+---
+
+## 2. Der Nutzen, genau benannt
+
+Claude Code bringt Skills, Hooks, Subagenten und Worktrees schon mit. Was
+ultraloom hinzufügt, sind genau vier Dinge — und nur diese vier rechtfertigen
+das Projekt:
+
+| Fähigkeit | Bedeutet |
+|---|---|
+| Unbeaufsichtigter Lauf | Ein Ablauf startet und läuft durch, ohne dass jemand zusieht |
+| Deterministische Kanten | Der nächste Schritt folgt aus Code, nicht aus einer Modellentscheidung |
+| Dauerhafter Zustand | Ein Abbruch verliert nichts; der Lauf setzt am letzten Knoten fort |
+| Maschinenlesbares Protokoll | Jeder Lauf ist auswertbar: Kosten, Dauer, Weg, Ausgang |
+
+Fällt einer dieser vier Punkte bei einem geplanten Ablauf weg, ist der Ablauf in
+Claude Code besser aufgehoben als in ultraloom.
+
+---
+
+## 3. Grundsätze
+
+1. **Deterministisch, wo es geht.** Ein Modell läuft nur dort, wo Verstehen nötig
+   ist. Alles andere ist normaler Code. Die Knotenart macht das sichtbar.
+2. **Fallbacks sind Kanten, keine Automatik.** Alles, was der Kern hinter dem
+   Rücken des Nutzers nachbessert, macht das Journal als Auswertungsgrundlage
+   wertlos.
+3. **ultraloom kennt kein Projekt; jedes Projekt darf ultraloom kennen.** Die
+   Abhängigkeit zeigt in eine Richtung.
+4. **Ein fehlendes Prüfwerkzeug ist ein Fehler, kein Grund zum Überspringen.**
+   Ein Lauf, der grün meldet, weil er nichts geprüft hat, ist der einzige Fehler
+   in diesem System, der wirklich schadet — er sieht wie Erfolg aus.
+5. **Der Mensch entscheidet an den Punkten, die er dafür bestimmt hat.** Ein
+   Freigabepunkt ist Teil des Ablaufs, keine Ausnahmebehandlung.
+6. **Ohne Netz vollständig prüfbar.** Der Kern ist gegen eine Modellattrappe
+   testbar; sonst ist die Coverage-Regel nicht erfüllbar.
+
+---
+
+## 4. Umfang von Teilprojekt 1
+
+**Der Kern kann:** einen Graphen validieren und ausführen, Zustand halten und
+fortschreiben, an Freigabepunkten anhalten, jeden Schritt journalisieren, einen
+Lauf wiederaufnehmen und aus dem Journal wiedergeben, Werkzeugprofile
+durchsetzen, Prüfwerkzeuge auflösen.
+
+**Der Kern kann ausdrücklich nicht** und soll es auch nicht:
+
+- Fachlogik jeder Art. Ein Knoten, der weiß, was ein OKF-Concept ist, gehört in
+  das Projekt, dem OKF gehört.
+- Werkzeuge bauen. Datei, Bash, Suche und MCP kommen vom Claude Agent SDK.
+- Nebenläufigkeit über mehrere Knoten hinweg. Kanten sind sequentiell mit
+  Verzweigung und Rückkanten. Fan-out kommt, wenn ein Ablauf es fordert.
+- Scheduler, Weboberfläche, verteilte Ausführung.
+
+Die vier Abläufe, für die ultraloom gebaut wird — Spec→Code→Wiki-Kreis,
+Prüfschleife bis grün, Wissenspflege im Wiki, Pläne autonom abarbeiten — sind
+Teilprojekte 2 bis 5. Jedes bekommt eine eigene Spec und einen eigenen Plan.
+
+---
+
+## 5. Architektur
+
+### 5.1 Grundlage: Claude Agent SDK
+
+Ein `AgentNode` ist ein Aufruf ins Claude Agent SDK (`claude-agent-sdk`, Python).
+Damit kommen Read/Write/Edit/Bash/Glob/Grep, Berechtigungen, Sessions, Hooks,
+Subagenten und MCP-Server als Konfigurationsfeld — nichts davon wird
+nachgebaut.
+
+Zwei Folgen, die bewusst in Kauf genommen werden: ultraloom hängt am Tempo einer
+Fremdbibliothek, und ein Knoten ist innen eine Blackbox — sichtbar ist sein
+Ergebnis, nicht jeder Zwischenschritt. Beides ist der Preis dafür, die
+Werkzeugschicht nicht selbst zu warten.
+
+Die Alternative für einzelne, eng geschnittene Knoten bleibt offen: Messages API
+mit Tool Runner hinter derselben Schnittstelle. Ein Knoten muss nicht wissen, wie
+sein Nachbar mit dem Modell redet.
+
+### 5.2 Drei Knotenarten
+
+Die Unterscheidung ist die wichtigste Grenze im System. Dass ein Knoten seine Art
+nennen muss, macht auf einen Blick sichtbar, wie viel Modell in einem Ablauf
+steckt.
+
+| Art | Was es ist | Kosten |
+|---|---|---|
+| `CodeNode` | Eine Python-Funktion. Bericht lesen, Linter starten, Frontmatter prüfen | Keine Tokens, byteweise reproduzierbar |
+| `AgentNode` | Ein Modellaufruf mit Systemprompt, Werkzeugprofil, `effort`, erzwungenem Ausgabeschema | Tokens, nicht reproduzierbar |
+| `GateNode` | Hält an und legt eine Frage vor; der Lauf endet aufnahmefähig | Keine |
+
+Der Großteil jedes echten Ablaufs ist `CodeNode`.
+
+### 5.3 Zustand
+
+Ein unveränderliches, typisiertes Objekt. Ein Knoten bekommt es, gibt ein Delta
+zurück, der Ausführer setzt beides zu einem neuen Zustand zusammen. Kein Knoten
+schreibt in den Zustand hinein — sonst ist Wiederaufnahme unmöglich, weil der
+Stand vor dem Knoten nicht mehr bekannt ist.
+
+### 5.4 Journal
+
+Eine JSONL-Datei pro Lauf, eine Zeile pro Knoten: Name, Knotenart, Hash der
+Eingabe, Ergebnis, Werkzeugprofil, `effort`, Tokens, Dauer, Ausgang.
+
+Das Journal ist absichtlich **ein** Ding statt zwei: dasselbe Journal ist das
+Protokoll zum Auswerten und die einzige Quelle für die Wiederaufnahme. Bei einem
+Neustart wird es abgespielt — Knoten mit unverändertem Eingabe-Hash liefern ihr
+Ergebnis sofort aus dem Journal, der erste geänderte Knoten und alles danach
+läuft echt.
+
+### 5.5 Ausführer
+
+Die Schleife: nächsten Knoten nach Kantenbedingung wählen, ausführen, Journal
+schreiben, Zustand fortschreiben. Bei einem `GateNode` anhalten. Bei einem Fehler
+entweder die `on_error`-Kante oder Abbruch mit wiederaufnehmbarem Stand.
+
+### 5.6 Modell-Anschluss hinter einer Schnittstelle
+
+Der Modellzugang liegt hinter einem Port, mit einer Attrappe daneben — dasselbe
+Muster, das ultra-brain für die Suchschicht nutzt (`search/port.py` +
+`search/fake.py`). Der Kern ist damit vollständig ohne Modellaufruf und ohne Netz
+testbar.
+
+### 5.7 Dateischnitt
+
+```
+src/ultraloom/
+  graph.py            Knoten- und Kantentypen, Graphbau, Validierung
+  state.py            Zustandsobjekt und Delta-Zusammenführung
+  journal.py          JSONL schreiben, lesen, abspielen
+  runner.py           Ausführungsschleife
+  gate.py             Freigabepunkte
+  tools.py            Werkzeugprofile
+  checks.py           Auflösung der Prüfwerkzeuge
+  config.py           .ultraloom/config.toml lesen
+  discovery.py        Abläufe im Projekt finden
+  model/port.py       Modellschnittstelle
+  model/agent_sdk.py  Anbindung an das Claude Agent SDK
+  model/fake.py       Attrappe für Tests
+  cli.py              Kommandozeile
+  flows/              Mitgelieferte, allgemeine Abläufe
+```
+
+Jede Datei ein Zweck, jede mit Testmodul.
+
+---
+
+## 6. Wie ein Ablauf aussieht
+
+Abläufe sind Python, nicht YAML. Kanten tragen Bedingungen, und eine Bedingung in
+YAML ist entweder eine Mini-Sprache, die man erfindet und debuggt, oder
+eingebetteter Code ohne Typen.
+
+```python
+flow = Graph("verify-until-green")
+
+flow.add(CodeNode("run_tests", run_test_suite))
+flow.add(CodeNode("read_reports", read_coverage_and_lint))
+flow.add(AgentNode(
+    "repair",
+    prompt=REPAIR_PROMPT,
+    schema=RepairResult,
+    tools="edit",          # tool profile, not a raw allowlist
+    effort="high",
+    max_visits=5,          # the loop guard lives on the node
+))
+
+flow.edge("run_tests", "read_reports")
+flow.edge("read_reports", END,      when=lambda s: s.all_green)
+flow.edge("read_reports", "repair", when=lambda s: not s.all_green)
+flow.edge("repair", "run_tests")
+```
+
+Ein `AgentNode` gibt ein schemavalidiertes Objekt zurück, keinen Fließtext. Prosa
+aus einem Knoten in den nächsten zu geben ist die Stelle, an der solche Systeme
+unzuverlässig werden.
+
+---
+
+## 7. Wo was liegt
+
+Drei Ebenen, nach einer Faustregel getrennt: **Lässt sich der Unterschied
+zwischen zwei Projekten als Konfiguration ausdrücken, gehört der Ablauf nach
+ultraloom. Braucht er Wissen über die Welt des Projekts, gehört er ins Projekt.**
+
+| Ebene | Ort | Beispiel |
+|---|---|---|
+| Kern | ultraloom, als Bibliothek installiert | Ausführer, Journal, Knotenarten |
+| Allgemeine Abläufe | ultraloom, `flows/` | Prüfschleife bis grün |
+| Projektspezifische Abläufe | `<projekt>/.ultraloom/flows/*.py` | Spec→Code→Wiki-Kreis von space |
+
+Ein allgemeiner Ablauf holt sich das Projektspezifische aus der Konfiguration:
+
+```toml
+# <projekt>/.ultraloom/config.toml
+[verify]
+test     = ".tools/godot4-headless.cmd --headless -s test/run.gd"
+lint     = "uvx gdlint ."
+coverage = { report = "coverage-report/lcov.info", threshold = 100 }
+```
+
+Damit läuft `ultraloom run verify-until-green` in mehreren Projekten, ohne dass
+eines davon eine Zeile Ablaufcode besitzt.
+
+Erweist sich ein projektspezifischer Ablauf beim dritten Projekt als doch
+allgemein, wandert er nach `flows/` und lässt eine Konfigurationszeile zurück.
+Das ist Beförderung, kein Umbau.
+
+---
+
+## 8. Werkzeugprofile
+
+Der Standard für einen `AgentNode` ist lesend. Schreibrechte und Shell müssen
+explizit angefordert werden.
+
+| Profil | Werkzeuge |
+|---|---|
+| `read_only` (Standard) | `Read`, `Grep`, `Glob` |
+| `edit` | zusätzlich `Edit`, `Write` |
+| `shell` | zusätzlich `Bash` |
+| `mcp` | zusätzlich die konfigurierten MCP-Server |
+
+Ein Knoten, der Coverage-Berichte deuten soll, kann dann keine Quelldatei
+anfassen — nicht weil er brav ist, sondern weil das Werkzeug fehlt. Das Journal
+schreibt mit, welches Profil ein Knoten hatte.
+
+**Kein Fallback auf Werkzeugebene.** Fehlt einem Knoten ein Werkzeug, scheitert
+er. Ein Knoten, der ersatzweise über `Bash` schreibt, weil `Edit` nicht erlaubt
+war, hat die Sicherung ausgehebelt — und man sieht es erst im Diff.
+
+---
+
+## 9. Auflösung der Prüfwerkzeuge
+
+Vierstufig, erster Treffer gewinnt:
+
+1. **`.ultraloom/config.toml`** im Projekt. Explizit gesetzt schlägt alles.
+2. **Prüfskripte an einem konventionellen Ort:** ausführbare Dateien
+   `.ultraloom/checks/{test,lint,types,coverage}.*`. Existieren sie, werden sie
+   aufgerufen statt eine eigene Kette zu erfinden. Ein Projekt, dessen Prüfungen
+   schon woanders liegen — etwa space' `.claude/hooks/coverage_gate.py` —, legt
+   dort einen einzeiligen Aufruf ab. Das ist Konvention über einen benannten
+   Pfad, **nicht** Absuchen des Projekts nach etwas, das nach einem Prüfskript
+   aussieht: Letzteres wäre Raten und fällt unter Grundsatz 4.
+3. **Eingebaute Sprachvoreinstellung** aus erkannten Merkmalen: `pyproject.toml`
+   → `uvx ruff check`, `uvx ruff format --check`, `uvx mypy`, `uvx coverage`;
+   `project.godot` → `uvx gdlint` und der Godot-Headless-Aufruf.
+4. **Fehler.** Erkennt ultraloom nichts, bricht es ab und sagt, was es nicht
+   wusste. Es rät nicht.
+
+Erkennung nimmt Arbeit ab; Raten nähme Verlässlichkeit — der Unterschied ist
+Stufe 4. Ohne Voreinstellungen kostet jedes neue Projekt erst eine
+Konfigurationsdatei, bevor irgendetwas läuft, und ein Werkzeug, das vor dem
+ersten Nutzen Arbeit verlangt, wird beim dritten Projekt nicht mehr benutzt.
+
+**Ein fehlendes Werkzeug ist ein Fehler, kein Grund zum Überspringen.** Jedes
+ausgelassene Prüfwerkzeug landet als solches im Journal, und ein Lauf mit
+ausgelassener Prüfung erreicht den Endzustand „grün" nie.
+
+---
+
+## 10. Effort-Eskalation
+
+Der einzige Fallback, der sich rechnet: ein `AgentNode` läuft auf
+`effort: "low"`, ein `CodeNode` danach prüft das Ergebnis, und scheitert die
+Prüfung, führt eine Kante zurück auf denselben Knoten mit `high` oder `xhigh`.
+Der Normalfall bleibt billig, teuer wird nur der Zweifelsfall.
+
+Als Muster in `flows/` mitgeliefert, aber **als sichtbare Kante im Ablauf** —
+nicht als verborgene Kernmagie. Sonst weiß man beim Auswerten nicht, ob ein guter
+Lauf gut war oder nur teuer.
+
+**Kein Modell-Fallback bei Ablehnung.** Der `fallbacks`-Parameter der API deckt
+Sicherheitsablehnungen ab; bei Entwicklungsarbeit an den vorgesehenen Projekten
+tritt das praktisch nie auf, und Rate-Limits und Serverfehler wiederholt das SDK
+selbst. Tritt es je auf, sagt es das Journal, und dann wird es gebaut.
+
+---
+
+## 11. Fehlerbehandlung
+
+Drei Sorten, absichtlich getrennt:
+
+| Sorte | Beispiel | Behandlung |
+|---|---|---|
+| Werkzeugfehler | Test rot, Linter klagt | Kein Fehler, sondern Daten: fließt in den Zustand, wird über Kanten behandelt |
+| Knotenfehler | Ausnahme, Schema verletzt, Modell nicht erreichbar | `on_error`-Kante oder Abbruch mit wiederaufnehmbarem Stand |
+| Graphfehler | Unerreichbarer Knoten, Zyklus ohne Zähler | Vor dem ersten Knoten erkannt, nicht während des Laufs |
+
+Die Graph-Validierung hat zwei Sicherungen: unerreichbare Knoten sind ein Fehler,
+und ein Zyklus ohne `max_visits` ist ein Fehler. Rückkanten sind erlaubt — die
+Prüfschleife braucht sie —, aber nie unbegrenzt.
+
+---
+
+## 12. Bedienung
+
+Ein angehaltener Lauf braucht eine Adresse.
+
+| Befehl | Wirkung |
+|---|---|
+| `ultraloom run <flow>` | Startet; läuft bis Ende, Gate oder Fehler |
+| `ultraloom show <run-id>` | Journal lesbar, mit Tokens und Dauer pro Knoten |
+| `ultraloom resume <run-id> [--answer ...]` | Nach Gate oder Abbruch weiter |
+| `ultraloom replay <run-id>` | Alles aus dem Journal, ohne einen Modellaufruf |
+
+`replay` erlaubt, ein Fehlverhalten zu untersuchen, ohne es erneut zu bezahlen.
+
+---
+
+## 13. Testen
+
+- **Attrappe statt Netz.** `model/fake.py` liefert vorgegebene Antworten. Der
+  ganze Kern ist damit ohne Modellaufruf prüfbar.
+- **Jede Knotenart** hat ihr Testmodul.
+- **Wiederaufnahme** bekommt einen eigenen Test: Journal abschneiden, neu laufen,
+  Ergebnis muss gleich sein.
+- **Golden-Journal-Test** hält die Reproduzierbarkeit fest: gleicher Ablauf plus
+  gleiche Attrappe muss dasselbe Journal ergeben.
+- **Graph-Validierung** wird gegen kaputte Graphen getestet, nicht nur gegen
+  gute.
+- TDD, 100 % Coverage, ruff und mypy sauber — nach den Projektregeln. Python
+  ≥ 3.13, Abhängigkeiten über `uv`.
+
+---
+
+## 14. Reihenfolge
+
+| Teilprojekt | Inhalt |
+|---|---|
+| 1 | **Dieser Kern** |
+| 2 | Prüfschleife bis grün — der einfachste echte Ablauf, klare Abbruchbedingung |
+| 3 | Spec→Code→Wiki-Kreis für space |
+| 4 | Pläne autonom abarbeiten, mit Freigabepunkten |
+| 5 | Wissenspflege im Wiki — braucht den ultra-brain-MCP, um gut zu werden |
+
+Teilprojekt 2 ist absichtlich der erste Ablauf: es fordert Rückkanten,
+Werkzeugprofile, Prüfwerkzeug-Auflösung und Journal, aber kaum Urteilsvermögen.
+Ein Fehler dort liegt am Kern, nicht am Ablauf.
+
+---
+
+## 15. Offene Punkte
+
+Bewusst offengelassen, weil noch kein Ablauf sie fordert:
+
+- **Nebenläufigkeit.** Fan-out über mehrere Knoten kommt, wenn ein Ablauf es
+  braucht. Bis dahin sequentiell.
+- **Kosten-Obergrenze pro Lauf.** Das Journal misst die Kosten schon; eine harte
+  Grenze wird erst sinnvoll, wenn echte Zahlen vorliegen.
+- **Verhältnis zu Claude-Code-Hooks.** Das Agent SDK führt sie aus; ob das bei
+  space' `coverage_gate.py` zu doppelter Prüfung führt, zeigt Teilprojekt 2.
