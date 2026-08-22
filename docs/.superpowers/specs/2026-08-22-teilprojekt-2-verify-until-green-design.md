@@ -134,9 +134,13 @@ check   → END          when: not failing
 check   → report_red   when: failing and (unfixable or stagnated)
 check   → repair       sonst
 repair  → guard
-guard   → check
 guard   → report_red   when: eine Testdatei wurde geändert
+guard   → check        sonst
 ```
+
+Die Reihenfolge der Kanten ist bedeutungstragend: `Graph.next_name` nimmt die
+erste Kante, deren Bedingung hält, und eine Kante ohne Bedingung hält immer.
+Eine bedingungslose Kante steht deshalb an letzter Stelle ihres Knotens.
 
 **Stagnation** heißt: `failing` ist unverändert gegenüber dem vorigen Durchlauf
 **und** `touched` ist leer. Der Agent hat nichts geändert oder nichts
@@ -204,7 +208,7 @@ flowchart TD
     check -->|"unfixable oder Stagnation"| red
     check -->|"sonst"| repair
     repair --> guard
-    guard --> check
+    guard -->|"sonst"| check
     guard -->|"Testdatei geändert"| red
 ```
 
