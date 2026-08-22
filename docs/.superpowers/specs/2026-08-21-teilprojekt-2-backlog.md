@@ -90,3 +90,138 @@ Wenn ein Plan eine Test-Fixture vorgibt, erben alle darauf aufbauenden Aufgaben
 deren blinde Flecken. Für Teilprojekt 2 heißt das: die Fixtures des Plans sind
 Vorschläge, und mindestens eine Variante sollte die Form verlassen, die der Plan
 vorgemacht hat.
+
+# Was Teilprojekt 2 hinterlässt
+
+Derselbe Zweck wie oben, eine Runde später: gesehen, beurteilt, mit Begründung
+verschoben. Gefunden hat das meiste davon Task 14 — der erste Lauf des Ablaufs
+`verify_until_green` in einem fremden Projekt (space: Godot 4, GDScript,
+headless gdUnit4, Nano Coverage nach LCOV, kein Typechecker). Die Läufe selbst
+stehen auf der Ablaufseite `docs/abläufe/verify-until-green.md`; hier steht, was
+davon Arbeit bleibt.
+
+## Der Agentenpfad hängt an einer ungepinnten Fremdversion
+
+**`claude-agent-sdk` ist nicht gepinnt, und die Wahl entscheidet über Lauf oder
+Nichtlauf.** Das Extra nennt weder Untergrenze noch Deckel. In der Umgebung von
+Task 14 löste das auf `0.2.144` auf, und dieses Rad brachte keine
+`_bundled/claude.exe` mit. Das SDK fiel auf das `claude.CMD` aus PATH zurück und
+**verweigerte den Start**: „Refusing to execute batch script … no reliable
+escaping for cmd.exe exists." Das ist kein Randfall und keine Verschlechterung
+der Qualität, sondern ein harter Fehlschlag des gesamten Agentenpfads — jeder
+Lauf mit Modell endet mit `outcome=error`, bevor ein einziges Token fließt. Mit
+`0.2.143`, das die `.exe` mitbringt, läuft es.
+
+Verschoben, weil die richtige Antwort mehr ist als eine Zahl in
+`pyproject.toml`: eine Untergrenze schließt genau den Fall nicht aus, der hier
+auftrat — die *neuere* Version war die kaputte —, ein Deckel veraltet, und ein
+Rad ohne gebündelte CLI ist auf manchen Plattformen die einzige Wahl. Der
+Adapter setzt heute kein `cli_path`; dort müsste die Diagnose vermutlich
+ansetzen: beim Start prüfen, ob eine ausführbare CLI erreichbar ist, und
+andernfalls sagen, welche der drei Abhilfen gemeint ist. Kosten des
+Liegenlassens: ein `uv sync` auf einer frischen Maschine kann den Agentenpfad
+ohne Zutun stilllegen, und die Meldung zeigt auf cmd.exe statt auf die
+Installation.
+
+**`setting_sources` bleibt ungesetzt.** Der Adapter (`model/agent_sdk.py`)
+übergibt das Feld nicht, also gilt der Standard des SDK. Gemessen in space heißt
+das: die `SessionStart`- und `Stop`-Hooks des Projekts liefen im Reparaturlauf
+mit, `PostToolUse` nicht. Der `SessionStart`-Hook schrieb dabei eine
+`override.cfg` in den Arbeitsbaum — ein Seiteneffekt, den weder der Reparateur
+verursacht hat noch die Wache erklären kann, und der nur deshalb harmlos blieb,
+weil die Grundlinie ihn vor `guard` abdeckte. Verschoben, weil die Entscheidung
+eine Richtungsfrage ist und keine Reparatur: Soll ein ultraloom-Lauf die
+Werkzeugumgebung des Projekts *erben* (dann ist er realistisch, aber teurer und
+mit fremden Seiteneffekten) oder nicht (dann ist er reproduzierbar, aber
+verhält sich anders als eine Sitzung von Hand)? Beides ist vertretbar; still
+danebenstehen ist es nicht.
+
+Dazu gehört, dass das SDK dem Reparateur die **global konfigurierten
+MCP-Server des Benutzers** anbietet. In Lauf 0005 versuchte er,
+`mcp__context-mode__ctx_execute` für einen eigenen gdlint-Lauf zu benutzen, und
+wurde von `permission_mode: "dontAsk"` abgewiesen. Die Sperre hält also — aber
+die Werkzeuge stehen im Prompt, kosten Token und in diesem Fall eine
+Werkzeugrunde. `[agent].mcp_servers` sagt heute, was *zusätzlich* erlaubt ist,
+und nichts darüber, was ohnehin schon da ist.
+
+## Was die Prüfkette über Werkzeuge annimmt
+
+**Ein Exit-Code ist das ganze Urteil — und manche Prüfwerkzeuge kennen ihn
+nicht.** `checks._run` liest `returncode`, sonst nichts. Die Prüfungen von space
+sind Claude-Code-Hooks: `coverage_gate.py` meldet seine Befunde über
+`hookSpecificOutput` nach stdout und beendet sich **immer** mit 0, weil Exit 2
+auf `Stop` dem Agenten das Ende des Zuges verweigern würde. Direkt als
+Prüfkommando eingetragen las ein *fehlender* LCOV-Bericht als bestandene
+Coverage-Prüfung. Das ist genau der eine Fehlschlag, den `verify-until-green`
+nie erzeugen darf, und ultraloom kann ihn strukturell nicht bemerken. In space
+steht deshalb eine dünne Hülle davor, die dieselben `findings()` ruft und nur
+den Kanal wechselt. Verschoben, weil die Alternative — Ausgabe deuten statt
+Exit-Code lesen — eine schlechtere Regel wäre: sie rät. Was fehlt, ist nicht
+Mechanik, sondern eine gut sichtbare Warnung in der Dokumentation: **jedes
+Prüfkommando, das aus einem Hook-Skript kommt, ist daraufhin anzusehen, ob es
+seinen Befund im Exit-Code trägt.** Kosten: ein Projekt, das das übersieht,
+bekommt eine grüne Prüfung, die nie etwas geprüft hat.
+
+**Eine Prüfart, ein Kommando.** `config._KINDS` erlaubt je Art genau eine
+Zeichenkette. space lintet mit zweien: `gdlint` und `gdformat --check` laufen
+über dieselben Verzeichnisse und sind beide „lint". Die Konfiguration von space
+fährt heute nur `gdlint`; `gdformat` fehlt damit gegenüber dem, was das Projekt
+selbst prüft. Der Ausweg existiert — ein Skript unter `.ultraloom/checks/`, das
+beide ruft —, verlagert aber Konfiguration in ausführbaren Code, den niemand
+liest. Verschoben, weil die naheliegende Erweiterung, eine Liste statt einer
+Zeichenkette, sofort Folgefragen aufmacht: Läuft nach dem ersten roten Kommando
+noch das zweite? Wie sieht der Bericht aus, den der Reparateur bekommt? Die
+Presets tragen die Antwort in Ansätzen (`measure` plus `argv`), aber für
+mehrere gleichrangige Kommandos ist sie nicht gebaut.
+
+**Zwischen Prüfungen gibt es keine Reihenfolge.** Spec 9.4 nimmt an, Prüfungen
+seien unabhängig, und lässt sie deshalb nebenläufig laufen. In space ist der
+LCOV-Bericht ein Nebenprodukt des Suitenlaufs: das Coverage-Tor liest den
+Bericht, den die Suite erst acht Minuten später schreibt, und meldet „no
+coverage report". Das Python-Preset löst dasselbe Problem mit einem
+`measure`-Schritt, der die Suite ein zweites Mal fährt — für eine Godot-Suite
+keine Option, weil das weitere acht Minuten kostet. Das Tor von space löst es
+über Reihenfolge und reicht einen Zeitstempel weiter (`measured_after`), damit
+ein alter Bericht nicht als neuer durchgeht. Verschoben als Entwurfsfrage: eine
+Abhängigkeit „coverage nach test" ist leicht gesagt und berührt die
+Nebenläufigkeit, den Bericht und die Frage, ob eine Prüfung ausfällt, wenn die
+Prüfung, auf die sie wartet, rot ist. **Dies ist der oberste Punkt dieser
+Liste** — er ist der Grund, warum in space kein grüner `precommit`-Lauf steht.
+
+## Kleinere offene Punkte
+
+- **Stille Präzedenz bei Coverage.** `resolve_check` prüft
+  `config.coverage_report` **vor** `config.commands`. Wer sowohl
+  `[verify.coverage].report` als auch ein `coverage`-Kommando setzt, bekommt
+  ohne Warnung das erste. Die Reihenfolge ist jetzt auf der Ablaufseite
+  dokumentiert; eine Warnung beim Laden wäre ehrlicher, ist aber eine
+  Entscheidung darüber, wie viel `load_config` beurteilen darf.
+- **Die Schwelle wird nicht durchgesetzt.** `[verify.coverage].threshold` wird
+  gelesen und weitergereicht, aber kein Kommando bekommt sie — durchgesetzt
+  wird, was das Coverage-Werkzeug selbst eingestellt hat. `ultraloom check
+  coverage` sagt das in einer eigenen Zeile; die Ablaufseite sagt es jetzt
+  auch. Was fehlt, ist die Entscheidung, ob der Schlüssel überhaupt bleiben
+  soll.
+- **Ein Projekt mit Build-Cache braucht einen Einrichtungsschritt, von dem der
+  Ablauf nichts weiß.** Ein frischer Godot-Worktree hat kein `.godot/`; ohne
+  `global_script_class_cache.cfg` findet gdUnit4 seine eigene Klasse nicht und
+  die Suite bricht mit einem Parse-Fehler ab, der wie ein Codefehler aussieht.
+  Zwei Editor-Läufe legen Cache und Importe an. Kein ultraloom-Befund, aber
+  jedes Projekt mit einem Build-Cache hat diese Stufe, und ultraloom bietet
+  keinen Ort, an dem sie stünde.
+- **`uv pip install -e` bricht an einem absoluten Windows-Pfad mit `#`.** Die
+  Meldung nennt `C:\Users\micro\Documents` und behauptet, dort liege kein
+  Python-Projekt: der Pfad wird an `#` abgeschnitten. Ein relativer Pfad
+  funktioniert. Fremdes Werkzeug, aber es kostet beim nächsten Mal wieder eine
+  Viertelstunde, und die Installationsanleitung von ultraloom nennt absolute
+  Pfade.
+- **Die `unavailable`-Übersetzung steht an zwei Stellen**
+  (`checks._run_or_report` und `flows/verify_until_green._result_for`). Bewusst
+  asymmetrisch: der Ablauf fängt nur `CheckUnavailableError`, `run_all`
+  zusätzlich alles andere, damit ein echter Fehler im Ablauf sichtbar bleibt,
+  statt still als rote Prüfung zu enden. Als Ermessensfrage festgehalten, nicht
+  als Schuld.
+- **Der Beweis für die Testsperre fehlt weiterhin.** Fünf Läufe in zwei
+  Projekten haben versucht, einen echten Agenten dazu zu bringen, eine
+  Testdatei anzufassen; keiner hat es geschafft. Die Wache ist durch Unit-Tests
+  abgedeckt und gegen ein echtes Modell unbewiesen.

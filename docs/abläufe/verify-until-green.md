@@ -197,7 +197,8 @@ Aus `.ultraloom/config.toml`:
 | `[verify].lint`, `.types`, `.test` | Die Kommandos der jeweiligen Prüfung. Fehlen sie, greifen die Sprachpresets. |
 | `[verify].timeout` | Sekunden pro Prüfkommando. |
 | `[verify.profiles].<name>` | Benannte Listen von Prüfarten, die `--checks <name>` auswählen kann. |
-| `[verify.coverage].threshold`, `.report` | Schwelle und Berichtskommando der Coverage-Prüfung. |
+| `[verify.coverage].report` | Das Kommando der Coverage-Prüfung. Es geht **jedem** anderen Weg vor: gesetzt, gewinnt es auch gegen ein `coverage`-Kommando aus `.ultraloom/checks/` und gegen das Sprachpreset — ohne Warnung. |
+| `[verify.coverage].threshold` | Wird gelesen und weitergereicht, aber **von ultraloom nicht durchgesetzt**: kein Prüfkommando bekommt die Zahl. Durchgesetzt wird, was das Coverage-Werkzeug selbst eingestellt hat. `ultraloom check coverage` sagt das in einer eigenen Zeile dazu. |
 | `[exec].prefix` | Präfix, mit dem jedes Prüfkommando ausgeführt wird. |
 | `[agent].mcp_servers` | MCP-Server, die dem Reparateur zur Verfügung stehen. |
 
@@ -453,11 +454,17 @@ Sitzungsprotokoll von Lauf 0005 ist: **teilweise ja.** `SessionStart`
 `SessionStart`-Hook schrieb dabei eine `override.cfg` in den Arbeitsbaum.
 `PostToolUse` — und damit die teure Prüfung `godot_quality.py` nach jeder
 Bearbeitung — erscheint nach dem `Edit` des Reparateurs **nicht** im Protokoll.
-Doppelt geprüft wird also nicht, aber der Reparaturlauf zahlt rund zwei Sekunden
-Hook-Zeit und bekommt einen Seiteneffekt im Baum. Wer das nicht will, setzt
-`setting_sources` im SDK-Adapter; ultraloom setzt das Feld heute nicht.
+Genauer: doppelt geprüft wird **teilweise**. `lint.py` ist eine zweite
+Linter-Instanz und lief mit — sie prüft in space allerdings das Wiki und nicht
+den GDScript-Code, und ihr Befund geht in den Kontext des Agenten, nicht in das
+Urteil des Ablaufs. Ausgeblieben ist die teure Doppelprüfung: `godot_quality.py`
+über `PostToolUse` nach jeder Bearbeitung. Der Reparaturlauf zahlt damit rund
+zwei Sekunden Hook-Zeit und bekommt einen Seiteneffekt im Baum. Wer das nicht
+will, setzt `setting_sources` im SDK-Adapter; ultraloom setzt das Feld heute
+nicht.
 
 Nebenbei zeigte dasselbe Protokoll, dass das SDK dem Reparateur die globalen
-MCP-Server des Benutzers anbietet. Er versuchte, über einen davon eine Shell zu
-erreichen, und wurde von `permission_mode: "dontAsk"` abgewiesen — die Sperre
-hält, aber die Werkzeuge kosten Prompt und eine Runde.
+MCP-Server des Benutzers anbietet. Er rief `mcp__context-mode__ctx_execute` auf,
+um sein Ergebnis mit einem eigenen gdlint-Lauf nachzuprüfen, und wurde von
+`permission_mode: "dontAsk"` abgewiesen — die Sperre hält, aber die Werkzeuge
+stehen im Prompt und kosten eine Werkzeugrunde.
