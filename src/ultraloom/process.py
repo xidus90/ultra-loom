@@ -20,12 +20,18 @@ its own and one killpg; Windows gets a job object, plus a sweep of the
 descendants for the processes Windows refuses to put in it. Both are chosen by
 `terminator`, which is a plain function so the choice can be tested on a machine
 that can only execute one of the two.
+
+Nothing in here may leave a process running. Every path out of `run` -- a clean
+exit, a timeout, an exception on the way to the wait -- goes through a kill and
+a *bounded* reap. A process this module started suspended and then walked away
+from would sit there until the machine is rebooted, holding two pipes, one such
+process per check command.
 """
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
-import ctypes.wintypes as wintypes
 import functools
 import io
 import os
@@ -34,7 +40,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, cast
@@ -47,17 +53,41 @@ from typing import IO, cast
 # output rather than on itself.
 DRAIN_GRACE = 5.0
 
+# How long a killed process gets to actually die. Bounded for the same reason
+# everything else here is: an unbounded wait after a kill that did not take is
+# the very hang this module exists to prevent, only moved one line down.
+KILL_GRACE = 5.0
+
+# Reported when the kill did not take and the process has no exit code yet.
+# Negative, like the signal-derived codes on POSIX, so it cannot be confused
+# with a status a tool chose to exit with.
+NO_EXIT_CODE = -1
+
 # Win32 constants, spelled out because the standard library exposes none of
-# them. From winbase.h and tlhelp32.h.
+# them. From winbase.h, winnt.h and tlhelp32.h.
 _CREATE_SUSPENDED = 0x00000004
 _TH32CS_SNAPPROCESS = 0x00000002
 _TH32CS_SNAPTHREAD = 0x00000004
 _THREAD_SUSPEND_RESUME = 0x0002
 _PROCESS_TERMINATE = 0x0001
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _MAX_PATH = 260
-_INVALID_HANDLE_VALUE = -1
 # What ResumeThread returns when it could not do it: (DWORD) -1.
 _RESUME_FAILED = 0xFFFFFFFF
+
+# ctypes.wintypes is deliberately not imported: importing it *fails* on POSIX,
+# which would make this whole module -- and with it the POSIX branch it
+# promises -- unimportable on Linux and macOS. Every Win32 type this module
+# needs is a plain C type underneath, so they are spelled out instead.
+_HANDLE = ctypes.c_void_p
+_BOOL = ctypes.c_int
+_DWORD = ctypes.c_uint
+_UINT = ctypes.c_uint
+_LPCWSTR = ctypes.c_wchar_p
+# INVALID_HANDLE_VALUE is (HANDLE) -1, and a c_void_p restype comes back from
+# ctypes *unsigned*. Comparing against a plain -1 would therefore never match,
+# and a failed snapshot would be walked as if it were an empty machine.
+_INVALID_HANDLE = ctypes.c_void_p(-1).value
 
 type TerminateTree = Callable[[subprocess.Popen[bytes]], None]
 
@@ -100,22 +130,43 @@ def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            terminator(sys.platform)(process)
-            process.wait()
+            _kill_tree(process)
 
         deadline = time.monotonic() + DRAIN_GRACE
         for drain in (out, err):
             drain.thread.join(max(0.0, deadline - time.monotonic()))
 
         return Completed(
-            returncode=process.returncode,
+            returncode=NO_EXIT_CODE if process.returncode is None else process.returncode,
             stdout=out.text(),
             stderr=err.text(),
             timed_out=timed_out,
             output_abandoned=out.abandoned or err.abandoned,
         )
+    except BaseException:
+        # On Windows the process is at this point possibly still *suspended*:
+        # adoption or the resume may be what failed. Raising and walking away
+        # would leave it standing until the machine reboots, holding both
+        # pipes. Loud and left behind is worse than loud.
+        _kill_tree(process)
+        raise
     finally:
         _release_job(process)
+
+
+def _kill_tree(process: subprocess.Popen[bytes]) -> None:
+    """Kill the whole tree and reap the direct child, on a deadline.
+
+    The reap is bounded because the kill is not guaranteed: TerminateJobObject
+    can fail, killpg can land in a session this process may not signal. An
+    unbounded wait() there would hand the run exactly the hang the timeout was
+    meant to buy it out of.
+    """
+    terminator(sys.platform)(process)
+    # Suppressed, not handled: there is nothing further to try. The caller
+    # learns of it through NO_EXIT_CODE and through output_abandoned.
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(KILL_GRACE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,39 +266,9 @@ def _terminate_posix(process: subprocess.Popen[bytes]) -> None:  # pragma: no co
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         # Already gone, or in a session this process may not signal. Either way
-        # there is nothing left to kill and nothing worth raising over.
+        # there is nothing left to kill here; the bounded reap in _kill_tree is
+        # what keeps a failure from turning into a hang.
         process.kill()
-
-
-class _ProcessEntry32(ctypes.Structure):
-    """PROCESSENTRY32W from tlhelp32.h, in full: the walk hands it to Windows."""
-
-    _fields_ = (
-        ("dwSize", ctypes.c_ulong),
-        ("cntUsage", ctypes.c_ulong),
-        ("th32ProcessID", ctypes.c_ulong),
-        ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
-        ("th32ModuleID", ctypes.c_ulong),
-        ("cntThreads", ctypes.c_ulong),
-        ("th32ParentProcessID", ctypes.c_ulong),
-        ("pcPriClassBase", ctypes.c_long),
-        ("dwFlags", ctypes.c_ulong),
-        ("szExeFile", ctypes.c_wchar * _MAX_PATH),
-    )
-
-
-class _ThreadEntry32(ctypes.Structure):
-    """THREADENTRY32 from tlhelp32.h; the walk needs it up to the owning pid."""
-
-    _fields_ = (
-        ("dwSize", ctypes.c_ulong),
-        ("cntUsage", ctypes.c_ulong),
-        ("th32ThreadID", ctypes.c_ulong),
-        ("th32OwnerProcessID", ctypes.c_ulong),
-        ("tpBasePri", ctypes.c_long),
-        ("tpDeltaPri", ctypes.c_long),
-        ("dwFlags", ctypes.c_ulong),
-    )
 
 
 def _terminate_windows(process: subprocess.Popen[bytes]) -> None:
@@ -255,15 +276,12 @@ def _terminate_windows(process: subprocess.Popen[bytes]) -> None:
 
     The job is the mechanism; the sweep is the admission that it has a hole.
     Processes started by a packaged application -- the Microsoft Store build of
-    Python is one, and it is what a stock Windows `python` resolves to -- are
-    created through the app-model activation path and never join the job of the
-    process that asked for them. Measured on this machine: with a Store Python
-    as the direct child, its own child sits in no job at all, and terminating
-    the job leaves it running with the pipe still in its hand.
-
-    So the descendants are opened *before* the job dies. A held handle keeps the
-    pid reserved, which is what makes killing by pid safe here: the alternative,
-    listing pids after the parents are gone, races against pid reuse.
+    Python is one, and it is what a bare `python` resolves to on a stock
+    Windows -- are created through the app-model activation path and never join
+    the job of the process that asked for them. Measured with IsProcessInJob:
+    cmd.exe and a uv-managed CPython pass their job on to their children, the
+    Store build does not, and terminating the job then leaves the grandchild
+    running with the pipe still in its hand.
     """
     handle = getattr(process, "_ultraloom_job", None)
     if handle is None:
@@ -271,17 +289,61 @@ def _terminate_windows(process: subprocess.Popen[bytes]) -> None:
         # Killing the direct child is then all that is left to do.
         process.kill()
         return
-    _terminate_job_and_strays(process, handle)  # pragma: no cover  # Windows-only
+    _terminate_job_and_strays(process, handle)  # pragma: no cover  # Windows-only syscalls
 
 
-def _terminate_job_and_strays(
+def _descendants(root: int, parents: Iterable[tuple[int, int]]) -> list[int]:
+    """Every pid below `root`, transitively, given the (pid, parent pid) pairs.
+
+    Pure on purpose: the walk is the part that can be wrong, and taking the
+    enumeration as an argument is what makes it testable on a machine that
+    cannot run a toolhelp snapshot.
+
+    The `seen` set is not tidiness. Windows keeps a parent pid on record after
+    the parent has died and hands the pid out again, so the table can contain a
+    cycle -- A recorded as B's child while B is recorded as A's. Without it the
+    walk would never end, and `run` would never return.
+    """
+    children: dict[int, list[int]] = {}
+    for child, parent in parents:
+        children.setdefault(parent, []).append(child)
+
+    found: list[int] = []
+    seen = {root}
+    pending = list(children.get(root, ()))
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        found.append(current)
+        pending.extend(children.get(current, ()))
+    return found
+
+
+def _resumed_enough(previous_counts: Iterable[int]) -> bool:
+    """Did resuming those threads actually start something that was standing still?
+
+    Pure so the decision can be tested; `_resume` supplies the numbers.
+
+    ResumeThread returns the *previous* suspend count. Three answers must not
+    be mistaken for success: no threads at all, `_RESUME_FAILED`, and a plain
+    zero -- zero means the thread was already running, which for a process
+    started suspended means we did not find the one that mattered.
+    """
+    return any(count != _RESUME_FAILED and count > 0 for count in previous_counts)
+
+
+def _terminate_job_and_strays(  # pragma: no cover  # Windows-only syscalls
     process: subprocess.Popen[bytes], job: int
-) -> None:  # pragma: no cover  # Windows-only syscalls
+) -> None:
     """The job first, then everything the job never got hold of."""
     kernel32 = _kernel32()
-    strays = _open_descendants(process.pid)
+    strays = _open_strays(process)
     try:
-        kernel32.TerminateJobObject(job, 1)
+        if not kernel32.TerminateJobObject(job, 1):
+            # The job failed us; the direct child is still reachable directly.
+            process.kill()
         for stray in strays:
             kernel32.TerminateProcess(stray, 1)
     finally:
@@ -289,38 +351,44 @@ def _terminate_job_and_strays(
             kernel32.CloseHandle(stray)
 
 
-def _open_descendants(pid: int) -> list[int]:  # pragma: no cover  # Windows-only toolhelp walk
-    """Handles to everything below one process, transitively.
+def _open_strays(process: subprocess.Popen[bytes]) -> list[int]:  # pragma: no cover  # Windows-only
+    """Handles to the descendants, opened before anything is killed.
 
-    Handles rather than pids on purpose: see `_terminate_windows`. Processes
-    that cannot be opened are skipped -- one unreachable descendant is not a
-    reason to leave the reachable ones running.
+    Handles rather than pids: a held handle keeps the pid reserved, so the pid
+    cannot be recycled between this walk and the kill that follows it.
 
-    Windows keeps a parent pid on record after the parent is gone, so a stray
-    whose parent pid was reused could in principle join the list. The root of
-    the walk is safe -- its pid is held by the Popen handle -- and everything
-    below it belongs to a tree that is being killed anyway.
+    The window *before* the walk is closed by the creation times. A stray whose
+    recorded parent pid was reused would otherwise be opened and killed although
+    it belongs to somebody else; a real descendant cannot have started before
+    the process it descends from.
     """
-    children: dict[int, list[int]] = {}
-    for child, parent in _process_parents():
-        children.setdefault(parent, []).append(child)
-
+    kernel32 = _kernel32()
+    root_started = _started_at(_process_handle(process))
     handles: list[int] = []
-    pending = list(children.get(pid, ()))
-    while pending:
-        current = pending.pop()
-        pending.extend(children.get(current, ()))
-        handle = _kernel32().OpenProcess(_PROCESS_TERMINATE, False, current)
-        if handle:
+    try:
+        for pid in _descendants(process.pid, _process_parents()):
+            handle = kernel32.OpenProcess(
+                _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+            )
+            if not handle:
+                # Unreachable is not a reason to leave the reachable ones alive.
+                continue
+            if _started_at(handle) < root_started:
+                kernel32.CloseHandle(handle)
+                continue
             handles.append(handle)
+    except BaseException:
+        for handle in handles:
+            kernel32.CloseHandle(handle)
+        raise
     return handles
 
 
-def _process_parents() -> list[tuple[int, int]]:  # pragma: no cover  # Windows-only toolhelp walk
+def _process_parents() -> list[tuple[int, int]]:  # pragma: no cover  # Windows-only syscalls
     """Every running process as (pid, parent pid)."""
     kernel32 = _kernel32()
     snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
-    if snapshot == _INVALID_HANDLE_VALUE:
+    if snapshot in (None, _INVALID_HANDLE):
         raise ctypes.WinError(ctypes.get_last_error())
     entry = _ProcessEntry32()
     entry.dwSize = ctypes.sizeof(_ProcessEntry32)
@@ -335,97 +403,11 @@ def _process_parents() -> list[tuple[int, int]]:  # pragma: no cover  # Windows-
     return pairs
 
 
-@functools.cache
-def _kernel32() -> ctypes.WinDLL:  # pragma: no cover  # Windows-only
-    """kernel32 with the prototypes spelled out.
-
-    Not optional tidiness: without argtypes ctypes passes and returns C ints,
-    and a 64-bit HANDLE truncated to 32 bits turns every call into a silent
-    no-op. The symptom is a job that exists and contains nothing -- which looks
-    exactly like the bug this module is here to fix.
-    """
-    dll = ctypes.WinDLL("kernel32", use_last_error=True)
-    dll.CreateJobObjectW.restype = wintypes.HANDLE
-    dll.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
-    dll.AssignProcessToJobObject.restype = wintypes.BOOL
-    dll.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
-    dll.TerminateJobObject.restype = wintypes.BOOL
-    dll.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
-    dll.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    dll.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
-    dll.Process32FirstW.restype = wintypes.BOOL
-    dll.Process32FirstW.argtypes = (wintypes.HANDLE, ctypes.POINTER(_ProcessEntry32))
-    dll.Process32NextW.restype = wintypes.BOOL
-    dll.Process32NextW.argtypes = (wintypes.HANDLE, ctypes.POINTER(_ProcessEntry32))
-    dll.OpenProcess.restype = wintypes.HANDLE
-    dll.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-    dll.TerminateProcess.restype = wintypes.BOOL
-    dll.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
-    dll.Thread32First.restype = wintypes.BOOL
-    dll.Thread32First.argtypes = (wintypes.HANDLE, ctypes.POINTER(_ThreadEntry32))
-    dll.Thread32Next.restype = wintypes.BOOL
-    dll.Thread32Next.argtypes = (wintypes.HANDLE, ctypes.POINTER(_ThreadEntry32))
-    dll.OpenThread.restype = wintypes.HANDLE
-    dll.OpenThread.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-    dll.ResumeThread.restype = wintypes.DWORD
-    dll.ResumeThread.argtypes = (wintypes.HANDLE,)
-    dll.CloseHandle.restype = wintypes.BOOL
-    dll.CloseHandle.argtypes = (wintypes.HANDLE,)
-    return dll
-
-
-def _adopt_into_job(process: subprocess.Popen[bytes]) -> None:  # pragma: no cover  # Windows-only
-    """Create a job, put the suspended process in it, then let it run.
-
-    The handle rides on the Popen object because that is what `_terminate_windows`
-    is handed. A private attribute on a foreign object is not pretty; the
-    alternative is a second mapping keyed by pid, and a pid can be reused.
-
-    A failure here is raised, not swallowed: a run that quietly loses its job is
-    a run whose timeout no longer reaches the grandchild, and that is the whole
-    reason this module exists.
-    """
-    kernel32 = _kernel32()
-    job = kernel32.CreateJobObjectW(None, None)
-    if not job:
-        raise ctypes.WinError(ctypes.get_last_error())
-    # The process handle subprocess keeps; there is no public way to it.
-    handle = wintypes.HANDLE(int(process._handle))  # type: ignore[attr-defined]
-    if not kernel32.AssignProcessToJobObject(job, handle):
-        error = ctypes.get_last_error()
-        kernel32.CloseHandle(job)
-        raise ctypes.WinError(error)
-    process._ultraloom_job = job  # type: ignore[attr-defined]  # see the docstring
-    _resume(process.pid)
-
-
-def _resume(pid: int) -> None:  # pragma: no cover  # Windows-only
-    """Let a CREATE_SUSPENDED process run.
-
-    subprocess keeps the main thread's handle to itself, so the thread has to be
-    found again through a toolhelp snapshot. Raising when nothing was resumed is
-    deliberate: a process left suspended does not fail, it sits there until the
-    timeout and reports nothing -- the worst outcome this module could produce,
-    and the one risk the CREATE_SUSPENDED trick buys its guarantee with.
-    """
-    kernel32 = _kernel32()
-    resumed = 0
-    for thread_id in _thread_ids(pid):
-        handle = kernel32.OpenThread(_THREAD_SUSPEND_RESUME, False, thread_id)
-        if not handle:
-            continue
-        if kernel32.ResumeThread(handle) != _RESUME_FAILED:
-            resumed += 1
-        kernel32.CloseHandle(handle)
-    if not resumed:
-        raise RuntimeError(f"could not resume suspended process {pid}")
-
-
-def _thread_ids(pid: int) -> list[int]:  # pragma: no cover  # Windows-only toolhelp walk
+def _thread_ids(pid: int) -> list[int]:  # pragma: no cover  # Windows-only syscalls
     """Every thread currently belonging to one process."""
     kernel32 = _kernel32()
     snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
-    if snapshot == _INVALID_HANDLE_VALUE:
+    if snapshot in (None, _INVALID_HANDLE):
         raise ctypes.WinError(ctypes.get_last_error())
     entry = _ThreadEntry32()
     entry.dwSize = ctypes.sizeof(_ThreadEntry32)
@@ -441,6 +423,74 @@ def _thread_ids(pid: int) -> list[int]:  # pragma: no cover  # Windows-only tool
     return found
 
 
+def _started_at(handle: int) -> int:  # pragma: no cover  # Windows-only syscall
+    """When that process was created, as a raw FILETIME."""
+    created, exited, kernel, user = (_FileTime() for _ in range(4))
+    if not _kernel32().GetProcessTimes(
+        handle,
+        ctypes.byref(created),
+        ctypes.byref(exited),
+        ctypes.byref(kernel),
+        ctypes.byref(user),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    # The fields are c_uint, which ctypes hands back as a plain int; mypy only
+    # sees Structure.__getattr__.
+    return (int(created.high) << 32) | int(created.low)
+
+
+def _process_handle(process: subprocess.Popen[bytes]) -> int:  # pragma: no cover  # Windows-only
+    """The process handle subprocess keeps to itself; there is no public way to it."""
+    # The attribute exists only in the Windows implementation of Popen, which is
+    # why the type checker has never heard of it.
+    return int(process._handle)  # type: ignore[attr-defined]  # see above
+
+
+def _adopt_into_job(process: subprocess.Popen[bytes]) -> None:  # pragma: no cover  # Windows-only
+    """Create a job, put the suspended process in it, then let it run.
+
+    The handle rides on the Popen object because that is what `_terminate_windows`
+    is handed. A private attribute on a foreign object is not pretty; the
+    alternative is a second mapping keyed by pid, and a pid can be reused.
+
+    A failure here is raised, not swallowed: a run that quietly loses its job is
+    a run whose timeout no longer reaches the grandchild, and that is the whole
+    reason this module exists. `run` catches it and kills the process, which at
+    this point may still be suspended.
+    """
+    kernel32 = _kernel32()
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not kernel32.AssignProcessToJobObject(job, _process_handle(process)):
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(job)
+        raise ctypes.WinError(error)
+    # Same story as _process_handle: a private attribute on a foreign object.
+    process._ultraloom_job = job  # type: ignore[attr-defined]  # see the docstring
+    _resume(process.pid)
+
+
+def _resume(pid: int) -> None:  # pragma: no cover  # Windows-only syscalls
+    """Let a CREATE_SUSPENDED process run.
+
+    subprocess keeps the main thread's handle to itself, so the thread has to be
+    found again through a toolhelp snapshot. Whether the numbers that come back
+    mean success is decided by `_resumed_enough`, which is where that judgement
+    can be tested.
+    """
+    kernel32 = _kernel32()
+    previous_counts: list[int] = []
+    for thread_id in _thread_ids(pid):
+        handle = kernel32.OpenThread(_THREAD_SUSPEND_RESUME, False, thread_id)
+        if not handle:
+            continue
+        previous_counts.append(int(kernel32.ResumeThread(handle)))
+        kernel32.CloseHandle(handle)
+    if not _resumed_enough(previous_counts):
+        raise RuntimeError(f"could not resume suspended process {pid}")
+
+
 def _release_job(process: subprocess.Popen[bytes]) -> None:
     """Give the job handle back once the run is over, however it ended.
 
@@ -452,6 +502,88 @@ def _release_job(process: subprocess.Popen[bytes]) -> None:
         return
     _kernel32().CloseHandle(handle)  # pragma: no cover  # Windows-only syscall
     process._ultraloom_job = None  # type: ignore[attr-defined]  # see _adopt_into_job
+
+
+class _ProcessEntry32(ctypes.Structure):
+    """PROCESSENTRY32W from tlhelp32.h, in full: the walk hands it to Windows."""
+
+    _fields_ = (
+        ("dwSize", _DWORD),
+        ("cntUsage", _DWORD),
+        ("th32ProcessID", _DWORD),
+        ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+        ("th32ModuleID", _DWORD),
+        ("cntThreads", _DWORD),
+        ("th32ParentProcessID", _DWORD),
+        ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", _DWORD),
+        ("szExeFile", ctypes.c_wchar * _MAX_PATH),
+    )
+
+
+class _ThreadEntry32(ctypes.Structure):
+    """THREADENTRY32 from tlhelp32.h; the walk needs it up to the owning pid."""
+
+    _fields_ = (
+        ("dwSize", _DWORD),
+        ("cntUsage", _DWORD),
+        ("th32ThreadID", _DWORD),
+        ("th32OwnerProcessID", _DWORD),
+        ("tpBasePri", ctypes.c_long),
+        ("tpDeltaPri", ctypes.c_long),
+        ("dwFlags", _DWORD),
+    )
+
+
+class _FileTime(ctypes.Structure):
+    """FILETIME from minwinbase.h: one 64-bit count in two halves."""
+
+    _fields_ = (("low", _DWORD), ("high", _DWORD))
+
+
+@functools.cache
+def _kernel32() -> ctypes.CDLL:  # pragma: no cover  # Windows-only
+    """kernel32 with the prototypes spelled out.
+
+    Not optional tidiness: without argtypes ctypes passes and returns C ints,
+    and a 64-bit HANDLE truncated to 32 bits turns every call into a silent
+    no-op. The symptom is a job that exists and contains nothing -- which looks
+    exactly like the bug this module is here to fix.
+    """
+    process_entry = ctypes.POINTER(_ProcessEntry32)
+    thread_entry = ctypes.POINTER(_ThreadEntry32)
+    file_time = ctypes.POINTER(_FileTime)
+
+    dll = ctypes.WinDLL("kernel32", use_last_error=True)
+    dll.CreateJobObjectW.restype = _HANDLE
+    dll.CreateJobObjectW.argtypes = (ctypes.c_void_p, _LPCWSTR)
+    dll.AssignProcessToJobObject.restype = _BOOL
+    dll.AssignProcessToJobObject.argtypes = (_HANDLE, _HANDLE)
+    dll.TerminateJobObject.restype = _BOOL
+    dll.TerminateJobObject.argtypes = (_HANDLE, _UINT)
+    dll.CreateToolhelp32Snapshot.restype = _HANDLE
+    dll.CreateToolhelp32Snapshot.argtypes = (_DWORD, _DWORD)
+    dll.Process32FirstW.restype = _BOOL
+    dll.Process32FirstW.argtypes = (_HANDLE, process_entry)
+    dll.Process32NextW.restype = _BOOL
+    dll.Process32NextW.argtypes = (_HANDLE, process_entry)
+    dll.OpenProcess.restype = _HANDLE
+    dll.OpenProcess.argtypes = (_DWORD, _BOOL, _DWORD)
+    dll.TerminateProcess.restype = _BOOL
+    dll.TerminateProcess.argtypes = (_HANDLE, _UINT)
+    dll.GetProcessTimes.restype = _BOOL
+    dll.GetProcessTimes.argtypes = (_HANDLE, file_time, file_time, file_time, file_time)
+    dll.Thread32First.restype = _BOOL
+    dll.Thread32First.argtypes = (_HANDLE, thread_entry)
+    dll.Thread32Next.restype = _BOOL
+    dll.Thread32Next.argtypes = (_HANDLE, thread_entry)
+    dll.OpenThread.restype = _HANDLE
+    dll.OpenThread.argtypes = (_DWORD, _BOOL, _DWORD)
+    dll.ResumeThread.restype = _DWORD
+    dll.ResumeThread.argtypes = (_HANDLE,)
+    dll.CloseHandle.restype = _BOOL
+    dll.CloseHandle.argtypes = (_HANDLE,)
+    return dll
 
 
 def _text(raw: bytes) -> str:

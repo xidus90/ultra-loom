@@ -9,16 +9,25 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
+from ultraloom import process as process_module
 from ultraloom.process import (
+    NO_EXIT_CODE,
     Completed,
+    _descendants,
     _drain,
     _release_job,
+    _resumed_enough,
     _terminate_posix,
     _terminate_windows,
     run,
     spawn_kwargs,
     terminator,
 )
+
+# ResumeThread's answer for "could not": (DWORD) -1.
+_RESUME_FAILED = 0xFFFFFFFF
 
 # subprocess.CREATE_SUSPENDED exists only on Windows, but its value is a Win32
 # constant out of winbase.h and does not depend on where the test runs. Naming
@@ -85,12 +94,14 @@ def test_a_timeout_returns_instead_of_waiting_on_the_orphans_pipe(tmp_path: Path
     assert not completed.output_abandoned
 
 
-def test_it_keeps_the_output_of_a_command_whose_reader_had_to_be_abandoned(tmp_path: Path) -> None:
-    """The regression this module exists for: abandoned must mean cut off, not lost.
+def test_it_keeps_what_a_killed_tree_had_already_written(tmp_path: Path) -> None:
+    """Reading to EOF would hold every byte inside read() until the pipe closes.
 
-    Reading to EOF would hold every byte inside read() until the pipe closes --
-    and here it never does, because the orphan keeps its end open. The output
-    would be thrown away in exactly the case the user most needs to see it.
+    Here it closes only because the whole tree is killed. What the command
+    managed to say before that must survive: it is the case the user most needs
+    to see. That the same output survives when the reader has to be *given up
+    on* is a separate promise, tested in
+    `test_a_reader_that_never_returns_still_hands_over_what_it_read`.
     """
     completed = run(_python(_ORPHAN_AFTER_OUTPUT), cwd=tmp_path, timeout=1)
 
@@ -214,3 +225,140 @@ def test_releasing_a_job_that_was_never_created_is_harmless(tmp_path: Path) -> N
     process = subprocess.Popen([sys.executable, "-c", ""], cwd=tmp_path)
     process.wait(10)
     _release_job(process)
+
+
+def test_a_reader_that_never_returns_still_hands_over_what_it_read() -> None:
+    """The promise the chunk list exists for: abandoned must mean cut off, not lost.
+
+    The pipe here never closes, exactly like one an escaped descendant still
+    holds. `run` gives such a reader up after DRAIN_GRACE, and everything read
+    before that has to be readable from the main thread anyway.
+    """
+    released = threading.Event()
+
+    class Blocking(io.BufferedReader):
+        def __init__(self) -> None:
+            super().__init__(io.BytesIO(b""))
+            self.handed_over = False
+
+        def read1(self, size: int = -1, /) -> bytes:
+            if not self.handed_over:
+                self.handed_over = True
+                return b"said this much"
+            released.wait(30)
+            return b""
+
+    drain = _drain(Blocking(), "stdout")
+    try:
+        drain.thread.join(0.5)
+        assert drain.abandoned, "a reader still inside read1 counts as abandoned"
+        assert drain.text() == "said this much"
+    finally:
+        released.set()
+        drain.thread.join(5)
+
+
+def test_a_failure_on_the_way_to_the_wait_leaves_no_process_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C1: on Windows the process is suspended at that point and would never run out.
+
+    Adoption or the resume can fail. A raise that walks away from a suspended
+    process leaves it standing until the machine reboots, holding both pipes --
+    one such process per check command.
+    """
+    spawned: list[subprocess.Popen[bytes]] = []
+    real_popen = subprocess.Popen
+
+    def remembering(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        # A pass-through wrapper: the overloads cannot describe *args, and the
+        # bytes-mode Popen is the only one run() ever asks for.
+        process: subprocess.Popen[bytes] = real_popen(*args, **kwargs)  # type: ignore[call-overload]
+        spawned.append(process)
+        return process
+
+    def exploding(stream: object, name: str) -> None:
+        raise RuntimeError("adoption failed")
+
+    monkeypatch.setattr(subprocess, "Popen", remembering)
+    monkeypatch.setattr(process_module, "_drain", exploding)
+
+    with pytest.raises(RuntimeError, match="adoption failed"):
+        run(_python("import time; time.sleep(30)"), cwd=tmp_path, timeout=30)
+
+    assert spawned[0].poll() is not None, "the child outlived the failure that started it"
+
+
+def test_a_kill_that_does_not_take_is_reported_rather_than_waited_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C2: an unbounded wait after a failed kill is the hang, one line further down."""
+    monkeypatch.setattr(process_module, "KILL_GRACE", 0.5)
+    monkeypatch.setattr(process_module, "terminator", lambda platform: lambda process: None)
+
+    started = time.monotonic()
+    completed = run(_python("import time; time.sleep(30)"), cwd=tmp_path, timeout=1)
+    elapsed = time.monotonic() - started
+
+    assert completed.timed_out
+    assert completed.returncode == NO_EXIT_CODE
+    assert elapsed < 20, f"run() waited {elapsed:.1f}s on a kill that never took"
+
+
+def test_the_walk_finds_every_generation() -> None:
+    assert sorted(_descendants(1, [(2, 1), (3, 2), (4, 3)])) == [2, 3, 4]
+
+
+def test_the_walk_leaves_other_peoples_processes_alone() -> None:
+    assert _descendants(1, [(2, 99), (3, 98)]) == []
+
+
+def test_the_walk_survives_a_cycle_in_the_parent_table() -> None:
+    """C3: Windows reuses pids, so a pid can end up recorded as its own ancestor."""
+    assert sorted(_descendants(1, [(2, 1), (3, 2), (2, 3)])) == [2, 3]
+
+
+def test_the_walk_never_returns_its_own_root() -> None:
+    """The root is killed through its handle; listing it again would be a second kill."""
+    assert _descendants(1, [(1, 1), (2, 1)]) == [2]
+
+
+def test_a_thread_that_was_standing_still_counts_as_resumed() -> None:
+    assert _resumed_enough([1])
+
+
+def test_no_threads_at_all_is_not_a_resume() -> None:
+    assert not _resumed_enough([])
+
+
+def test_a_failed_resume_is_not_a_resume() -> None:
+    assert not _resumed_enough([_RESUME_FAILED])
+
+
+def test_a_thread_that_was_already_running_is_not_a_resume() -> None:
+    """I4: ResumeThread answers 0 there, and 0 would otherwise pass for success."""
+    assert not _resumed_enough([0])
+
+
+def test_the_module_imports_where_ctypes_has_no_windows_half() -> None:
+    """S1: on POSIX `import ctypes.wintypes` raises, and so would this module.
+
+    Simulated rather than skipped, because the machine this is measured on is
+    the one that cannot notice the mistake: ctypes.wintypes is made
+    unimportable and the Windows-only ctypes names are removed, which is the
+    shape ctypes has on Linux and macOS. If the module can still be imported
+    and still answers for the POSIX branch, the branch is alive.
+    """
+    probe = (
+        "import ctypes, sys;"
+        "sys.modules['ctypes.wintypes'] = None;"
+        "del ctypes.WinDLL, ctypes.WinError;"
+        "import ultraloom.process as p;"
+        "print(p.spawn_kwargs('linux'), p.terminator('linux').__name__)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, timeout=60
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "{'start_new_session': True} _terminate_posix"
