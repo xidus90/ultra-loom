@@ -78,6 +78,11 @@ Journal-Verlauf *nachvollzieht*:
 
 Ein frischer `run()` schlägt gar nicht erst nach.
 
+Beim Planen verfeinert: in `resume` wird der Cache beim **ersten Knoten ohne
+Eintrag** abgeschaltet, nicht erst am Ende des Laufs. Sonst würde ein Zyklus,
+der nach dem Freigabepunkt einen früheren Knoten erneut betritt, wieder aus dem
+Journal bedient — derselbe Fehler, nur eine Stelle später.
+
 Betroffen sind `Runner._step`, `Runner._answered`, `Runner._why_it_looped` und
 der Golden-Journal-Test. Die Erklärung „aus dem Journal bedient" in der Meldung
 der Besuchsgrenze verliert ihren Anlass und fällt weg; dasselbe gilt für den
@@ -100,6 +105,23 @@ Quelle: das Paket `ultraloom.flows`.
 - Eine Datei, deren Name kein Identifier ist (`my-flow.py`), wird nicht länger
   verschwiegen, sondern mit dem Grund aufgeführt. Damit ist der entsprechende
   Backlog-Punkt erledigt.
+
+### 3.3 Zwei Lücken, die beim Planen aufgefallen sind
+
+**Ein Ablauf braucht Parameter.** `find_flow` liefert heute ein statisches
+`flow` samt `initial` aus dem Modul. Ein *mitgelieferter* Ablauf kennt aber
+weder die `Config` des Projekts noch, was auf der Kommandozeile stand. Ein
+Ablaufmodul darf deshalb statt `flow`/`initial` ein `build(context) ->
+LoadedFlow` definieren; `FlowContext` trägt `root`, `config` und die Optionen.
+Beides zugleich zu definieren ist ein Fehler, kein Vorrang.
+
+**Ein Ablauf braucht einen eigenen Exit-Code.** `Result` trägt `status` und
+`detail`, und die CLI bildet jeden Fehler auf 1 ab — Exit 4 aus Abschnitt 7.3
+wäre damit nicht erreichbar. Ein Knoten wirft dafür `FlowExit(code, message)`;
+der Runner reicht den Code über `Result.exit_code` durch, die CLI verwendet ihn.
+Ein `FlowExit` bleibt ein Fehler wie jeder andere und wird der `on_error`-Kante
+des Knotens angeboten: der Code sagt, wie der *Prozess* endet, nicht dass der
+Graph nichts mehr zu tun hat.
 
 ---
 
