@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from ultraloom.config import Config
 from ultraloom.graph import Graph
 
 FLOW_DIR = ".ultraloom/flows"
@@ -19,6 +21,21 @@ FLOW_DIR = ".ultraloom/flows"
 # A module may legitimately bind `flow = None`; `None` is therefore not the
 # same answer as "the module never bound it".
 _ABSENT: Final = object()
+
+
+@dataclass(frozen=True, slots=True)
+class FlowContext:
+    """What a flow needs to know about the run it is being built for.
+
+    A bundled flow lives in ultraloom and knows nothing about the project it
+    runs in: which tools check it, where its tests are, what the caller asked
+    for on the command line. All three arrive here rather than through import
+    time magic, so a flow stays a function of its inputs.
+    """
+
+    root: Path
+    config: Config
+    options: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +70,7 @@ def list_flows(root: Path) -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
-def find_flow(name: str, root: Path) -> LoadedFlow:
+def find_flow(name: str, root: Path, context: FlowContext | None = None) -> LoadedFlow:
     """Load one flow by name, with the state it starts from."""
     # The name is interpolated into a path that is then executed, and it reaches
     # here from the command line and from a run's `.flow` marker file alike.
@@ -85,6 +102,30 @@ def find_flow(name: str, root: Path) -> LoadedFlow:
         spec.loader.exec_module(module)
     except Exception as error:
         raise FlowLoadError(f"{path}: {error}") from error
+
+    builder = getattr(module, "build", _ABSENT)
+    has_flow = getattr(module, "flow", _ABSENT) is not _ABSENT
+    if builder is not _ABSENT:
+        if has_flow:
+            # Both would leave the reader guessing which one runs, and the
+            # answer would be an implementation detail of this function.
+            raise FlowLoadError(f"{path}: defines both `build` and `flow`; keep one")
+        if context is None:
+            raise FlowLoadError(
+                f"{path}: defines `build`, so it needs a context; "
+                f"this caller loaded the flow without one"
+            )
+        if not callable(builder):
+            raise FlowLoadError(f"{path}: `build` must be callable, got {type(builder).__name__}")
+        try:
+            built = builder(context)
+        except Exception as error:
+            raise FlowLoadError(f"{path}: build failed: {error}") from error
+        if not isinstance(built, LoadedFlow):
+            raise FlowLoadError(
+                f"{path}: `build` must return a LoadedFlow, got {type(built).__name__}"
+            )
+        return built
 
     # A sentinel and not None: a module that binds `flow = None` defines one,
     # and telling its author it defines none sends them to look in the wrong

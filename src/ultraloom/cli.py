@@ -151,11 +151,30 @@ def _report(result: CheckResult) -> None:
         print(result.output.rstrip("\n"))
 
 
+def _flow_options(args: argparse.Namespace) -> dict[str, str]:
+    """The command line options a flow may read, as plain strings.
+
+    Strings and not parsed values: the CLI has no business knowing what a flow
+    means by "checks". Every flow narrows what it reads, and reports its own
+    error when it cannot.
+    """
+    return {
+        name: str(value)
+        for name in ("checks", "max_rounds")
+        if (value := getattr(args, name, None)) is not None
+    }
+
+
 def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
     # Local imports: `ultraloom check` must never pull the harness in, because
     # the harness needs the optional agent extra (spec 15.2). Task 13 pins this
     # with a child process that runs the check path and inspects sys.modules.
-    from ultraloom.discovery import FlowLoadError, FlowNotFoundError, find_flow
+    from ultraloom.discovery import (
+        FlowContext,
+        FlowLoadError,
+        FlowNotFoundError,
+        find_flow,
+    )
     from ultraloom.gate import pending_gate
     from ultraloom.journal import Journal
     from ultraloom.runner import Runner
@@ -193,8 +212,9 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
                 )
                 return _EXIT_FAIL
 
+    context = FlowContext(root=root, config=config, options=_flow_options(args))
     try:
-        loaded = find_flow(flow_name, root)
+        loaded = find_flow(flow_name, root, context)
     except (FlowNotFoundError, FlowLoadError) as error:
         print(str(error), file=sys.stderr)
         return _EXIT_FAIL

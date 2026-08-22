@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.discovery import FlowLoadError, FlowNotFoundError, find_flow, list_flows
+from ultraloom.config import Config
+from ultraloom.discovery import (
+    FlowContext,
+    FlowLoadError,
+    FlowNotFoundError,
+    find_flow,
+    list_flows,
+)
 
 A_FLOW = '''
 """A minimal flow for tests."""
@@ -161,3 +168,82 @@ def test_the_listing_does_not_advertise_a_name_find_flow_refuses(tmp_path: Path)
     (directory / "my-flow.py").write_text("", encoding="utf-8")
 
     assert list_flows(tmp_path) == ("good",)
+
+
+PARAMETERISED_FLOW = """
+from dataclasses import dataclass
+
+from ultraloom.discovery import LoadedFlow
+from ultraloom.graph import END, CodeNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Payload:
+    note: str = ""
+
+
+def build(context):
+    note = context.options["note"]
+    flow = Graph("parameterised", start="only")
+    flow.add(CodeNode("only", lambda _data: {"note": note}))
+    flow.edge("only", END)
+    return LoadedFlow(flow, Payload())
+"""
+
+
+def test_build_receives_the_context(tmp_path: Path) -> None:
+    write_flow(tmp_path, "parameterised", PARAMETERISED_FLOW)
+    context = FlowContext(root=tmp_path, config=Config(root=tmp_path), options={"note": "hello"})
+
+    loaded = find_flow("parameterised", tmp_path, context)
+
+    assert loaded.graph.name == "parameterised"
+
+
+def test_a_flow_with_build_and_no_context_says_so(tmp_path: Path) -> None:
+    write_flow(tmp_path, "parameterised", PARAMETERISED_FLOW)
+
+    with pytest.raises(FlowLoadError, match="needs a context"):
+        find_flow("parameterised", tmp_path)
+
+
+def test_a_module_defining_both_build_and_flow_is_refused(tmp_path: Path) -> None:
+    write_flow(tmp_path, "both", PARAMETERISED_FLOW + "\nflow = None\n")
+    context = FlowContext(root=tmp_path, config=Config(root=tmp_path), options={})
+
+    with pytest.raises(FlowLoadError, match="defines both"):
+        find_flow("both", tmp_path, context)
+
+
+def test_a_build_that_is_not_callable_is_refused(tmp_path: Path) -> None:
+    write_flow(tmp_path, "notcallable", "build = 3\n")
+    context = FlowContext(root=tmp_path, config=Config(root=tmp_path), options={})
+
+    with pytest.raises(FlowLoadError, match="must be callable"):
+        find_flow("notcallable", tmp_path, context)
+
+
+def test_a_build_that_raises_is_reported(tmp_path: Path) -> None:
+    write_flow(tmp_path, "boom", "def build(context):\n    raise ValueError('nope')\n")
+    context = FlowContext(root=tmp_path, config=Config(root=tmp_path), options={})
+
+    with pytest.raises(FlowLoadError, match="build failed: nope"):
+        find_flow("boom", tmp_path, context)
+
+
+def test_build_returning_the_wrong_type_is_refused(tmp_path: Path) -> None:
+    write_flow(tmp_path, "wrong", "def build(context):\n    return 'nope'\n")
+    context = FlowContext(root=tmp_path, config=Config(root=tmp_path), options={})
+
+    with pytest.raises(FlowLoadError, match="must return a LoadedFlow"):
+        find_flow("wrong", tmp_path, context)
+
+
+def test_a_plain_flow_module_still_loads_without_a_context(tmp_path: Path) -> None:
+    write_flow(tmp_path, "plain")
+
+    assert find_flow("plain", tmp_path).graph.name == "smoke"
+
+
+def test_a_context_defaults_to_empty_options(tmp_path: Path) -> None:
+    assert FlowContext(root=tmp_path, config=Config(root=tmp_path)).options == {}

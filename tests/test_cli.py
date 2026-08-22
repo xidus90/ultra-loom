@@ -471,3 +471,36 @@ def test_the_cli_returns_the_code_the_flow_named(tmp_path: Path) -> None:
     write_flow(tmp_path, "stopper", A_FLOW_THAT_EXITS_WITH_4)
 
     assert main(["run", "stopper", "--root", str(tmp_path), "--no-model"]) == 4
+
+
+A_BUILT_FLOW = '''
+"""A flow that is built from the run's context."""
+
+from dataclasses import dataclass
+
+from ultraloom.discovery import LoadedFlow
+from ultraloom.graph import END, CodeNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Data:
+    root: str = ""
+
+
+def build(context):
+    flow = Graph("built", start="mark")
+    flow.add(CodeNode("mark", lambda _d: {"root": str(context.root)}))
+    flow.edge("mark", END)
+    return LoadedFlow(flow, Data(root=str(context.config.root)))
+'''
+
+
+def test_run_builds_a_flow_that_defines_build(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_flow(tmp_path, "built", A_BUILT_FLOW)
+
+    code = main(["run", "built", "--root", str(tmp_path)])
+
+    assert code == 0
+    assert "done" in capsys.readouterr().out
