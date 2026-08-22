@@ -45,15 +45,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, cast
 
-# How long the draining threads get *together* after the tree has been killed.
-# One shared deadline, not one per reader: what a caller is promised is how long
-# run() may take, and two sequential grace periods would quietly turn that into
-# timeout + 2 x DRAIN_GRACE. If a reader is still blocked when the deadline has
-# passed, something out there survived and the run gives up on the rest of the
-# output rather than on itself.
+# The whole budget for everything that happens after the command's own time is
+# up: killing the tree, reaping the child, and letting the readers finish. One
+# deadline shared by all of them, not one grace period each -- what a caller is
+# promised is how long run() may take, and grace periods laid end to end would
+# quietly turn that promise into timeout + a multiple of this. Whatever is still
+# blocked when the deadline passes is given up on; the run gives up on the rest
+# of the output rather than on itself.
 DRAIN_GRACE = 5.0
 
-# How long a killed process gets to actually die. Bounded for the same reason
+# The same budget for a kill that has no deadline to share -- the failure path,
+# where there is no output left to wait for. Bounded for the same reason
 # everything else here is: an unbounded wait after a kill that did not take is
 # the very hang this module exists to prevent, only moved one line down.
 KILL_GRACE = 5.0
@@ -130,9 +132,12 @@ def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            _kill_tree(process)
 
+        # Started before the kill, on purpose: the reap and the readers share it.
         deadline = time.monotonic() + DRAIN_GRACE
+        if timed_out:
+            _kill_tree(process, deadline=deadline)
+
         for drain in (out, err):
             drain.thread.join(max(0.0, deadline - time.monotonic()))
 
@@ -154,19 +159,30 @@ def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
         _release_job(process)
 
 
-def _kill_tree(process: subprocess.Popen[bytes]) -> None:
+def _kill_tree(process: subprocess.Popen[bytes], *, deadline: float | None = None) -> None:
     """Kill the whole tree and reap the direct child, on a deadline.
 
-    The reap is bounded because the kill is not guaranteed: TerminateJobObject
-    can fail, killpg can land in a session this process may not signal. An
-    unbounded wait() there would hand the run exactly the hang the timeout was
-    meant to buy it out of.
+    Neither half may raise. A terminator that throws would otherwise be called a
+    second time by the handler in `run` -- same cause, same exception, and a
+    process that on Windows may still be suspended left standing, which is
+    precisely the case that handler exists to prevent. So a tree-wide kill that
+    fails falls back to the ordinary kill of the direct child, and the reap is
+    bounded because no kill is guaranteed to take.
+
+    Without a deadline the kill gets KILL_GRACE of its own; with one it takes
+    what is left of a budget it shares with the readers.
     """
-    terminator(sys.platform)(process)
-    # Suppressed, not handled: there is nothing further to try. The caller
-    # learns of it through NO_EXIT_CODE and through output_abandoned.
+    try:
+        terminator(sys.platform)(process)
+    except Exception:
+        # Whatever the tree-wide kill was, it did not happen. The direct child
+        # is still reachable the ordinary way, and the caller learns of the rest
+        # through NO_EXIT_CODE and output_abandoned.
+        with contextlib.suppress(Exception):
+            process.kill()
+    remaining = KILL_GRACE if deadline is None else max(0.0, deadline - time.monotonic())
     with contextlib.suppress(subprocess.TimeoutExpired):
-        process.wait(KILL_GRACE)
+        process.wait(remaining)
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,33 +350,109 @@ def _resumed_enough(previous_counts: Iterable[int]) -> bool:
     return any(count != _RESUME_FAILED and count > 0 for count in previous_counts)
 
 
+def _kill_job_then_strays(
+    *,
+    sweep: Callable[[], list[int]],
+    job_kill: Callable[[], bool],
+    direct_kill: Callable[[], None],
+    stray_kill: Callable[[int], None],
+    release: Callable[[int], None],
+) -> None:
+    """Order and failure policy for the Windows kill, with the syscalls handed in.
+
+    The syscalls are parameters so that the part that can be wrong -- the order,
+    and what happens when a step fails -- can be tested on any machine.
+
+    The sweep runs first even though the job kill matters more, because opening
+    the descendants before anything dies is what keeps their pids reserved; done
+    afterwards, the parents would be gone and the pids free to be handed out
+    again. That order is only safe as long as the sweep cannot stop the kill,
+    which is what `_sweep_or_nothing` is for: a sweep that fails costs strays,
+    never the job.
+
+    A job kill that reports failure falls back to the direct child, which is
+    reachable without any of this.
+    """
+    strays = _sweep_or_nothing(sweep)
+    try:
+        if not job_kill():
+            direct_kill()
+        for stray in strays:
+            stray_kill(stray)
+    finally:
+        for stray in strays:
+            release(stray)
+
+
+def _sweep_or_nothing(sweep: Callable[[], list[int]]) -> list[int]:
+    """The strays, or none of them -- but never an exception.
+
+    Collecting the strays needs a process snapshot and a creation time per
+    candidate, and every one of those can fail. None of it may prevent the kill
+    it is a supplement to: no strays is a partial kill, no kill at all is the
+    bug this module was written against.
+    """
+    try:
+        return sweep()
+    except Exception:
+        return []
+
+
+def _usable_handle(value: int | None) -> bool:
+    """Whether a Win32 call handed back a handle or a way of saying "no".
+
+    Two ways of saying no, which is the point of having this in one place:
+    OpenProcess and friends return NULL, which ctypes hands over as None or 0,
+    while CreateToolhelp32Snapshot returns INVALID_HANDLE_VALUE. That one is
+    (HANDLE) -1, and a c_void_p restype comes back *unsigned* -- comparing it
+    against a plain -1 never matches, and a failed snapshot would then be walked
+    as if the machine had no processes on it.
+    """
+    return value is not None and value != 0 and value != _INVALID_HANDLE
+
+
+def _could_be_a_descendant(root_started: int | None, candidate_started: int | None) -> bool:
+    """Whether a process found by parent pid can really descend from the root.
+
+    Windows keeps a parent pid on record after the parent has died and hands the
+    pid out again, so the table can name a stranger as our child. A stranger
+    that started *before* the root cannot be its descendant, and that is cheap
+    to check -- this is what keeps the sweep from killing somebody else's work.
+
+    Unreadable times are not treated alike, and deliberately so. A candidate
+    whose time cannot be read is dropped: it may be a stranger, and being unsure
+    is not a licence to kill. A root whose time cannot be read drops the filter
+    instead of the sweep: the tree is being killed either way, and a sweep
+    without the filter is still better than a grandchild left running.
+    """
+    if root_started is None:
+        return True
+    if candidate_started is None:
+        return False
+    return candidate_started >= root_started
+
+
 def _terminate_job_and_strays(  # pragma: no cover  # Windows-only syscalls
     process: subprocess.Popen[bytes], job: int
 ) -> None:
-    """The job first, then everything the job never got hold of."""
+    """Hand the Win32 calls to the policy in `_kill_job_then_strays`."""
     kernel32 = _kernel32()
-    strays = _open_strays(process)
-    try:
-        if not kernel32.TerminateJobObject(job, 1):
-            # The job failed us; the direct child is still reachable directly.
-            process.kill()
-        for stray in strays:
-            kernel32.TerminateProcess(stray, 1)
-    finally:
-        for stray in strays:
-            kernel32.CloseHandle(stray)
+    _kill_job_then_strays(
+        sweep=lambda: _open_strays(process),
+        job_kill=lambda: bool(kernel32.TerminateJobObject(job, 1)),
+        direct_kill=process.kill,
+        stray_kill=lambda stray: kernel32.TerminateProcess(stray, 1),
+        release=lambda stray: kernel32.CloseHandle(stray),
+    )
 
 
 def _open_strays(process: subprocess.Popen[bytes]) -> list[int]:  # pragma: no cover  # Windows-only
     """Handles to the descendants, opened before anything is killed.
 
     Handles rather than pids: a held handle keeps the pid reserved, so the pid
-    cannot be recycled between this walk and the kill that follows it.
-
-    The window *before* the walk is closed by the creation times. A stray whose
-    recorded parent pid was reused would otherwise be opened and killed although
-    it belongs to somebody else; a real descendant cannot have started before
-    the process it descends from.
+    cannot be recycled between this walk and the kill that follows it. Which
+    candidates survive the walk is decided by `_usable_handle` and
+    `_could_be_a_descendant`; this function only makes the calls.
     """
     kernel32 = _kernel32()
     root_started = _started_at(_process_handle(process))
@@ -370,10 +462,10 @@ def _open_strays(process: subprocess.Popen[bytes]) -> list[int]:  # pragma: no c
             handle = kernel32.OpenProcess(
                 _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid
             )
-            if not handle:
+            if not _usable_handle(handle):
                 # Unreachable is not a reason to leave the reachable ones alive.
                 continue
-            if _started_at(handle) < root_started:
+            if not _could_be_a_descendant(root_started, _started_at(handle)):
                 kernel32.CloseHandle(handle)
                 continue
             handles.append(handle)
@@ -388,7 +480,7 @@ def _process_parents() -> list[tuple[int, int]]:  # pragma: no cover  # Windows-
     """Every running process as (pid, parent pid)."""
     kernel32 = _kernel32()
     snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
-    if snapshot in (None, _INVALID_HANDLE):
+    if not _usable_handle(snapshot):
         raise ctypes.WinError(ctypes.get_last_error())
     entry = _ProcessEntry32()
     entry.dwSize = ctypes.sizeof(_ProcessEntry32)
@@ -407,7 +499,7 @@ def _thread_ids(pid: int) -> list[int]:  # pragma: no cover  # Windows-only sysc
     """Every thread currently belonging to one process."""
     kernel32 = _kernel32()
     snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
-    if snapshot in (None, _INVALID_HANDLE):
+    if not _usable_handle(snapshot):
         raise ctypes.WinError(ctypes.get_last_error())
     entry = _ThreadEntry32()
     entry.dwSize = ctypes.sizeof(_ThreadEntry32)
@@ -423,8 +515,13 @@ def _thread_ids(pid: int) -> list[int]:  # pragma: no cover  # Windows-only sysc
     return found
 
 
-def _started_at(handle: int) -> int:  # pragma: no cover  # Windows-only syscall
-    """When that process was created, as a raw FILETIME."""
+def _started_at(handle: int) -> int | None:  # pragma: no cover  # Windows-only syscall
+    """When that process was created as a raw FILETIME, or None if unreadable.
+
+    None rather than an exception: this runs on the path to a kill, and what to
+    make of an unreadable time is `_could_be_a_descendant`'s decision, not a
+    reason to abandon the kill.
+    """
     created, exited, kernel, user = (_FileTime() for _ in range(4))
     if not _kernel32().GetProcessTimes(
         handle,
@@ -433,7 +530,7 @@ def _started_at(handle: int) -> int:  # pragma: no cover  # Windows-only syscall
         ctypes.byref(kernel),
         ctypes.byref(user),
     ):
-        raise ctypes.WinError(ctypes.get_last_error())
+        return None
     # The fields are c_uint, which ctypes hands back as a plain int; mypy only
     # sees Structure.__getattr__.
     return (int(created.high) << 32) | int(created.low)

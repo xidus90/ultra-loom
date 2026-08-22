@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import io
 import subprocess
 import sys
@@ -15,16 +16,25 @@ from ultraloom import process as process_module
 from ultraloom.process import (
     NO_EXIT_CODE,
     Completed,
+    _could_be_a_descendant,
     _descendants,
     _drain,
+    _kill_job_then_strays,
     _release_job,
     _resumed_enough,
+    _sweep_or_nothing,
     _terminate_posix,
     _terminate_windows,
+    _usable_handle,
     run,
     spawn_kwargs,
     terminator,
 )
+
+# INVALID_HANDLE_VALUE as ctypes hands it back from a c_void_p restype: (HANDLE)
+# -1, unsigned. Computed the same way the module does, because the width of a
+# pointer is the whole point of the value.
+_INVALID_HANDLE = ctypes.c_void_p(-1).value
 
 # ResumeThread's answer for "could not": (DWORD) -1.
 _RESUME_FAILED = 0xFFFFFFFF
@@ -267,20 +277,11 @@ def test_a_failure_on_the_way_to_the_wait_leaves_no_process_behind(
     process leaves it standing until the machine reboots, holding both pipes --
     one such process per check command.
     """
-    spawned: list[subprocess.Popen[bytes]] = []
-    real_popen = subprocess.Popen
-
-    def remembering(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
-        # A pass-through wrapper: the overloads cannot describe *args, and the
-        # bytes-mode Popen is the only one run() ever asks for.
-        process: subprocess.Popen[bytes] = real_popen(*args, **kwargs)  # type: ignore[call-overload]
-        spawned.append(process)
-        return process
 
     def exploding(stream: object, name: str) -> None:
         raise RuntimeError("adoption failed")
 
-    monkeypatch.setattr(subprocess, "Popen", remembering)
+    spawned = _remember_spawned(monkeypatch)
     monkeypatch.setattr(process_module, "_drain", exploding)
 
     with pytest.raises(RuntimeError, match="adoption failed"):
@@ -293,16 +294,48 @@ def test_a_kill_that_does_not_take_is_reported_rather_than_waited_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """C2: an unbounded wait after a failed kill is the hang, one line further down."""
-    monkeypatch.setattr(process_module, "KILL_GRACE", 0.5)
+    spawned = _remember_spawned(monkeypatch)
+    monkeypatch.setattr(process_module, "DRAIN_GRACE", 0.5)
     monkeypatch.setattr(process_module, "terminator", lambda platform: lambda process: None)
 
-    started = time.monotonic()
-    completed = run(_python("import time; time.sleep(30)"), cwd=tmp_path, timeout=1)
-    elapsed = time.monotonic() - started
+    try:
+        started = time.monotonic()
+        completed = run(_python("import time; time.sleep(30)"), cwd=tmp_path, timeout=1)
+        elapsed = time.monotonic() - started
 
-    assert completed.timed_out
-    assert completed.returncode == NO_EXIT_CODE
-    assert elapsed < 20, f"run() waited {elapsed:.1f}s on a kill that never took"
+        assert completed.timed_out
+        assert completed.returncode == NO_EXIT_CODE
+        assert elapsed < 20, f"run() waited {elapsed:.1f}s on a kill that never took"
+    finally:
+        # The terminator was a no-op, so nobody else is going to do this.
+        _reap(spawned)
+
+
+def test_a_terminator_that_raises_does_not_leave_the_child_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """N2: a throwing terminator used to be called twice and then give up.
+
+    The second call had the same cause as the first, so the exception left
+    run() -- with a process behind it that on Windows may never even have been
+    resumed.
+    """
+    spawned = _remember_spawned(monkeypatch)
+
+    def refusing(platform: str) -> object:
+        def terminate(process: subprocess.Popen[bytes]) -> None:
+            raise OSError("the kill did not go through")
+
+        return terminate
+
+    monkeypatch.setattr(process_module, "terminator", refusing)
+
+    try:
+        completed = run(_python("import time; time.sleep(30)"), cwd=tmp_path, timeout=1)
+        assert completed.timed_out
+        assert spawned[0].poll() is not None, "the child outlived a terminator that threw"
+    finally:
+        _reap(spawned)
 
 
 def test_the_walk_finds_every_generation() -> None:
@@ -349,10 +382,19 @@ def test_the_module_imports_where_ctypes_has_no_windows_half() -> None:
     shape ctypes has on Linux and macOS. If the module can still be imported
     and still answers for the POSIX branch, the branch is alive.
     """
+    # Every name ctypes and subprocess only have on Windows, not merely the
+    # ones the module happens to use today: a relapse to ctypes.windll or to
+    # subprocess.CREATE_SUSPENDED would otherwise sail straight through here.
     probe = (
-        "import ctypes, sys;"
+        "import ctypes, subprocess, sys;"
         "sys.modules['ctypes.wintypes'] = None;"
-        "del ctypes.WinDLL, ctypes.WinError;"
+        "[delattr(ctypes, n) for n in ("
+        "'WinDLL', 'OleDLL', 'WinError', 'windll', 'oledll', 'GetLastError',"
+        "'get_last_error', 'set_last_error', 'FormatError', 'WINFUNCTYPE', 'HRESULT')"
+        " if hasattr(ctypes, n)];"
+        "[delattr(subprocess, n) for n in dir(subprocess)"
+        " if n.startswith(('CREATE_', 'DETACHED_', 'ABOVE_', 'BELOW_', 'HIGH_',"
+        " 'IDLE_', 'NORMAL_', 'REALTIME_', 'STARTF_', 'STD_', 'SW_'))];"
         "import ultraloom.process as p;"
         "print(p.spawn_kwargs('linux'), p.terminator('linux').__name__)"
     )
@@ -362,3 +404,169 @@ def test_the_module_imports_where_ctypes_has_no_windows_half() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "{'start_new_session': True} _terminate_posix"
+
+
+def _remember_spawned(monkeypatch: pytest.MonkeyPatch) -> list[subprocess.Popen[bytes]]:
+    """Hold on to every process run() starts, so a test can clean up after itself."""
+    spawned: list[subprocess.Popen[bytes]] = []
+    real_popen = subprocess.Popen
+
+    def remembering(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        # A pass-through wrapper: the overloads cannot describe *args, and the
+        # bytes-mode Popen is the only one run() ever asks for.
+        process: subprocess.Popen[bytes] = real_popen(*args, **kwargs)  # type: ignore[call-overload]
+        spawned.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", remembering)
+    return spawned
+
+
+def _reap(spawned: list[subprocess.Popen[bytes]]) -> None:
+    for process in spawned:
+        process.kill()
+        process.wait(10)
+
+
+class _Recorder:
+    """Notes what the kill policy did, in the order it did it."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def note(self, event: str) -> None:
+        self.events.append(event)
+
+
+def test_the_sweep_runs_before_the_job_is_killed() -> None:
+    """N1: the descendants have to be opened while their parents are still alive.
+
+    A handle held on a process keeps its pid reserved. Collected after the job
+    dies, the pids would be free to be handed out again between the walk and
+    the kill -- and the sweep would be killing whoever got them.
+    """
+    recorder = _Recorder()
+
+    def sweep() -> list[int]:
+        recorder.note("sweep")
+        return [7]
+
+    def job_kill() -> bool:
+        recorder.note("job")
+        return True
+
+    _kill_job_then_strays(
+        sweep=sweep,
+        job_kill=job_kill,
+        direct_kill=lambda: recorder.note("direct"),
+        stray_kill=lambda stray: recorder.note(f"stray {stray}"),
+        release=lambda stray: recorder.note(f"release {stray}"),
+    )
+
+    assert recorder.events == ["sweep", "job", "stray 7", "release 7"]
+
+
+def test_a_sweep_that_fails_costs_strays_and_not_the_job() -> None:
+    """N1: three syscalls on the way to the strays can fail, none may stop the kill.
+
+    Before this, one unreadable process time meant the job was never terminated
+    at all and the whole tree survived.
+    """
+    recorder = _Recorder()
+
+    def exploding() -> list[int]:
+        raise OSError("the snapshot failed")
+
+    def job_kill() -> bool:
+        recorder.note("job")
+        return True
+
+    _kill_job_then_strays(
+        sweep=exploding,
+        job_kill=job_kill,
+        direct_kill=lambda: recorder.note("direct"),
+        stray_kill=lambda stray: recorder.note(f"stray {stray}"),
+        release=lambda stray: recorder.note(f"release {stray}"),
+    )
+
+    assert recorder.events == ["job"]
+
+
+def test_a_job_that_refuses_to_die_falls_back_to_the_direct_child() -> None:
+    recorder = _Recorder()
+
+    _kill_job_then_strays(
+        sweep=lambda: [],
+        job_kill=lambda: False,
+        direct_kill=lambda: recorder.note("direct"),
+        stray_kill=lambda stray: recorder.note(f"stray {stray}"),
+        release=lambda stray: recorder.note(f"release {stray}"),
+    )
+
+    assert recorder.events == ["direct"]
+
+
+def test_every_stray_handle_is_given_back_even_when_a_kill_throws() -> None:
+    released: list[int] = []
+
+    with pytest.raises(OSError, match="no"):
+        _kill_job_then_strays(
+            sweep=lambda: [1, 2],
+            job_kill=lambda: True,
+            direct_kill=lambda: None,
+            stray_kill=_raising_stray_kill,
+            release=released.append,
+        )
+
+    assert released == [1, 2]
+
+
+def _raising_stray_kill(stray: int) -> None:
+    raise OSError("no")
+
+
+def test_a_failing_sweep_hands_back_no_strays() -> None:
+    def exploding() -> list[int]:
+        raise OSError("the snapshot failed")
+
+    assert _sweep_or_nothing(exploding) == []
+
+
+def test_a_working_sweep_is_handed_through() -> None:
+    assert _sweep_or_nothing(lambda: [4, 5]) == [4, 5]
+
+
+def test_a_null_handle_is_not_a_handle() -> None:
+    assert not _usable_handle(None)
+    assert not _usable_handle(0)
+
+
+def test_the_invalid_handle_value_is_not_a_handle() -> None:
+    """I2: it comes back unsigned, so comparing it against -1 never matched."""
+    assert not _usable_handle(_INVALID_HANDLE)
+    assert _INVALID_HANDLE != -1, "the whole point: ctypes hands it over unsigned"
+
+
+def test_a_real_handle_is_a_handle() -> None:
+    assert _usable_handle(1136)
+
+
+def test_a_process_older_than_the_root_cannot_descend_from_it() -> None:
+    """I1: a stranger whose dead parent once held a pid from our tree."""
+    assert not _could_be_a_descendant(1000, 999)
+
+
+def test_a_process_younger_than_the_root_may_descend_from_it() -> None:
+    assert _could_be_a_descendant(1000, 1001)
+    assert _could_be_a_descendant(1000, 1000)
+
+
+def test_a_candidate_whose_time_cannot_be_read_is_dropped() -> None:
+    """Being unsure about a stranger is not a licence to kill it."""
+    assert not _could_be_a_descendant(1000, None)
+
+
+def test_an_unreadable_root_time_drops_the_filter_and_not_the_sweep() -> None:
+    """The tree is being killed either way; no filter beats no sweep."""
+    assert _could_be_a_descendant(None, 999)
+    assert _could_be_a_descendant(None, None)
