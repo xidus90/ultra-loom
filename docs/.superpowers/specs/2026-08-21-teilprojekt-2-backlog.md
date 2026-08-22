@@ -403,8 +403,8 @@ scheitert mit `[coverage] must be a table`, und `[coverage]` kommt in der Datei
 nirgends vor. Einzeilige Reparatur, aber sie ändert eine Meldung, an der Tests
 hängen können — deshalb hier und nicht nebenbei in einer Doku-Aufgabe.
 Verwandt und ausdrücklich *kein* Fehler: ein Tippfehler **innerhalb** von
-`[verify.coverage]` (`reprot` statt `report`) wird still geschluckt, weil eine
-unbekannte Schlüssel abzulehnen eine eigene Entscheidung über Vorwärts-
+`[verify.coverage]` (`reprot` statt `report`) wird still geschluckt, weil einen
+unbekannten Schlüssel abzulehnen eine eigene Entscheidung über Vorwärts-
 kompatibilität wäre. Der README benennt beides.
 
 **Was der Umbau noch nicht gemessen hat.** Der `precommit`-Lauf in space ist
