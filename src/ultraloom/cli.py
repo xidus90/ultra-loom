@@ -221,7 +221,10 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
         print(result.detail)
     if result.status == "paused":
         return _EXIT_PAUSED
-    return _EXIT_OK if result.status == "done" else _EXIT_FAIL
+    if result.status == "done":
+        return _EXIT_OK
+    # A flow may name its own code; without one, a failure is a failure.
+    return result.exit_code if result.exit_code is not None else _EXIT_FAIL
 
 
 def _show(root: Path, run_id: str) -> int:

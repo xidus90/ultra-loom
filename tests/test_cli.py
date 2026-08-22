@@ -73,6 +73,32 @@ initial = Data()
 '''
 
 
+A_FLOW_THAT_EXITS_WITH_4 = '''
+"""A flow that refuses with an exit code of its own."""
+
+from dataclasses import dataclass
+
+from ultraloom.graph import END, CodeNode, Graph
+from ultraloom.runner import FlowExit
+
+
+@dataclass(frozen=True, slots=True)
+class Data:
+    note: str = ""
+
+
+def refuse(_data):
+    raise FlowExit(4, "refused on purpose")
+
+
+flow: Graph[Data] = Graph("stopper", start="refuse")
+flow.add(CodeNode("refuse", refuse))
+flow.edge("refuse", END)
+
+initial = Data()
+'''
+
+
 def write_flow(root: Path, name: str, body: str) -> None:
     target = root / ".ultraloom" / "flows" / f"{name}.py"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -439,3 +465,9 @@ def test_show_works_when_the_config_is_unreadable(
 
     assert code == 0
     assert "mark" in capsys.readouterr().out
+
+
+def test_the_cli_returns_the_code_the_flow_named(tmp_path: Path) -> None:
+    write_flow(tmp_path, "stopper", A_FLOW_THAT_EXITS_WITH_4)
+
+    assert main(["run", "stopper", "--root", str(tmp_path), "--no-model"]) == 4

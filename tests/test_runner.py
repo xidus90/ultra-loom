@@ -11,7 +11,14 @@ from ultraloom.graph import END, AgentNode, CodeNode, GateNode, Graph
 from ultraloom.journal import Journal
 from ultraloom.model.fake import FakeModel
 from ultraloom.model.port import ModelError, Reply
-from ultraloom.runner import Result, Runner, VisitLimitError, _guard_visits, _monotonic
+from ultraloom.runner import (
+    FlowExit,
+    Result,
+    Runner,
+    VisitLimitError,
+    _guard_visits,
+    _monotonic,
+)
 from ultraloom.state import State
 
 
@@ -531,3 +538,52 @@ def test_a_loop_that_does_advance_gets_the_plain_visit_limit(tmp_path: Path) -> 
 
     assert result.status == "error"
     assert result.detail == "node 'bump' exceeded max_visits=3"
+
+
+def _raise(error: Exception) -> Callable[[Payload], dict[str, object]]:
+    """A node body that fails, for the paths where only the failure matters."""
+
+    def body(_data: Payload) -> dict[str, object]:
+        raise error
+
+    return body
+
+
+def test_a_flow_exit_carries_its_code_into_the_result(tmp_path: Path) -> None:
+    def refuse(_data: Payload) -> dict[str, object]:
+        raise FlowExit(4, "the repairer changed a test file")
+
+    graph: Graph[Payload] = Graph("stop", start="refuse")
+    graph.add(CodeNode("refuse", refuse))
+    graph.edge("refuse", END)
+
+    result = Runner(graph, a_journal(tmp_path)).run(Payload(""))
+
+    assert result.status == "error"
+    assert result.exit_code == 4
+    assert result.detail == "the repairer changed a test file"
+
+
+def test_an_ordinary_failure_names_no_code(tmp_path: Path) -> None:
+    graph: Graph[Payload] = Graph("boom", start="boom")
+    graph.add(CodeNode("boom", _raise(ValueError("no"))))
+    graph.edge("boom", END)
+
+    result = Runner(graph, a_journal(tmp_path)).run(Payload(""))
+
+    assert result.exit_code is None
+
+
+def test_a_flow_exit_still_takes_the_error_edge(tmp_path: Path) -> None:
+    # An exit code says how the *process* should end, not that the graph has
+    # nothing left to do. A flow with a fallback keeps it.
+    graph: Graph[Payload] = Graph("stop", start="refuse")
+    graph.add(CodeNode("refuse", _raise(FlowExit(4, "nope"))))
+    graph.add(CodeNode("cleanup", lambda _data: {"note": "cleaned"}))
+    graph.edge("refuse", "cleanup", on_error=True)
+    graph.edge("refuse", END)
+    graph.edge("cleanup", END)
+
+    result = Runner(graph, a_journal(tmp_path)).run(Payload(""))
+
+    assert result.status == "done"

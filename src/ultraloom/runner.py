@@ -25,6 +25,23 @@ class ReplayGapError(RuntimeError):
     """Raised in replay mode for a node the journal does not cover."""
 
 
+# N818 is waived below: "FlowExitError" would rename the intent into the very
+# thing this is not -- an unexpected fault. A flow raising it chose to end the
+# process with a code, and the base class already carries the Error part.
+class FlowExit(RuntimeError):  # noqa: N818
+    """Raised by a node that wants the process to end with a named code.
+
+    A flow that has more than one way of failing needs more than one way of
+    saying so: a hook cannot tell "the checks stayed red" from "the repairer
+    touched a test file" if both arrive as 1. The code travels on the Result;
+    it never reaches into sys.exit from inside a node.
+    """
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 @dataclass(frozen=True, slots=True)
 class Result[T]:
     """How a run ended, and where."""
@@ -34,6 +51,7 @@ class Result[T]:
     node: str | None
     question: str | None
     detail: str | None
+    exit_code: int | None = None
 
 
 class Runner[T]:
@@ -180,7 +198,9 @@ class Runner[T]:
             if outcome.failed:
                 fallback = self._graph.error_name(name)
                 if fallback is None:
-                    return Result("error", outcome.state, name, None, outcome.detail)
+                    return Result(
+                        "error", outcome.state, name, None, outcome.detail, outcome.exit_code
+                    )
                 state, name = outcome.state, fallback
                 continue
 
@@ -225,7 +245,8 @@ class Runner[T]:
         except Exception as error:
             seconds = self._clock() - started
             self._write(node, state, {}, "error", 0, seconds, str(error))
-            return _Step(state, failed=True, detail=str(error))
+            code = error.code if isinstance(error, FlowExit) else None
+            return _Step(state, failed=True, detail=str(error), exit_code=code)
 
         seconds = self._clock() - started
         if isinstance(node, GateNode):
@@ -341,6 +362,7 @@ class _Step[T]:
     failed: bool = False
     question: str | None = None
     detail: str | None = None
+    exit_code: int | None = None
 
 
 def _guard_visits[T](node: Node[T], state: State[T]) -> None:
