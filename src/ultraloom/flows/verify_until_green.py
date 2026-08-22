@@ -202,8 +202,29 @@ def changed_files(root: Path) -> tuple[str, ...]:
             _EXIT_TOUCHED_A_TEST,
             f"cannot inspect the working tree in {root}: {result.stderr.strip()}",
         )
-    # Each entry is "XY path"; a rename adds its original path as its own entry.
-    return tuple(entry[3:] for entry in result.stdout.split("\0") if len(entry) > 3)
+    return _parse_status(result.stdout)
+
+
+def _parse_status(output: str) -> tuple[str, ...]:
+    """The paths out of a `--porcelain -z` answer, read field by field.
+
+    Most fields are "XY path". A rename or a copy is the exception: git emits
+    *two* fields for it, and only the first carries the three-character prefix
+    -- the second is the original path, bare. Cutting three characters off that
+    one too would turn "tests/test_cli.py" into "s/test_cli.py", and a test
+    renamed out of the way would walk straight past the guard.
+    """
+    fields = [field for field in output.split("\0") if field]
+    paths: list[str] = []
+    index = 0
+    while index < len(fields):
+        field = fields[index]
+        paths.append(field[3:])
+        index += 1
+        if field[:1] in ("R", "C") and index < len(fields):
+            paths.append(fields[index])
+            index += 1
+    return tuple(paths)
 
 
 def _is_protected(path: str, test_paths: tuple[str, ...]) -> bool:
@@ -213,6 +234,10 @@ def _is_protected(path: str, test_paths: tuple[str, ...]) -> bool:
     so the comparison is a POSIX one even where the flow runs on Windows.
     Comparing whole segments is the point -- a plain prefix test would let
     "tests/" catch "testsuite/thing.py".
+
+    Case is compared exactly, deliberately, even on Windows: git reports the
+    path as its index spells it, so the spelling matches what the project
+    configured rather than what a case-insensitive filesystem accepted.
     """
     candidate = PurePosixPath(path)
     for protected in test_paths:

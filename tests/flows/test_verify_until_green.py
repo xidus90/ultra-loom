@@ -220,3 +220,72 @@ def test_changed_files_survives_a_directory_outside_any_repository(tmp_path: Pat
         changed_files(outside)
 
     assert raised.value.code == 4
+
+
+def _repo(tmp_path: Path) -> Path:
+    """A repository with one committed file per case the -z parsing must handle."""
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_cli.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "gone.py").write_text("y = 2\n", encoding="utf-8")
+    (tmp_path / "a.c").write_text("int main;\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=tmp_path, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "first"),
+        cwd=tmp_path,
+        check=True,
+    )
+    return tmp_path
+
+
+def test_changed_files_reports_every_kind_of_change(tmp_path: Path) -> None:
+    """A rename, a deletion, a short path and a non-ASCII one, in one answer.
+
+    This is what -z and the paired reading of a rename are for: git reports a
+    rename as two NUL fields, and only the first carries the "XY " prefix.
+    """
+    repo = _repo(tmp_path)
+    subprocess.run(("git", "mv", "tests/test_cli.py", "moved.py"), cwd=repo, check=True)
+    subprocess.run(("git", "mv", "a.c", "b.c"), cwd=repo, check=True)
+    (repo / "gone.py").unlink()
+    (repo / "gr\u00fc\u00dfe.py").write_text("z = 3\n", encoding="utf-8")
+
+    reported = changed_files(repo)
+
+    assert set(reported) == {
+        "moved.py",
+        "tests/test_cli.py",  # the rename's original path, prefix-free
+        "b.c",
+        "a.c",  # three characters, and still a path
+        "gone.py",
+        "gr\u00fc\u00dfe.py",  # quoted without -z, and unreadable then
+    }
+
+
+def test_a_test_file_renamed_away_does_not_escape_the_guard(tmp_path: Path) -> None:
+    """Moving a test out of tests/ is deleting it by another name."""
+    repo = _repo(tmp_path)
+    subprocess.run(("git", "mv", "tests/test_cli.py", "moved.py"), cwd=repo, check=True)
+    guard = make_guard(repo, ("tests/",))
+
+    with pytest.raises(FlowExit) as raised:
+        guard(VerifyState())
+
+    assert "tests/test_cli.py" in str(raised.value)
+
+
+def test_a_test_deep_below_a_protected_directory_is_protected() -> None:
+    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("tests/flows/sub/test_x.py",))
+
+    with pytest.raises(FlowExit):
+        guard(VerifyState())
+
+
+def test_an_untracked_directory_is_reported_file_by_file(tmp_path: Path) -> None:
+    """Without -uall git collapses this to "new/", which is no path to any file."""
+    repo = _repo(tmp_path)
+    (repo / "new").mkdir()
+    (repo / "new" / "one.py").write_text("a = 1\n", encoding="utf-8")
+    (repo / "new" / "two.py").write_text("b = 2\n", encoding="utf-8")
+
+    assert set(changed_files(repo)) == {"new/one.py", "new/two.py"}
