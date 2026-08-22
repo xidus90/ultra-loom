@@ -11,6 +11,7 @@ from ultraloom.checks import KINDS, CheckResult
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext
 from ultraloom.flows.verify_until_green import (
+    _EXIT_STILL_RED,
     CheckRunner,
     RepairResult,
     VerifyState,
@@ -479,7 +480,16 @@ def test_a_resumed_state_that_is_still_red_repairs_rather_than_stagnating(tmp_pa
         tmp_path,
         outcomes=[{"lint": False}, {"lint": True}],
         initial=VerifyState(
-            kinds=("lint",), rounds=3, previous_failing=("lint",), touched=("src/thing.py",)
+            kinds=("lint",),
+            rounds=3,
+            # `failing` too, and not only `previous_failing`: the first check
+            # pass overwrites `previous_failing` with whatever `failing` held,
+            # so a state that names only the older half makes the condition
+            # compare ("lint",) against () and the fixture would pass with
+            # `touched` empty -- proving nothing about the rule it is named for.
+            failing=("lint",),
+            previous_failing=("lint",),
+            touched=("src/thing.py",),
         ),
         repairs=[RepairResult("second look", changed=True)],
         touched=[("src/thing.py",)],
@@ -535,4 +545,87 @@ def test_the_round_ceiling_may_be_raised_from_the_command_line(tmp_path: Path) -
     config = Config(root=tmp_path, test_paths=("tests/",))
     context = FlowContext(root=tmp_path, config=config, options={"max_rounds": "9"})
 
-    build(context).graph.validate()
+    graph = build(context).graph
+    graph.validate()
+
+    # The repair node's ceiling moves with the option. Fixed at five it would
+    # not show here -- validate() only asks whether a cycle is bounded at all --
+    # but a run of more than five rounds would end on the runner's visit guard
+    # instead of the flow's own red exit.
+    assert graph.node("repair").max_visits == 9
+
+
+def test_an_empty_checks_option_is_refused(tmp_path: Path) -> None:
+    """A run with nothing to check would report success without checking anything."""
+    config = Config(root=tmp_path, test_paths=("tests/",))
+    context = FlowContext(root=tmp_path, config=config, options={"checks": ""})
+
+    with pytest.raises(ValueError, match="names no check"):
+        build(context)
+
+
+def test_a_checks_option_of_only_separators_is_refused(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, test_paths=("tests/",))
+    context = FlowContext(root=tmp_path, config=config, options={"checks": ","})
+
+    with pytest.raises(ValueError, match="names no check"):
+        build(context)
+
+
+def test_a_profile_that_names_no_check_is_refused(tmp_path: Path) -> None:
+    """config.py validates the names in a profile, not that there are any."""
+    config = Config(root=tmp_path, test_paths=("tests/",), profiles={"nothing": ()})
+    context = FlowContext(root=tmp_path, config=config, options={"checks": "nothing"})
+
+    with pytest.raises(ValueError, match="names no check"):
+        build(context)
+
+
+def test_a_run_without_kinds_ends_red_rather_than_reporting_success(tmp_path: Path) -> None:
+    """`assemble` is callable directly, so the door `build` closes must be shut here too.
+
+    Without this the check node maps over nothing, `failing` is empty, the first
+    edge holds and the run reports done with exit 0 -- having started no checker.
+    """
+    result = _run_flow(tmp_path, outcomes=[{}], initial=VerifyState(kinds=()))
+
+    assert result.status == "error"
+    assert result.exit_code == _EXIT_STILL_RED
+    assert "no checks" in (result.detail or "")
+
+
+def test_a_raised_round_ceiling_reaches_the_red_exit_and_not_a_visit_limit(
+    tmp_path: Path,
+) -> None:
+    """Above five rounds the repair node's own ceiling used to be hit first.
+
+    That ends the run through the runner's visit guard: no exit code and a
+    detail about max_visits, instead of exit 1 and the reason the run is red.
+    """
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False}] * 9,
+        repairs=[RepairResult(f"attempt {n}", changed=True) for n in range(7)],
+        touched=[(f"src/attempt_{n}.py",) for n in range(7)],
+        max_rounds=6,
+    )
+
+    assert result.exit_code == _EXIT_STILL_RED
+    assert result.state.data.rounds == 7
+    assert "6 repair rounds" in (result.detail or "")
+
+
+def test_a_round_ceiling_that_is_not_a_number_says_so(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, test_paths=("tests/",))
+    context = FlowContext(root=tmp_path, config=config, options={"max_rounds": "abc"})
+
+    with pytest.raises(ValueError, match="max_rounds must be a whole number"):
+        build(context)
+
+
+def test_a_round_ceiling_below_one_says_so(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, test_paths=("tests/",))
+    context = FlowContext(root=tmp_path, config=config, options={"max_rounds": "0"})
+
+    with pytest.raises(ValueError, match="max_rounds must be at least 1"):
+        build(context)

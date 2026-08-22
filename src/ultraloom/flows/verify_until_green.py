@@ -7,6 +7,7 @@ what lets the same flow run in a Python package and in a Godot game.
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -60,6 +61,18 @@ def make_check(config: Config, runner: CheckRunner = run_check) -> Callable[[Ver
     """
 
     def check(state: VerifyState) -> Delta:
+        if not state.kinds:
+            # Without this the pool maps over nothing, `failing` comes back
+            # empty, the first edge out of this node holds and the run reports
+            # success -- having started no checker at all. A green answer
+            # nobody checked for is the one failure this flow must never
+            # produce, so it is refused here as well as in `_kinds_from`:
+            # `assemble` is callable without going through `build`.
+            raise FlowExit(
+                _EXIT_STILL_RED,
+                "no checks to run: the state names none, so nothing was verified",
+            )
+
         # Concurrent for the same reason checks.run_all is: subprocess.run
         # releases the GIL while it waits. Not run_all itself, because that one
         # runs every kind and this node runs the kinds the caller asked for.
@@ -327,7 +340,10 @@ def assemble(
     graph: Graph[VerifyState] = Graph("verify-until-green", start="check")
     # One more than repair: the last check grades the last repair pass.
     graph.add(CodeNode("check", make_check(config, check_runner), max_visits=max_rounds + 1))
-    graph.add(make_repair(config.test_paths))
+    # The node's own ceiling moves with the option: left at its default of five
+    # a run allowed more rounds would end on the runner's visit guard -- no exit
+    # code, a detail about max_visits -- instead of this flow's red exit.
+    graph.add(dataclasses.replace(make_repair(config.test_paths), max_visits=max_rounds))
     graph.add(CodeNode("guard", make_guard(root, config.test_paths, differ), max_visits=max_rounds))
     graph.add(CodeNode("report_red", report_red))
 
@@ -358,7 +374,7 @@ def build(context: FlowContext) -> LoadedFlow:
             "stopping a failing test from being edited away."
         )
     kinds = _kinds_from(context.options.get("checks"), config)
-    max_rounds = int(context.options.get("max_rounds", 5))
+    max_rounds = _max_rounds_from(context.options.get("max_rounds"))
     graph = assemble(config, context.root, max_rounds=max_rounds)
     # LoadedFlow holds any flow's graph and therefore types it over `object`,
     # which Graph -- being mutable -- is invariant in. The cast is the erasure
@@ -371,9 +387,14 @@ def _kinds_from(requested: str | None, config: Config) -> tuple[str, ...]:
     """What `--checks` asked for: a profile name, a list, or everything."""
     if requested is None:
         return KINDS
-    if requested in config.profiles:
-        return config.profiles[requested]
-    kinds = tuple(part.strip() for part in requested.split(",") if part.strip())
+    # The profile's kinds go through the emptiness check below like any other
+    # answer: returning them here would leave a profile configured as an empty
+    # list the one way to start a run that checks nothing.
+    kinds = (
+        config.profiles[requested]
+        if requested in config.profiles
+        else tuple(part.strip() for part in requested.split(",") if part.strip())
+    )
     unknown = [kind for kind in kinds if kind not in KINDS]
     if unknown:
         known = ", ".join(KINDS)
@@ -381,4 +402,32 @@ def _kinds_from(requested: str | None, config: Config) -> tuple[str, ...]:
         raise ValueError(
             f"unknown check {unknown[0]!r}; known checks: {known}; profiles: {profiles}"
         )
+    if not kinds:
+        # An empty answer passes the name check above -- there is no name to
+        # object to -- and would start a run that verifies nothing and reports
+        # success. "" and "," take this path, and so does a profile configured
+        # as an empty list: config.py validates the names in a profile, not
+        # that it holds any.
+        raise ValueError(
+            f"--checks {requested!r} names no check to run; known checks: {', '.join(KINDS)}"
+        )
     return kinds
+
+
+def _max_rounds_from(requested: str | None) -> int:
+    """How many repair rounds the caller allows.
+
+    Read here rather than trusted: `int()` on a word raises a message about
+    literals that never mentions the option, and a ceiling of zero or less
+    reaches the graph as an unbounded cycle -- reported as a GraphError about a
+    node's max_visits, which is true and tells the caller nothing.
+    """
+    if requested is None:
+        return 5
+    try:
+        rounds = int(requested)
+    except ValueError:
+        raise ValueError(f"max_rounds must be a whole number, got {requested!r}") from None
+    if rounds < 1:
+        raise ValueError(f"max_rounds must be at least 1, got {rounds}")
+    return rounds
