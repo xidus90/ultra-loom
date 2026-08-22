@@ -58,6 +58,8 @@ Vier Punkte, die während der Ausführung von Teilprojekt 2 gesehen und verschob
 wurden und bis zum Abschlussreview nur im Ausführungsledger standen — der ist
 git-ignoriert und stirbt mit dem Arbeitsbereich.
 
+**ERLEDIGT** — umgesetzt in [2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md) §7. `checks._run` ruft jetzt `process.run`: `Popen` in einer eigenen Gruppe (POSIX) beziehungsweise einem Job-Objekt (Windows, über `ctypes`), zwei Lesefäden je Prozess statt `communicate()`, Baumtötung bei Fristablauf und ein zweites, kurzes Fenster für das Einsammeln. Kommt ein Lesefaden nicht zurück, wird er aufgegeben und das Ergebnis sagt, dass die Ausgabe unvollständig ist. Der Befund von damals steht unverändert darunter, weil er der Grund für den Umbau ist.
+
 **Die Zeitgrenze tötet nur das Kind, nicht die Enkel.** `checks._run` ruft
 `subprocess.run(..., timeout=…)` — die Grenze aus §8 der Spec, Vorgabe 600
 Sekunden. `subprocess.run` beendet bei Zeitüberschreitung **den direkten
@@ -195,6 +197,8 @@ und nichts darüber, was ohnehin schon da ist.
 
 ## Was die Prüfkette über Werkzeuge annimmt
 
+**ERLEDIGT, soweit er zu erledigen war** — die Mechanik bleibt bewusst, wie sie war (Ausgabe deuten hieße raten); was fehlte, war die Warnung, und die steht jetzt im README unter *Two things worth knowing before you configure a check*.
+
 **Ein Exit-Code ist das ganze Urteil — und manche Prüfwerkzeuge kennen ihn
 nicht.** `checks._run` liest `returncode`, sonst nichts. Die Prüfungen von space
 sind Claude-Code-Hooks: `coverage_gate.py` meldet seine Befunde über
@@ -211,6 +215,8 @@ Prüfkommando, das aus einem Hook-Skript kommt, ist daraufhin anzusehen, ob es
 seinen Befund im Exit-Code trägt.** Kosten: ein Projekt, das das übersieht,
 bekommt eine grüne Prüfung, die nie etwas geprüft hat.
 
+**ERLEDIGT** — umgesetzt in [2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md) §5 und §6. `lint`, `types` und `test` nehmen drei Gestalten: Zeichenkette, Liste, Tabelle mit `commands` und `threaded`. Die damaligen Folgefragen sind beantwortet: **alle** Kommandos laufen, auch nach dem ersten roten (der Reparateur braucht die vollständige Mängelliste), der Bericht bekommt je Kommando eine `$`-Überschrift und bleibt bei genau einem Kommando Zeichen für Zeichen der alte, und `threaded` ist damit ein reiner Geschwindigkeitsschalter.
+
 **Eine Prüfart, ein Kommando.** `config._KINDS` erlaubt je Art genau eine
 Zeichenkette. space lintet mit zweien: `gdlint` und `gdformat --check` laufen
 über dieselben Verzeichnisse und sind beide „lint". Die Konfiguration von space
@@ -222,6 +228,8 @@ Zeichenkette, sofort Folgefragen aufmacht: Läuft nach dem ersten roten Kommando
 noch das zweite? Wie sieht der Bericht aus, den der Reparateur bekommt? Die
 Presets tragen die Antwort in Ansätzen (`measure` plus `argv`), aber für
 mehrere gleichrangige Kommandos ist sie nicht gebaut.
+
+**ERLEDIGT** — umgesetzt in [2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md) §3, §4 und §8. Prüfungen laufen in Stufen, nebenläufig nur innerhalb einer Stufe; die Kanten kommen aus dem Preset und werden von `[verify.after]` überschrieben. Die zweite Frage — was mit einer Prüfung geschieht, deren Vorgänger rot ist — ist mit der neuen Quelle `blocked` beantwortet: rot, nicht übersprungen, aber nicht außer Reichweite. Und die Doppelmessung ist weg: `test` misst mit, wenn `coverage` im selben Lauf angefordert ist.
 
 **Zwischen Prüfungen gibt es keine Reihenfolge.** Spec 9.4 nimmt an, Prüfungen
 seien unabhängig, und lässt sie deshalb nebenläufig laufen. In space ist der
@@ -300,3 +308,72 @@ Liste** — er ist der Grund, warum in space kein grüner `precommit`-Lauf steht
   Projekten haben versucht, einen echten Agenten dazu zu bringen, eine
   Testdatei anzufassen; keiner hat es geschafft. Die Wache ist durch Unit-Tests
   abgedeckt und gegen ein echtes Modell unbewiesen.
+
+# Was der Umbau der Prüfkette hinterlässt
+
+Gesehen, beurteilt, mit Begründung verschoben — dritte Runde, aus dem Umfang
+[2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md)
+(Stufen, Prozessgruppe, mehrere Kommandos je Prüfart).
+
+**Ein Journal von vor dem Umbau passt nicht mehr auf seinen `check`-Knoten.**
+`VerifyState` hat zwei Felder dazubekommen — `blocked` und `brief` —, und der
+Zustand geht in den `input_hash` ein, mit dem das Journal seine Einträge
+schlüsselt. Ein Lauf, der vor dem Upgrade begonnen hat, findet nach dem Upgrade
+für seinen `check`-Knoten keinen passenden Eintrag mehr: `replay` leitet nicht
+mehr dasselbe Ende ab, und eine Wiederaufnahme führt den Knoten neu aus und
+wiederholt damit auch die Reparaturrunde dahinter — bezahlte Token für Arbeit,
+die schon getan war. Verschoben, weil die Abhilfe eine Versionierung des
+Zustands wäre (Migration alter Einträge oder ein Schema-Stempel im Journal), und
+das ist eine Entscheidung über das Journalformat, nicht über die Prüfkette. Vor
+0.1.0 sind die Kosten gering: die Läufe, die es gibt, sind unsere eigenen. Was
+fehlt, ist die Meldung — heute sieht ein solcher Fall aus wie ein Knoten, der
+eben nochmal lief, und nicht wie ein unbrauchbar gewordenes Journal.
+
+**Der POSIX-Zweig von `process.py` ist nie ausgeführt worden.** `spawn_kwargs`
+und `terminator` sind über eine gewöhnliche Auswahlfunktion testbar, und die
+Tests wählen beide Plattformen — geprüft ist damit die *Auswahl*. Der Rumpf von
+`_terminate_posix` selbst, also `os.killpg(os.getpgid(pid), SIGKILL)`, trägt ein
+`# pragma: no cover  # POSIX-only` und ist auf dieser Maschine (Windows 11) noch
+nie gelaufen. Verschoben, weil die einzige ehrliche Prüfung eine POSIX-Maschine
+verlangt: ein Kommando, das einen langlebigen Enkel hinterlässt, die Zeitgrenze
+darüber, und danach die Frage, ob der Enkel wirklich tot ist. Kosten des
+Liegenlassens: die Hälfte der Plattformweiche ist Behauptung. **Dies ist der
+oberste Punkt dieser Liste.**
+
+**Das Restfenster bei der PID-Wiederverwendung unter Windows.** Der Baum wird
+über ein Job-Objekt getötet, dem der Prozess suspendiert zugewiesen wird — das
+schließt das Fenster, in dem ein schnelles Kind schon einen Enkel erzeugt haben
+könnte. Der Kehraus über die Eltern-PID-Tabelle daneben hat aber ein eigenes:
+Windows behält eine Eltern-PID im Eintrag, nachdem der Elternprozess gestorben
+ist, und vergibt PIDs neu. `_could_be_a_descendant` fängt den Normalfall ab —
+wer *vor* der Wurzel gestartet ist, kann nicht ihr Nachfahre sein. Ein
+Fremdprozess, der *nach* der Wurzel geboren wird und eine recycelte PID aus
+unserem Baum als Eltern-PID trägt, bleibt ununterscheidbar und würde
+mitgetötet. Verschoben, weil die saubere Antwort Handles statt PIDs über die
+ganze Kette wären und die Wahrscheinlichkeit in der Praxis winzig ist: das
+Fenster ist der Bruchteil einer Sekunde zwischen dem Tod eines Kindes und dem
+Kehraus. Festgehalten, weil ein fremder getöteter Prozess ein Schaden ist, den
+niemand mit ultraloom in Verbindung bringen würde.
+
+**Godot hat kein `coverage`-Preset, und das kostet jedes Projekt eine Zeile.**
+Der Eintrag für `project.godot` ist bewusst entfallen: GDScript-Coverage ist in
+dem Projekt, aus dem der Fall stammt, das Editor-Addon Nano Coverage — es
+instrumentiert die Quellen an Ort und Stelle und schreibt `lcov.info` als
+Nebenprodukt des Suitenlaufs, und die Schwelle darüber erzwingt ein
+projekteigenes Skript. Weder das eine noch das andere ist ein Kommando, das ein
+zweites Godot-Projekt aufrufen könnte, und ein erfundenes hätte nach einer
+Prüfung ausgesehen, ohne eine zu sein. Die Folge: die Aussage „ein
+Godot-Coverage-Bericht folgt immer auf die Suite" ist allgemein wahr, aber
+nirgends allgemein hinterlegt — jedes Godot-Projekt schreibt sein
+`coverage = "test"` selbst in `[verify.after]`, neben sein Kommando unter
+`[verify.coverage].report`. Verschoben, weil die Abhilfe ein Preset wäre, das
+eine Reihenfolge ohne ein Kommando trägt, und damit eine neue Sorte
+Preset-Eintrag. Kosten: eine Wiederholung je Projekt und ein Godot-Projekt, das
+sie vergisst, liest einen Bericht aus dem vorigen Lauf.
+
+**Was der Umbau noch nicht gemessen hat.** Der `precommit`-Lauf in space ist
+seither nicht wiederholt worden. Er wäre die erste Messung von zwei Zahlen, die
+dieser Umfang behauptet: was `threaded = true` über zwei gleichrangige
+GDScript-Linter bringt, und was die eingesparte zweite Suite kostet
+beziehungsweise spart. Die Zahlen gehören auf die Ablaufseite, neben die
+bestehenden Tabellen — dort steht bisher nur der Stand vor dem Umbau.

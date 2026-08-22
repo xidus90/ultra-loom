@@ -39,7 +39,7 @@ kein Ausgang ist.
 
 | Knoten | Art | `max_visits` | Was er tut |
 | --- | --- | --- | --- |
-| `check` | code | `max_rounds + 1` | Führt die gewählten Prüfungen nebenläufig aus, sammelt die roten, erhöht den Rundenzähler und merkt sich, was die vorige Runde gefunden hatte. |
+| `check` | code | `max_rounds + 1` | Führt die gewählten Prüfungen in Stufen aus — nebenläufig nur innerhalb einer Stufe —, sammelt die roten, erhöht den Rundenzähler und merkt sich, was die vorige Runde gefunden hatte. |
 | `repair` | agent | `max_rounds + 1` | Bekommt den Bericht der roten Prüfungen und repariert die Quellen. Werkzeugprofil `edit`, Effort `high`. |
 | `guard` | code | `max_rounds + 1` | Liest den Arbeitsbaum über `git status` und bricht ab, wenn der Reparateur geschützte Pfade angefasst hat. |
 | `report_red` | code | 1 | Beendet den Lauf rot und sagt, warum. |
@@ -65,9 +65,17 @@ dem er rot ist.
 | `failing` | `tuple[str, ...]` | Die Arten, die in der letzten Runde rot waren. |
 | `unfixable` | `tuple[str, ...]` | Davon die, die keine Reparatur schließen kann. |
 | `blocked` | `tuple[str, ...]` | Davon die, die gar nicht gelaufen sind, weil ihr Vorgänger rot war. Weder reparierbar noch außer Reichweite — und diese dritte Antwort muss bis zur Abbruchentscheidung durchhalten. |
+| `brief` | `str` | Derselbe Bericht, gekürzt auf das, was der Reparateur zu sehen bekommt. |
 | `touched` | `tuple[str, ...]` | Was `git status` nach dem Reparaturlauf als geändert meldet. |
 | `rounds` | `int` | Wie oft `check` gelaufen ist. |
 | `previous_failing` | `tuple[str, ...]` | Was die vorige Runde gefunden hat. Eine Kantenbedingung sieht nur einen Zustand, und „dieselben Prüfungen schon wieder" ist sonst nicht beantwortbar. |
+
+`report` und `brief` tragen denselben Befund in zwei Längen. Der Prompt des
+Reparateurs bekommt `brief`: je Prüfung höchstens 200 Zeilen, Kopf und Fuß
+erhalten und eine Zeile dazwischen, die sagt, wie viel fehlt. Der Fuß wiegt
+schwerer als der Kopf, weil pytest seine Zusammenfassung ans Ende schreibt. Ins
+Journal geht `report` mit der **vollständigen** Ausgabe — gekürzt wird nur, was
+Token kostet, nie das, was einen Lauf im Nachhinein auswertbar macht.
 
 Zwischen `repair` und dem nächsten `check` liest der Zustand absichtlich
 gemischt: `failing` und `unfixable` tragen noch die Werte der alten Runde,
@@ -108,6 +116,18 @@ ihr Vorgänger grün ist. Wäre sie außer Reichweite, gäbe der Ablauf bei jede
 gewöhnlichen roten Test sofort auf. Und weil `coverage` in `UNFIXABLE` steht,
 wird die Quelle **vor** der Art gefragt: ein blockiertes `coverage` ist keine
 Deckungslücke, sondern eine Prüfung, die nicht lief.
+
+Der Reparateur sieht sie deshalb auch nicht in der Mängelliste, sondern
+darunter, in einer eigenen Zeile:
+
+```
+Nicht gelaufen, weil ein Vorgänger rot war: coverage
+```
+
+Genannt, damit ein Bericht mit grünem `lint`, grünem `types` und rotem `test`
+sich nicht liest, als wäre die Abdeckung geprüft worden. Getrennt, damit klar
+ist, dass hier nichts zu reparieren ist: der Griff ist der rote Vorgänger, und
+sobald der grün ist, läuft die blockierte Prüfung von selbst wieder mit.
 
 Für die Abbruchentscheidung zählt eine blockierte Prüfung deshalb gar nicht mit:
 „außer Reichweite" heißt genau dann, wenn *jede rote, nicht blockierte* Prüfung
@@ -283,8 +303,10 @@ Aus `.ultraloom/config.toml`:
 | Schlüssel | Wirkung |
 | --- | --- |
 | `[verify].tests` | Die Pfade, die der Reparateur nicht anfassen darf. **Pflicht** — ohne sie startet der Ablauf nicht. |
-| `[verify].lint`, `.types`, `.test` | Die Kommandos der jeweiligen Prüfung. Fehlen sie, greifen die Sprachpresets. |
-| `[verify].timeout` | Sekunden pro Prüfkommando. |
+| `[verify].lint`, `.types`, `.test` | Die Kommandos der jeweiligen Prüfung, in einer von drei Gestalten: Zeichenkette (eines), Liste (mehrere, nacheinander) oder Tabelle mit `commands` und `threaded` (mehrere, wahlweise nebenläufig). Alle laufen, auch nach dem ersten roten. Fehlen sie, greifen die Sprachpresets. |
+| `[verify].timeout` | Sekunden pro **Prüfkommando** — nicht pro Prüfart und nicht pro Stufe. |
+| `[verify.after]` | Reihenfolge zwischen Prüfarten: bildet eine Art auf den einen Vorgänger ab, den sie liest. Überschreibt die Vorgabe des Presets. Ein Godot-Projekt schreibt hier `coverage = "test"` selbst, weil es kein GDScript-Coverage-Preset gibt. |
+| `[verify].max_parallel` | Deckel auf die gleichzeitig laufenden Prüfprozesse über den ganzen Lauf. Vorgabe `os.process_cpu_count()`. |
 | `[verify].godot_import` | Standard `true`. Auf `false` gesetzt, entfällt die Import-Vorbedingung für `test` und `coverage` — für ein Godot-Projekt, dessen eigenes Prüfkommando den Import fährt oder das nicht über eine Engine testet. Siehe *Was ein Godot-Projekt vorher braucht*. |
 | `[verify.profiles].<name>` | Benannte Listen von Prüfarten, die `--checks <name>` auswählen kann. |
 | `[verify.coverage].report` | Das Kommando der Coverage-Prüfung. Es geht **jedem** anderen Weg vor: gesetzt, gewinnt es auch gegen ein `coverage`-Kommando aus `.ultraloom/checks/` und gegen das Sprachpreset — ohne Warnung. |
@@ -309,7 +331,7 @@ Parametern aufbauen wie der ursprüngliche Lauf.
 | Ausgang | Exit-Code | Wann |
 | --- | --- | --- |
 | grün | 0 | `check` findet keine rote Prüfung — oder, unter `ultraloom replay`, das Journal eines Laufs, der so endete. Ein `replay` prüft nichts nach; er leitet das aufgezeichnete Ende neu ab. |
-| rot, außer Reichweite | 1 | Es ist nichts Reparierbares mehr übrig: jede rote Prüfung ist unreparierbar. Eine unreparierbare *neben* reparierbaren beendet den Lauf **nicht** — sonst erreichte ein Projekt, dessen Coverage-Prüfung über die Tests misst, bei einem einzigen roten Test nie eine Reparaturrunde. |
+| rot, außer Reichweite | 1 | Es ist nichts Reparierbares mehr übrig: jede rote, **nicht blockierte** Prüfung ist unreparierbar. Eine blockierte zählt nicht mit — sie schließt sich, sobald ihr Vorgänger grün ist. Eine unreparierbare *neben* reparierbaren beendet den Lauf **nicht** — sonst erreichte ein Projekt, dessen Coverage-Prüfung über die Tests misst, bei einem einzigen roten Test nie eine Reparaturrunde. |
 | rot, Runden aufgebraucht | 1 | `rounds > max_rounds`. |
 | rot, stagniert | 1 | Dieselben Prüfungen sind wieder rot, und der Reparaturlauf dazwischen hat keine Datei geändert. |
 | rot, Ring in der Reihenfolge | 1 | `[verify.after]` und die Presets ergeben zusammen einen Kreis. Kein roter Befund, sondern das Ende des Laufs: eine Reparaturrunde gegen den Quelltext schließt keinen Ring in der Konfiguration. Die Meldung nennt den Pfad. |
@@ -428,7 +450,9 @@ danach dazugekommen ist.
   senken, aber ein Verbot im Prompt ist eine Bitte; `guard` ist die Mechanik.
 - Der volle `precommit`-Lauf auf sauberem Baum braucht rund 9 s, fast alles
   davon die zweimal laufende Testsuite (einmal unter `test`, einmal unter
-  `coverage`). Das ist der in Spec 9.4 bewusst bezahlte Preis.
+  `coverage`). Das war der in Spec 9.4 bewusst bezahlte Preis — er ist seit den
+  Stufen nicht mehr fällig: `test` misst mit, `coverage` berichtet in der Stufe
+  danach, und die Suite läuft einmal.
 - Beim ersten Versuch, den Fehler für Lauf 0002 einzubauen (falsche
   Rückgabeannotation `-> int` an `_decode`), stürzte mypy 2.3.1 reproduzierbar
   mit „INTERNAL ERROR" ab und meldete die echten Fehler nur zum Teil. Das ist
@@ -439,8 +463,11 @@ danach dazugekommen ist.
 
 ## Die Läufe nach der Reparatur
 
-Dieselben Lagen noch einmal, mit Grundlinie, mit `set(failing) <= set(unfixable)`
-als Abbruchbedingung und mit der vollständigen roten Meldung.
+Dieselben Lagen noch einmal, mit Grundlinie und mit der vollständigen roten
+Meldung. Abbruchbedingung war damals `set(failing) <= set(unfixable)`; die
+Quelle `blocked` gab es noch nicht, und heute zählt die Bedingung blockierte
+Prüfungen ausdrücklich nicht mit (siehe *Abbruchbedingungen und Exit-Codes*).
+Die Zahlen sind das Protokoll jener Läufe, nicht der heutige Stand.
 
 | Lauf | Lage | Exit | Runden | Token | Laufzeit |
 | --- | --- | --- | --- | --- | --- |
