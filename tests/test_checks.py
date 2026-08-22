@@ -9,10 +9,14 @@ from threading import Semaphore
 
 import pytest
 
-from ultraloom import process
+from ultraloom import checks, process
 from ultraloom.checks import (
+    BLOCKED,
     KINDS,
     PRESETS,
+    UNREADY,
+    CheckResult,
+    CheckRunner,
     CheckUnavailableError,
     Command,
     Preset,
@@ -20,6 +24,7 @@ from ultraloom.checks import (
     resolve_check,
     run_all,
     run_check,
+    run_kinds,
 )
 from ultraloom.config import Config, load_config
 
@@ -1079,3 +1084,187 @@ def test_no_known_language_means_no_language_measurer(tmp_path: Path) -> None:
     command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
     assert command.measure == ()
     assert command.warning == ""
+
+
+def _fake(record: list[str], red: set[str] | None = None) -> CheckRunner:
+    """A runner that records what it was asked to run and never starts a process."""
+    failing = red or set()
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        record.append(kind)
+        return CheckResult(kind, kind not in failing, "", "fake")
+
+    return runner
+
+
+def test_coverage_runs_after_test(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    record: list[str] = []
+
+    run_kinds(("lint", "types", "test", "coverage"), Config(root=tmp_path), _fake(record))
+
+    assert record.index("coverage") > record.index("test")
+
+
+def test_a_red_predecessor_blocks_its_dependant(tmp_path: Path) -> None:
+    python_project(tmp_path)
+
+    results = run_kinds(("test", "coverage"), Config(root=tmp_path), _fake([], red={"test"}))
+
+    coverage = next(result for result in results if result.kind == "coverage")
+    assert not coverage.ok
+    assert coverage.source == BLOCKED
+    assert "test" in coverage.output
+
+
+def test_a_blocked_check_never_starts_its_tool(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    record: list[str] = []
+
+    run_kinds(("test", "coverage"), Config(root=tmp_path), _fake(record, red={"test"}))
+
+    assert "coverage" not in record
+
+
+def test_blocking_is_transitive(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.after]\ncoverage = "test"\ntest = "lint"\n')
+    python_project(tmp_path)
+
+    results = run_kinds(
+        ("lint", "test", "coverage"), load_config(tmp_path), _fake([], red={"lint"})
+    )
+
+    assert [result.source for result in results if result.kind != "lint"] == [BLOCKED, BLOCKED]
+
+
+def test_an_unavailable_predecessor_blocks_too(tmp_path: Path) -> None:
+    """Red is red: a missing tool leaves nothing for the dependant to read either."""
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        if kind == "test":
+            raise CheckUnavailableError("no suite here")
+        return CheckResult(kind, True, "", "fake")
+
+    python_project(tmp_path)
+
+    results = run_kinds(("test", "coverage"), Config(root=tmp_path), runner)
+
+    assert [result.source for result in results] == ["unavailable", BLOCKED]
+
+
+def test_an_unready_predecessor_blocks_too(tmp_path: Path) -> None:
+    """The stale-report coupling in _measures_for: `coverage` already dropped its
+    own measuring step because `test` was asked for, so a `test` that never ran
+    must not leave `coverage` reading whatever an earlier run wrote."""
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, kind != "test", "never imported", UNREADY)
+
+    python_project(tmp_path)
+
+    results = run_kinds(("test", "coverage"), Config(root=tmp_path), runner)
+
+    assert [result.source for result in results] == [UNREADY, BLOCKED]
+
+
+def test_a_kind_whose_predecessor_was_not_asked_for_runs_at_once(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    record: list[str] = []
+
+    run_kinds(("coverage",), Config(root=tmp_path), _fake(record))
+
+    assert record == ["coverage"]
+
+
+def test_an_after_edge_onto_a_kind_outside_the_run_is_dropped(tmp_path: Path) -> None:
+    """The last way [verify.after] could hang: waiting for something never asked for."""
+    write_config(tmp_path, '[verify.after]\ncoverage = "test"\n')
+    python_project(tmp_path)
+    record: list[str] = []
+
+    results = run_kinds(("lint", "coverage"), load_config(tmp_path), _fake(record))
+
+    assert record == ["lint", "coverage"] or record == ["coverage", "lint"]
+    assert all(result.ok for result in results)
+
+
+def test_the_results_keep_the_order_they_were_asked_in(tmp_path: Path) -> None:
+    python_project(tmp_path)
+
+    results = run_kinds(("coverage", "lint", "test"), Config(root=tmp_path), _fake([]))
+
+    assert [result.kind for result in results] == ["coverage", "lint", "test"]
+
+
+def test_every_check_learns_who_else_is_running(tmp_path: Path) -> None:
+    seen: list[frozenset[str]] = []
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        seen.append(alongside)
+        return CheckResult(kind, True, "", "fake")
+
+    python_project(tmp_path)
+    run_kinds(("test", "coverage"), Config(root=tmp_path), runner)
+
+    assert all(group == frozenset({"test", "coverage"}) for group in seen)
+
+
+def test_a_check_that_blows_up_does_not_discard_the_others(tmp_path: Path) -> None:
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        if kind == "lint":
+            raise RuntimeError("boom")
+        return CheckResult(kind, True, "", "fake")
+
+    python_project(tmp_path)
+
+    results = run_kinds(("lint", "types"), Config(root=tmp_path), runner)
+
+    assert [result.source for result in results] == ["error", "fake"]
+
+
+def test_a_run_that_checks_nothing_is_refused(tmp_path: Path) -> None:
+    """An empty run would report `all(())` -- a pass over nothing."""
+    with pytest.raises(ValueError, match="at least one check"):
+        run_kinds((), Config(root=tmp_path))
+
+
+def test_one_cap_covers_the_whole_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_parallel is a cap per run, not per check kind.
+
+    Each kind used to build its own, so four kinds under max_parallel = 2 could
+    be eight processes at once.
+    """
+    seen: list[Semaphore | None] = []
+
+    def spy(
+        kind: str,
+        config: Config,
+        alongside: frozenset[str] = frozenset(),
+        gate: Semaphore | None = None,
+    ) -> CheckResult:
+        seen.append(gate)
+        return CheckResult(kind, True, "", "fake")
+
+    python_project(tmp_path)
+    monkeypatch.setattr(checks, "run_check", spy)
+    run_kinds(("lint", "types", "test", "coverage"), Config(root=tmp_path))
+
+    assert len(seen) == 4
+    assert all(gate is seen[0] for gate in seen)
+    assert seen[0] is not None
+
+
+def test_run_check_hands_the_cap_it_was_given_down(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (py("print('a')"), py("print('b')"))})
+    gate = _CountingGate()
+
+    run_check("lint", config, frozenset({"lint"}), gate)
+
+    assert gate.acquired == 2
+
+
+def test_run_all_still_runs_every_kind(tmp_path: Path) -> None:
+    python_project(tmp_path)
+
+    assert tuple(result.kind for result in run_all(Config(root=tmp_path))) == KINDS

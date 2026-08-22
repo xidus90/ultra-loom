@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import shlex
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -105,6 +105,11 @@ PRESETS: Mapping[str, Mapping[str, Preset]] = {
 # with a source of its own, because "unavailable" would say a tool is missing
 # when the tool is there and the project is not ready for it.
 UNREADY = "unready"
+
+# A red result whose cause is another check: reported with a source of its own,
+# because neither "failed" nor "unavailable" says that this check never ran and
+# will run fine as soon as its predecessor is green.
+BLOCKED = "blocked"
 
 # What a Godot import writes, and the only file here that an *empty* `.godot/`
 # does not have -- the directory itself appears long before the import fills it.
@@ -358,19 +363,29 @@ def _predecessor_of(kind: str, marker: str | None, config: Config) -> str:
     return entry.after if entry is not None else ""
 
 
-def run_check(kind: str, config: Config, alongside: frozenset[str] = frozenset()) -> CheckResult:
+def run_check(
+    kind: str,
+    config: Config,
+    alongside: frozenset[str] = frozenset(),
+    gate: Semaphore | None = None,
+) -> CheckResult:
     """Run the check and report what it said.
 
     A check with a measuring step runs that first. Its failure is the check's
     failure and stops the check there: a report over data nobody measured --
     or over data left behind by an earlier run -- would be green for reasons
     that have nothing to do with this one.
+
+    `gate` is the run's cap on processes, handed down from the scheduler. A
+    caller that runs one check on its own leaves it out and gets a cap of its
+    own -- correct for a lone check, and the reason the scheduler does not let
+    every kind build one.
     """
     command = resolve_check(kind, config, alongside=alongside)
     unready = _unready(command, config)
     if unready is not None:
         return unready
-    return _run_command(command, config)
+    return _run_command(command, config, gate)
 
 
 def _unready(command: Command, config: Config) -> CheckResult | None:
@@ -571,20 +586,127 @@ def _with(detail: str, completed: process.Completed, output: str) -> str:
     return f"{detail}\n{output}".rstrip()
 
 
-def run_all(config: Config) -> tuple[CheckResult, ...]:
-    """Run every resolvable check at once, and report them in a fixed order.
+type CheckRunner = Callable[[str, Config, frozenset[str]], CheckResult]
 
-    Concurrent with plain threads: process.run spends its time waiting on a
-    child, with the GIL released, so parallel waiting reaches most of its
-    ceiling without a special interpreter (spec 9.4). The order of the result is
-    KINDS, never the order in which the checks happened to finish — a report whose lines move around
-    between runs cannot be compared.
+
+def run_kinds(
+    kinds: Sequence[str],
+    config: Config,
+    runner: CheckRunner | None = None,
+) -> tuple[CheckResult, ...]:
+    """Run these checks in dependency order and report them in the order asked.
+
+    Concurrent within a stage with plain threads: subprocess waiting releases
+    the GIL, so parallel waiting reaches most of its ceiling without a special
+    interpreter (spec 9.4). Sequential *between* stages, because a check that
+    reads what another one writes cannot start at the same time as it.
+
+    The one scheduler both callers use. `ultraloom check all` and the
+    verify_until_green flow ran a pool each, and a stage built into only one of
+    them would leave the flow -- the reason this exists -- running unordered.
+
+    `runner` defaults to None rather than to `run_check` so that the default
+    path can carry the run's process cap: it is built here, once, and handed
+    down. An injected runner starts no processes worth capping -- that
+    parameter is where the flow tests hang.
     """
-    with ThreadPoolExecutor(max_workers=len(KINDS)) as pool:
-        return tuple(pool.map(lambda kind: _run_or_report(kind, config), KINDS))
+    if not kinds:
+        raise ValueError(
+            "run_kinds needs at least one check; a run that checks nothing is not a pass"
+        )
+
+    alongside = frozenset(kinds)
+    marker = _marker(config.root)
+    results: dict[str, CheckResult] = {}
+    run = _gated(BoundedSemaphore(config.max_parallel)) if runner is None else runner
+
+    for stage in _stages(kinds, marker, config):
+        pending: list[str] = []
+        for kind in stage:
+            blocker = _blocker(kind, marker, config, results)
+            if blocker is None:
+                pending.append(kind)
+            else:
+                results[kind] = CheckResult(
+                    kind, False, f"läuft nicht, weil `{blocker}` rot war", BLOCKED
+                )
+        if not pending:
+            continue
+        with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+            for result in pool.map(
+                lambda kind: _run_or_report(kind, config, alongside, run), pending
+            ):
+                results[result.kind] = result
+
+    return tuple(results[kind] for kind in kinds)
 
 
-def _run_or_report(kind: str, config: Config) -> CheckResult:
+def _gated(gate: Semaphore) -> CheckRunner:
+    """The real runner, carrying this run's one process cap.
+
+    A closure and not a partial over `run_check` bound at definition time: the
+    name is looked up when the check runs, so a test that replaces `run_check`
+    on the module is seen.
+    """
+
+    def run(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return run_check(kind, config, alongside, gate)
+
+    return run
+
+
+def _stages(
+    kinds: Sequence[str], marker: str | None, config: Config
+) -> tuple[tuple[str, ...], ...]:
+    """The requested kinds, grouped so that nothing runs before what it reads.
+
+    A kind whose predecessor was not requested lands in the first stage: it has
+    nothing to wait for in *this* run, and holding it behind an empty stage
+    would be waiting for something that is never going to come. Whether it then
+    reads a stale report is a question ultraloom cannot answer, and
+    `resolve_check` says so in a warning rather than guessing.
+    """
+    requested = set(kinds)
+    depth: dict[str, int] = {}
+
+    def level(kind: str) -> int:
+        if kind in depth:
+            return depth[kind]
+        predecessor = _predecessor_of(kind, marker, config)
+        # The config loader rejects cycles, so this recursion terminates.
+        depth[kind] = level(predecessor) + 1 if predecessor in requested else 0
+        return depth[kind]
+
+    ordered: dict[int, list[str]] = {}
+    for kind in kinds:
+        ordered.setdefault(level(kind), []).append(kind)
+    return tuple(tuple(ordered[key]) for key in sorted(ordered))
+
+
+def _blocker(
+    kind: str, marker: str | None, config: Config, results: Mapping[str, CheckResult]
+) -> str | None:
+    """The predecessor that failed, if there is one.
+
+    Any red result blocks, `unavailable` and `unready` included: a report over a
+    suite that never ran is worth exactly as much as one over a suite that
+    failed -- and by then the report has already dropped its own measuring step
+    (see `_measures_for`), so what it would read is an earlier run's data.
+    Transitive by construction -- a blocked check is itself red, so whatever
+    waits on it is blocked in turn.
+    """
+    predecessor = _predecessor_of(kind, marker, config)
+    if not predecessor:
+        return None
+    result = results.get(predecessor)
+    if result is None or result.ok:
+        return None
+    return predecessor
+
+
+def _run_or_report(
+    kind: str, config: Config, alongside: frozenset[str], runner: CheckRunner
+) -> CheckResult:
     """One check, with any failure of its own turned into a visible result.
 
     Broad on purpose. `pool.map` re-raises the first exception when the tuple
@@ -593,13 +715,18 @@ def _run_or_report(kind: str, config: Config) -> CheckResult:
     KeyboardInterrupt and SystemExit must still stop the run.
     """
     try:
-        return run_check(kind, config)
+        return runner(kind, config, alongside)
     except CheckUnavailableError as error:
         # Reported, not skipped: a run that looks green because nothing ran is
         # the one failure in this system that actually does damage.
         return CheckResult(kind, False, str(error), "unavailable")
     except Exception as error:
         return CheckResult(kind, False, f"{type(error).__name__}: {error}", "error")
+
+
+def run_all(config: Config) -> tuple[CheckResult, ...]:
+    """Every check this project has, in the fixed order of KINDS."""
+    return run_kinds(KINDS, config)
 
 
 def _script_for(kind: str, root: Path) -> tuple[str, ...] | None:
