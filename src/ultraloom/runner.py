@@ -39,15 +39,14 @@ class Result[T]:
 class Runner[T]:
     """Walks a graph, journalling every step.
 
-    Every method reads the journal first. A node whose name and input already
-    have a successful entry is *not* executed: its recorded delta is returned.
-    That is what makes a resume cheap, and it applies to `run` exactly as much
-    as to `resume` — a `run` over a journal that already covers the flow
-    executes nothing at all.
+    A `run` executes every node it reaches. A `replay` executes none: it
+    retraces the journal entry by entry. A `resume` retraces until it reaches
+    the point where the earlier run stopped and executes from there — which is
+    what makes answering a gate cheap without making a loop toothless.
 
-    So a node is recognised by its name and the input it saw, never by its
-    implementation. Editing a node's body and running again over the same
-    journal replays the old result for the new code. That is the price of the
+    A node is recognised by its name and the input it saw, never by its
+    implementation. Editing a node's body and replaying the same journal
+    reproduces the old result for the new code. That is the price of the
     alternative: hashing a function body would throw a journal away on a
     cosmetic edit. Start a fresh run when a node changes.
     """
@@ -69,12 +68,18 @@ class Runner[T]:
         self._clock = clock if clock is not None else _monotonic
         self._mcp_servers = tuple(mcp_servers)
         self._replay = replay
+        # Whether this walk is retracing a journal that already exists. A replay
+        # retraces from first node to last; a resume retraces only up to the
+        # point where the old run stopped, and _step switches it off there. A
+        # fresh run never retraces: a loop whose passes leave the payload alone
+        # would otherwise be served its first pass forever and never check
+        # anything a second time.
+        self._retracing = replay
 
     def run(self, data: T) -> Result[T]:
-        """Run the flow from its start node.
+        """Run the flow from its start node, executing every node it reaches.
 
-        Subject to the journal cache described on the class: this is not a
-        guarantee that anything executes.
+        A replay is the exception: it retraces the journal instead.
         """
         try:
             self._graph.validate()
@@ -88,8 +93,9 @@ class Runner[T]:
         Without an answer the gate pauses again: treating a missing answer as
         consent would make the approval point decorative.
 
-        The journal cache described on the class governs here too: nothing
-        before the gate is executed a second time.
+        Nothing before the gate is executed a second time: the walk retraces
+        the journal up to the point the earlier run reached, and only then
+        starts doing work.
 
         With an answer the walk still starts at `graph.start`, so every node
         before the gate is reconstructed from the journal and the gate's `apply`
@@ -118,6 +124,7 @@ class Runner[T]:
 
         gate = pending_gate(self._journal)
         if answer is None:
+            self._retracing = True
             return self._walk(State(data), self._graph.start)
         if gate is None:
             # An answer with nothing to answer is a mistake worth reporting: a
@@ -129,6 +136,7 @@ class Runner[T]:
         if not isinstance(node, GateNode):
             return Result("error", State(data), gate.node, None, f"{gate.node!r} is not a gate")
 
+        self._retracing = True
         return self._walk(State(data), self._graph.start, _Answer(gate.input_hash, answer))
 
     def _walk(self, state: State[T], name: str, answer: _Answer | None = None) -> Result[T]:
@@ -142,7 +150,7 @@ class Runner[T]:
                 # be told from a node failure. It is converted here, where the
                 # state still exists: exceeding max_visits is an outcome of the
                 # flow, not a crash of the harness, so nothing leaves `run`.
-                detail = str(error) + self._why_it_looped(node, state)
+                detail = str(error)
                 self._write(node, state, {}, "error", 0, 0.0, detail)
                 return Result("error", state, name, None, detail)
 
@@ -179,38 +187,27 @@ class Runner[T]:
                 return Result("error", state, name, None, str(error))
         return Result("done", state, None, None, None)
 
-    def _why_it_looped(self, node: Node[T], state: State[T]) -> str:
-        """The half of a visit-limit report the bare count does not carry.
-
-        A cycle whose passes leave the payload alone hits the same
-        `(node, input_hash)` key every time, so the journal serves the first
-        pass's delta and the node never runs again. Without this the author
-        reads "exceeded max_visits" and looks for a loop that ran too often,
-        when in fact it ran once and spun.
-        """
-        served = self._journal.lookup(node.name, input_hash(node.name, state.data), outcome="ok")
-        if served is None:
-            return ""
-        return (
-            "; every visit saw the same payload, so the journal served the first pass "
-            "and the node never ran again — a bounded cycle has to advance its payload"
-        )
-
     def _step(self, node: Node[T], state: State[T], answer: str | None = None) -> _Step[T]:
-        # The most recent *successful* entry, not the most recent one: both the
-        # visit-limit path and a gate's pause write a non-ok entry under the key
-        # of an entry that succeeded, and taking the latest match would re-run a
-        # node that is already done — for an agent node, a real model call.
-        # This holds outside replay mode too: without it, resuming a paused run
-        # from the start would pay again for every node before the gate.
-        cached = self._journal.lookup(node.name, input_hash(node.name, state.data), outcome="ok")
-        if cached is not None:
-            return _Step(state.merged(cached.delta))
-        if self._replay:
-            # Not an error outcome: an error outcome would be offered the node's
-            # on_error edge, and taking a fallback the original run never took
-            # would make a broken replay look like a run that handled a failure.
-            raise ReplayGapError(f"node {node.name!r} is not in the journal")
+        if self._retracing:
+            # The most recent *successful* entry, not the most recent one: both
+            # the visit-limit path and a gate's pause write a non-ok entry under
+            # the key of an entry that succeeded, and taking the latest match
+            # would re-run a node that is already done.
+            cached = self._journal.lookup(
+                node.name, input_hash(node.name, state.data), outcome="ok"
+            )
+            if cached is not None:
+                return _Step(state.merged(cached.delta))
+            if self._replay:
+                # Not an error outcome: an error outcome would be offered the
+                # node's on_error edge, and taking a fallback the original run
+                # never took would make a broken replay look like a run that
+                # handled a failure.
+                raise ReplayGapError(f"node {node.name!r} is not in the journal")
+            # A resume has caught up with where the old run stopped. Everything
+            # from here is new work, including a second pass through a node the
+            # journal already covers.
+            self._retracing = False
 
         if answer is not None and isinstance(node, GateNode):
             return self._answered(node, state, answer)

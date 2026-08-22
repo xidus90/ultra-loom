@@ -113,19 +113,20 @@ from. The module is executed on every load and is never registered in
 
 ### The journal, and what a resume replays
 
-A resume keys on a node's *input* — its name and the data it saw — not on its
-code. Edit a node in the middle of a run and resume, and you get the old result
-back from the journal. Start a fresh run when a node changes.
+Ein `run` führt jeden Knoten aus, den er erreicht. Der Journal-Cache greift nur,
+solange ein Lauf einen bestehenden Verlauf *nachvollzieht*: ein `replay` tut das
+von Anfang bis Ende, ein `resume` bis zu der Stelle, an der der frühere Lauf
+stehen geblieben ist — ab da wird wieder wirklich gearbeitet.
 
-The same cache governs `run`: a `run` over a journal that already covers the
-flow executes nothing and returns the recorded deltas.
+Nachvollzogen wird über den *Input* eines Knotens — seinen Namen und die Daten,
+die er gesehen hat — nicht über seinen Code. Wer einen Knoten mitten im Lauf
+ändert und dann wiedergibt, bekommt das alte Ergebnis zurück. Nach einer
+Änderung an einem Knoten gehört ein frischer Lauf gestartet.
 
-That has one consequence worth knowing before you write a loop. `max_visits`
-raises a node's ceiling so it may sit on a cycle, but every pass that leaves
-the payload unchanged hits the same journal key and is served from the journal
-rather than executed. A bounded cycle only does work if each pass advances the
-payload; otherwise the node runs once and spins until the ceiling stops it.
-ultraloom says so in the error when that happens.
+Damit tut eine Schleife auch dann Arbeit, wenn sie ihre Nutzlast nicht
+verändert: `max_visits` hebt die Obergrenze eines Knotens, und jeder Durchgang
+läuft wirklich. Genau das braucht ein Knoten, der die Außenwelt misst, ohne sie
+zu ändern.
 
 ### Exit codes
 

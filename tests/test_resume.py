@@ -70,17 +70,29 @@ def looping_flow(log: list[str]) -> Graph[Data]:
     return graph
 
 
-def test_a_second_run_over_the_same_journal_executes_nothing(tmp_path: Path) -> None:
+def test_a_resume_over_a_finished_journal_executes_nothing(tmp_path: Path) -> None:
     journal = Journal(tmp_path / "r.jsonl")
     log: list[str] = []
     Runner(counting_flow(log), journal, clock=ticking_clock()).run(Data())
     assert log == ["first", "second"]
 
     log.clear()
-    result = Runner(counting_flow(log), journal, clock=ticking_clock()).run(Data())
+    result = Runner(counting_flow(log), journal, clock=ticking_clock()).resume(Data())
 
     assert log == [], "unchanged inputs must come from the journal, not from a rerun"
     assert result.state.data.steps == "12"
+
+
+def test_a_second_run_over_the_same_journal_executes_everything_again(tmp_path: Path) -> None:
+    """A fresh `run` is not a retrace, so the journal must not stand in for it."""
+    journal = Journal(tmp_path / "r.jsonl")
+    log: list[str] = []
+    Runner(counting_flow(log), journal, clock=ticking_clock()).run(Data())
+
+    log.clear()
+    Runner(counting_flow(log), journal, clock=ticking_clock()).run(Data())
+
+    assert log == ["first", "second"]
 
 
 def test_a_truncated_journal_reruns_only_what_is_missing(tmp_path: Path) -> None:
@@ -93,9 +105,9 @@ def test_a_truncated_journal_reruns_only_what_is_missing(tmp_path: Path) -> None
     path.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
     log.clear()
-    result = Runner(counting_flow(log), journal, clock=ticking_clock()).run(Data())
+    result = Runner(counting_flow(log), journal, clock=ticking_clock()).resume(Data())
 
-    assert log == ["second"], "the first node is cached, the second is not"
+    assert log == ["second"], "the first node is retraced, the second is not"
     assert result.state.data.steps == "12", "a resumed run must reach the same state"
 
 
@@ -112,7 +124,7 @@ def test_a_changed_input_reruns_and_so_does_everything_after_it(tmp_path: Path) 
     Runner(counting_flow(log), journal, clock=ticking_clock()).run(Data())
 
     log.clear()
-    result = Runner(counting_flow(log), journal, clock=ticking_clock()).run(Data(steps="seed"))
+    result = Runner(counting_flow(log), journal, clock=ticking_clock()).resume(Data(steps="seed"))
 
     assert log == ["first", "second"]
     assert result.state.data.steps == "seed12"
@@ -136,7 +148,7 @@ def test_a_journalled_error_is_not_replayed_as_success(tmp_path: Path) -> None:
     first = Runner(graph, journal, clock=ticking_clock()).run(Data())
     assert first.status == "error"
 
-    second = Runner(graph, journal, clock=ticking_clock()).run(Data())
+    second = Runner(graph, journal, clock=ticking_clock()).resume(Data())
     assert second.status == "done"
     assert second.state.data.steps == "recovered"
 
@@ -152,15 +164,21 @@ def test_a_later_non_ok_entry_does_not_hide_an_earlier_success(tmp_path: Path) -
     log: list[str] = []
     first = Runner(looping_flow(log), journal, clock=ticking_clock()).run(Data())
     assert first.status == "error"
-    assert log == ["a", "b"]
+    assert log == ["a", "b", "a", "b"], "every pass of the cycle executes"
 
     outcomes = [(entry.node, entry.outcome) for entry in journal.entries()]
-    assert outcomes == [("a", "ok"), ("b", "ok"), ("a", "error")], "the decoy must be in place"
+    assert outcomes == [
+        ("a", "ok"),
+        ("b", "ok"),
+        ("a", "ok"),
+        ("b", "ok"),
+        ("a", "error"),
+    ], "the decoy must be in place"
     keys = {entry.input_hash for entry in journal.entries() if entry.node == "a"}
     assert len(keys) == 1, "both entries for 'a' must share one key, or there is no decoy"
 
     log.clear()
-    second = Runner(looping_flow(log), journal, clock=ticking_clock()).run(Data())
+    second = Runner(looping_flow(log), journal, clock=ticking_clock()).resume(Data())
 
     assert log == [], "a node with a successful entry must not run again"
     assert second.status == "error", "the visit limit still stops the cycle"
@@ -260,26 +278,43 @@ def test_an_agent_node_is_replayed_without_asking_the_model(tmp_path: Path) -> N
     ).run(Data())
 
     empty = FakeModel([])
-    result = Runner(graph, journal, model=empty, clock=ticking_clock()).run(Data())
+    result = Runner(graph, journal, model=empty, clock=ticking_clock(), replay=True).run(Data())
 
     assert empty.seen == (), "a replayed agent node must cost nothing"
     assert result.state.data.steps == "patched"
 
 
-def test_the_same_flow_and_the_same_fake_produce_the_same_journal(tmp_path: Path) -> None:
-    """The golden-journal test: reproducibility is measured, not assumed."""
+def test_a_replay_reaches_the_recorded_journal_entry_by_entry(tmp_path: Path) -> None:
+    """The golden-journal test: reproducibility is measured, not assumed.
 
-    def one_run(name: str) -> bytes:
-        path = tmp_path / f"{name}.jsonl"
-        Runner(
-            _asking_flow(),
-            Journal(path),
-            model=FakeModel([Reply(Verdict(fix="patched"), tokens=5)]),
-            clock=ticking_clock(),
-        ).run(Data())
-        return path.read_bytes()
+    Two runs of the same flow are no longer the comparison — a second `run`
+    executes again by design. The recorded journal is the golden artefact, and
+    a replay against it has to arrive at exactly those entries: same nodes,
+    same keys, same deltas, same order, and the same end state.
+    """
+    path = tmp_path / "r.jsonl"
+    journal = Journal(path)
+    Runner(
+        _asking_flow(),
+        journal,
+        model=FakeModel([Reply(Verdict(fix="patched"), tokens=5)]),
+        clock=ticking_clock(),
+    ).run(Data())
+    recorded = journal.entries()
+    bytes_before = path.read_bytes()
 
-    assert one_run("a") == one_run("b")
+    replayed = Runner(
+        _asking_flow(),
+        journal,
+        model=FakeModel([]),
+        clock=ticking_clock(),
+        replay=True,
+    ).run(Data())
+
+    assert replayed.status == "done"
+    assert replayed.state.data.steps == "patched"
+    assert journal.entries() == recorded, "a replay reproduces the journal, it does not change it"
+    assert path.read_bytes() == bytes_before
 
 
 def test_a_replay_gap_names_the_missing_node(tmp_path: Path) -> None:

@@ -21,12 +21,9 @@ class GraphError(ValueError):
 class CodeNode[T]:
     """A plain function. Costs no tokens and is reproducible byte for byte.
 
-    `max_visits` raises the ceiling so this node may sit on a cycle. It does
-    not make a cycle work on its own: the runner serves any node whose name and
-    input already have a successful journal entry from that entry instead of
-    executing it. A loop whose passes leave the payload unchanged therefore
-    runs **once** and then spins on the cache until the ceiling stops it. Every
-    pass of a bounded cycle has to advance the payload.
+    `max_visits` raises the ceiling so this node may sit on a cycle. Every pass
+    of a bounded cycle executes; the journal records each one under its own
+    entry.
     """
 
     name: str

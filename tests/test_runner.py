@@ -27,6 +27,16 @@ class Verdict:
     fix: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class Counter:
+    n: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Payload:
+    note: str = ""
+
+
 def ticking_clock() -> Callable[[], float]:
     """A clock that advances one second per call, so durations are deterministic."""
     ticks = count()
@@ -366,26 +376,123 @@ def test_the_default_clock_is_the_monotonic_clock() -> None:
     assert second >= first, "a monotonic clock never runs backwards"
 
 
-def test_a_loop_that_never_advances_its_payload_is_told_why_it_did_nothing(
+def test_a_second_run_over_the_same_journal_executes_again(tmp_path: Path) -> None:
+    """A fresh run is not a retrace, so it must not be served from the journal."""
+    calls: list[int] = []
+
+    def tick(data: Counter) -> dict[str, object]:
+        calls.append(1)
+        return {"n": data.n + 1}
+
+    graph: Graph[Counter] = Graph("count", start="tick")
+    graph.add(CodeNode("tick", tick))
+    graph.edge("tick", END)
+    journal = Journal(tmp_path / "run.jsonl")
+
+    Runner(graph, journal, clock=ticking_clock()).run(Counter(0))
+    Runner(graph, journal, clock=ticking_clock()).run(Counter(0))
+
+    assert len(calls) == 2
+
+
+def test_a_bounded_cycle_runs_every_pass_even_with_an_unchanging_payload(
     tmp_path: Path,
 ) -> None:
-    """The bare count reads as "ran too often" for a loop that ran exactly once."""
-    ran: list[str] = []
-    graph: Graph[Data] = Graph("spinning", start="probe")
+    calls: list[int] = []
 
-    def probe(_data: Data) -> dict[str, object]:
-        ran.append("probe")
+    def tick(_data: Counter) -> dict[str, object]:
+        calls.append(1)
         return {}
 
-    graph.add(CodeNode("probe", probe, max_visits=5))
-    graph.edge("probe", "probe")
+    graph: Graph[Counter] = Graph("spin", start="tick")
+    graph.add(CodeNode("tick", tick, max_visits=3))
+    graph.edge("tick", "tick")
 
-    result = Runner(graph, a_journal(tmp_path), clock=ticking_clock()).run(Data())
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), clock=ticking_clock()).run(Counter(0))
 
     assert result.status == "error"
-    assert ran == ["probe"], "the cache serves every pass after the first"
-    assert result.detail is not None
-    assert "advance its payload" in result.detail
+    assert "max_visits" in (result.detail or "")
+    # Three real executions, not one execution and two cache hits.
+    assert len(calls) == 3
+
+
+def test_resume_still_reconstructs_without_executing(tmp_path: Path) -> None:
+    calls: list[str] = []
+    graph, journal = _gate_flow(tmp_path, before=lambda: calls.append("before"))
+
+    Runner(graph, journal, clock=ticking_clock()).run(Payload(""))  # pauses at the gate
+    calls.clear()
+    result = Runner(graph, journal, clock=ticking_clock()).resume(Payload(""), answer="yes")
+
+    assert result.status == "done"
+    assert calls == []  # the node before the gate was reconstructed, not re-run
+
+
+def test_a_resume_executes_a_second_pass_of_a_node_the_journal_covers(
+    tmp_path: Path,
+) -> None:
+    """Past the point the old run reached, a retrace becomes a real run.
+
+    The gate sits on a cycle, so the node before it is entered twice. The first
+    entry is retraced; the second happens after the retrace ended and must
+    execute.
+    """
+    calls: list[str] = []
+
+    def prepare(_data: Payload) -> dict[str, object]:
+        calls.append("prepare")
+        return {}
+
+    graph: Graph[Payload] = Graph("ask", start="prepare")
+    graph.add(CodeNode("prepare", prepare, max_visits=2))
+    graph.add(
+        GateNode(
+            "ask",
+            question=lambda _d: "again?",
+            apply=lambda _d, answer: {"note": answer},
+            max_visits=2,
+        )
+    )
+    graph.add(CodeNode("finish", lambda _d: {}))
+    graph.edge("prepare", "ask")
+    graph.edge("ask", "prepare", when=lambda d: d.note == "again")
+    graph.edge("ask", "finish")
+    graph.edge("finish", END)
+    journal = Journal(tmp_path / "run.jsonl")
+
+    Runner(graph, journal, clock=ticking_clock()).run(Payload(""))
+    calls.clear()
+    result = Runner(graph, journal, clock=ticking_clock()).resume(Payload(""), answer="again")
+
+    assert calls == ["prepare"], "the second pass is new work, not a cache hit"
+    assert result.status == "paused", "the cycle comes back to the gate and pauses again"
+
+
+def test_the_visit_limit_no_longer_blames_the_cache(tmp_path: Path) -> None:
+    graph: Graph[Counter] = Graph("spin", start="tick")
+    graph.add(CodeNode("tick", lambda _data: {}, max_visits=2))
+    graph.edge("tick", "tick")
+
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), clock=ticking_clock()).run(Counter(0))
+
+    assert "the journal served" not in (result.detail or "")
+
+
+def _gate_flow(tmp_path: Path, before: Callable[[], None]) -> tuple[Graph[Payload], Journal]:
+    """A flow with one node *before* the gate, so a resume has something to retrace."""
+
+    def prepare(_data: Payload) -> dict[str, object]:
+        before()
+        return {"note": "prepared"}
+
+    graph: Graph[Payload] = Graph("ask", start="prepare")
+    graph.add(CodeNode("prepare", prepare))
+    graph.add(GateNode("ask", question=lambda _d: "ok?", apply=lambda _d, answer: {"note": answer}))
+    graph.add(CodeNode("finish", lambda _data: {}))
+    graph.edge("prepare", "ask")
+    graph.edge("ask", "finish")
+    graph.edge("finish", END)
+    return graph, Journal(tmp_path / "run.jsonl")
 
 
 def test_a_loop_that_does_advance_gets_the_plain_visit_limit(tmp_path: Path) -> None:
