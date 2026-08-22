@@ -64,6 +64,7 @@ dem er rot ist.
 | `report` | `str` | Der gerenderte Bericht der roten Prüfungen — nach `repair` stattdessen dessen Zusammenfassung. |
 | `failing` | `tuple[str, ...]` | Die Arten, die in der letzten Runde rot waren. |
 | `unfixable` | `tuple[str, ...]` | Davon die, die keine Reparatur schließen kann. |
+| `blocked` | `tuple[str, ...]` | Davon die, die gar nicht gelaufen sind, weil ihr Vorgänger rot war. Weder reparierbar noch außer Reichweite — und diese dritte Antwort muss bis zur Abbruchentscheidung durchhalten. |
 | `touched` | `tuple[str, ...]` | Was `git status` nach dem Reparaturlauf als geändert meldet. |
 | `rounds` | `int` | Wie oft `check` gelaufen ist. |
 | `previous_failing` | `tuple[str, ...]` | Was die vorige Runde gefunden hat. Eine Kantenbedingung sieht nur einen Zustand, und „dieselben Prüfungen schon wieder" ist sonst nicht beantwortbar. |
@@ -100,6 +101,20 @@ Vorher endete dort jeder Lauf sofort mit Exit 1; jetzt bekommen die übrigen
 Prüfungen ihre Runden, und der Ablauf ruft bis zu `max_rounds` mal das Modell,
 wo vorher gar keiner kam. Das ist der gewollte Tausch — wer ihn nicht will,
 lässt die unverfügbare Art über `--checks` weg.
+
+Die Quelle `"blocked"` gehört ausdrücklich **nicht** dazu. Eine blockierte
+Prüfung ist keine, die niemand schließen kann — sie schließt sich selbst, sobald
+ihr Vorgänger grün ist. Wäre sie außer Reichweite, gäbe der Ablauf bei jedem
+gewöhnlichen roten Test sofort auf. Und weil `coverage` in `UNFIXABLE` steht,
+wird die Quelle **vor** der Art gefragt: ein blockiertes `coverage` ist keine
+Deckungslücke, sondern eine Prüfung, die nicht lief.
+
+Für die Abbruchentscheidung zählt eine blockierte Prüfung deshalb gar nicht mit:
+„außer Reichweite" heißt genau dann, wenn *jede rote, nicht blockierte* Prüfung
+außer Reichweite liegt. Ohne diese Ausnahme kostete ein nie importiertes
+Godot-Projekt fünf bezahlte Modellrunden — `test` rot mit `unready`, `coverage`
+dahinter blockiert, zusammen kein Teilmengenverhältnis mehr und am Ende die
+falsche Diagnose „still red after N repair rounds".
 
 ## Was ein Godot-Projekt vorher braucht
 
@@ -297,6 +312,7 @@ Parametern aufbauen wie der ursprüngliche Lauf.
 | rot, außer Reichweite | 1 | Es ist nichts Reparierbares mehr übrig: jede rote Prüfung ist unreparierbar. Eine unreparierbare *neben* reparierbaren beendet den Lauf **nicht** — sonst erreichte ein Projekt, dessen Coverage-Prüfung über die Tests misst, bei einem einzigen roten Test nie eine Reparaturrunde. |
 | rot, Runden aufgebraucht | 1 | `rounds > max_rounds`. |
 | rot, stagniert | 1 | Dieselben Prüfungen sind wieder rot, und der Reparaturlauf dazwischen hat keine Datei geändert. |
+| rot, Ring in der Reihenfolge | 1 | `[verify.after]` und die Presets ergeben zusammen einen Kreis. Kein roter Befund, sondern das Ende des Laufs: eine Reparaturrunde gegen den Quelltext schließt keinen Ring in der Konfiguration. Die Meldung nennt den Pfad. |
 | rot, keine Prüfung | 1 | Der Zustand benennt keine Prüfart. Ein grünes Ergebnis, nach dem niemand gesehen hat, ist der eine Fehler, den dieser Ablauf nie erzeugen darf. |
 | abgebrochen, Tests angefasst | 4 | Der Reparateur hat einen geschützten Pfad geändert, oder der Arbeitsbaum ist nicht lesbar. |
 
@@ -527,8 +543,21 @@ Zweitens misst space seine Abdeckung als *Nebenprodukt des Suitenlaufs*. Die
 Prüfungen laufen nebenläufig (Spec 9.4), also liest das Coverage-Tor den
 Bericht, den die Suite erst acht Minuten später schreibt. Das Python-Preset löst
 das mit einem `measure`-Schritt, der die Suite ein zweites Mal fährt; für eine
-Godot-Suite ist das keine Option. Eine Reihenfolge zwischen Prüfungen kennt der
-Ablauf heute nicht — das ist die offene Stelle, die space hinterlässt.
+Godot-Suite ist das keine Option. Genau das war die offene Stelle, die space
+hinterlassen hat — sie ist inzwischen geschlossen: der Knoten `check` ruft den
+gemeinsamen Scheduler `checks.run_kinds` und hat keinen eigenen Thread-Pool
+mehr. Prüfungen laufen in Stufen, nebenläufig nur innerhalb einer Stufe, und
+eine Prüfung, deren Vorgänger rot war, läuft nicht — sie kommt rot mit der
+Quelle `"blocked"` zurück. Im Bericht steht sie **unter** den Befunden und nie
+zwischen ihnen:
+
+```
+Nicht gelaufen, weil ein Vorgänger rot war: coverage
+```
+
+Unter ihnen, weil sie kein Mangel ist, den der Reparateur anfassen kann.
+Genannt, weil ein Bericht mit grünem `lint`, grünem `types` und rotem `test`
+sich sonst läse, als wäre die Abdeckung geprüft worden.
 
 ### Führt das SDK die Hooks des Projekts zusätzlich aus?
 

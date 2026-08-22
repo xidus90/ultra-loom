@@ -13,7 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from ultraloom.checks import BLOCKED, KINDS, UNREADY, CheckResult, CheckRunner, run_kinds
+from ultraloom.checks import (
+    BLOCKED,
+    KINDS,
+    UNAVAILABLE,
+    UNREADY,
+    CheckResult,
+    CheckRunner,
+    run_check,
+    run_kinds,
+)
 from ultraloom.config import Config, ConfigError
 from ultraloom.discovery import FlowContext, LoadedFlow
 from ultraloom.graph import END, AgentNode, CodeNode, Graph
@@ -31,12 +40,6 @@ _EXIT_STILL_RED = 1
 # repair pass for it would be an agent looking for a way around a rule.
 UNFIXABLE: tuple[str, ...] = ("coverage",)
 
-# A check that could not be resolved at all reports itself this way
-# (checks._run_or_report). It is red, but no edit to the project fixes it --
-# space has no GDScript typechecker, and asking an agent to repair a tool that
-# is not installed is asking it to invent one.
-UNAVAILABLE = "unavailable"
-
 
 @dataclass(frozen=True, slots=True)
 class VerifyState:
@@ -46,6 +49,12 @@ class VerifyState:
     report: str = ""
     failing: tuple[str, ...] = ()
     unfixable: tuple[str, ...] = ()
+    # Which of `failing` never ran because a predecessor was red. A field of its
+    # own rather than a source carried on the result: a check that did not run
+    # is neither repairable nor out of reach, and that third answer has to
+    # survive as far as `_out_of_reach_only` -- which sees the state, not the
+    # results.
+    blocked: tuple[str, ...] = ()
     touched: tuple[str, ...] = ()
     rounds: int = 0
     previous_failing: tuple[str, ...] = ()
@@ -58,8 +67,16 @@ def make_check(config: Config, runner: CheckRunner | None = None) -> Callable[[V
     a test that shells out to ruff measures ruff. It stays None by default and
     is passed on as None, because `run_kinds` builds the run's one process cap
     around its own default runner -- naming `run_check` here would hand every
-    check a cap of its own.
+    check a cap of its own. Handing `run_check` in is refused rather than left
+    to the docstring: it typechecks, it works, and it silently spends
+    `max_parallel` processes per check instead of per run.
     """
+    if runner is run_check:
+        raise ValueError(
+            "pass runner=None for the real checks: run_check handed in directly "
+            "bypasses the run's process cap, because run_kinds builds that cap "
+            "around its own default runner"
+        )
 
     def check(state: VerifyState) -> Delta:
         if not state.kinds:
@@ -92,6 +109,7 @@ def make_check(config: Config, runner: CheckRunner | None = None) -> Callable[[V
         return {
             "failing": tuple(result.kind for result in red),
             "unfixable": tuple(result.kind for result in red if _out_of_reach(result)),
+            "blocked": tuple(result.kind for result in red if result.source == BLOCKED),
             "report": _render(red),
             "rounds": state.rounds + 1,
             # What the previous pass found, saved before `failing` is
@@ -142,9 +160,13 @@ def _render(red: tuple[CheckResult, ...]) -> str:
     if not blocked:
         return rendered
     line = f"Nicht gelaufen, weil ein Vorgänger rot war: {', '.join(blocked)}"
-    # Concatenated conditionally rather than always: a blocked check whose own
-    # blocker was blocked leaves no findings at all, and a report opening on two
-    # blank lines would read as a lost heading.
+    # Concatenated conditionally rather than always. `make_check` never reaches
+    # the second arm -- a blocked check needs a red predecessor in the same
+    # pass, so there is always a finding above the line, transitive chains
+    # included: the root of every chain is a real one. It is here because
+    # `_render` takes any tuple of red results, and a report opening on two
+    # blank lines would read as a lost heading. The direct test is what holds
+    # this arm honest; coverage does not measure the arms of a ternary.
     return f"{rendered}\n\n{line}" if rendered else line
 
 
@@ -318,8 +340,17 @@ def _out_of_reach_only(state: VerifyState) -> bool:
     the normal case, not the exception, in a project that permanently lacks a
     tool -- space has no GDScript typechecker, so `types` is unavailable there
     on every single run.
+
+    Blocked checks are left out of the question entirely, because they answer
+    it with nothing: a check that never ran is neither a defect the repairer
+    can close nor one that is out of reach. Counting them as repairable is what
+    a Godot project that was never imported would have paid for -- `test` red
+    and unready, `coverage` blocked behind it, and five agent rounds spent on a
+    project no edit turns green. Leaving them out cannot make the set empty in
+    practice either: the root of every blocking chain is a real finding.
     """
-    return bool(state.failing) and set(state.failing) <= set(state.unfixable)
+    reachable = tuple(kind for kind in state.failing if kind not in state.blocked)
+    return bool(reachable) and set(reachable) <= set(state.unfixable)
 
 
 def _why_red(state: VerifyState, max_rounds: int) -> str:

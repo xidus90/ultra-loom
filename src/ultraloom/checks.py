@@ -106,6 +106,13 @@ PRESETS: Mapping[str, Mapping[str, Preset]] = {
     },
 }
 
+# A red result whose cause is a tool that could not be resolved at all. A
+# constant and not a literal at its one raising site: the flow reads this value
+# to decide what no repair pass can close, and across a module boundary a
+# literal on one side and a constant on the other is a coupling that a rename
+# would break silently.
+UNAVAILABLE = "unavailable"
+
 # A red result whose cause is the project's state, not a missing tool: reported
 # with a source of its own, because "unavailable" would say a tool is missing
 # when the tool is there and the project is not ready for it.
@@ -746,7 +753,7 @@ def _run_or_report(
     except CheckUnavailableError as error:
         # Reported, not skipped: a run that looks green because nothing ran is
         # the one failure in this system that actually does damage.
-        return CheckResult(kind, False, str(error), "unavailable")
+        return CheckResult(kind, False, str(error), UNAVAILABLE)
     except Exception as error:
         return CheckResult(kind, False, f"{type(error).__name__}: {error}", "error")
 

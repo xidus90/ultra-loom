@@ -7,7 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.checks import BLOCKED, KINDS, CheckResult, CheckRunner, CheckUnavailableError
+from ultraloom.checks import (
+    BLOCKED,
+    KINDS,
+    UNREADY,
+    CheckResult,
+    CheckRunner,
+    CheckUnavailableError,
+    run_check,
+)
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext
 from ultraloom.flows.verify_until_green import (
@@ -16,6 +24,7 @@ from ultraloom.flows.verify_until_green import (
     RepairResult,
     VerifyState,
     _out_of_reach,
+    _render,
     assemble,
     build,
     make_check,
@@ -29,6 +38,11 @@ from ultraloom.model.port import Reply
 from ultraloom.runner import FlowExit, Result, Runner
 from ultraloom.state import Delta
 from ultraloom.worktree import WorktreeError
+
+# A marker file is all `checks` needs to know the language -- and with it, that
+# `coverage` waits for `test`. The order under test lives in the preset table,
+# so a project this thin is enough to reach it.
+_PYPROJECT = '[project]\nname = "x"\n'
 
 
 def _config() -> Config:
@@ -904,11 +918,11 @@ def test_a_blocked_check_is_not_out_of_reach() -> None:
 def test_the_node_runs_checks_in_dependency_order(tmp_path: Path) -> None:
     record: list[str] = []
 
-    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
         record.append(kind)
         return CheckResult(kind, True, "", "fake")
 
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
     check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
     check(VerifyState(kinds=("test", "coverage")))
 
@@ -916,10 +930,10 @@ def test_the_node_runs_checks_in_dependency_order(tmp_path: Path) -> None:
 
 
 def test_the_report_names_what_did_not_run(tmp_path: Path) -> None:
-    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
         return CheckResult(kind, kind != "test", "suite is red", "fake")
 
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
     check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
     delta = check(VerifyState(kinds=("test", "coverage")))
 
@@ -933,10 +947,10 @@ def test_the_report_names_what_did_not_run(tmp_path: Path) -> None:
 def test_a_blocked_check_is_named_below_the_findings_not_among_them(tmp_path: Path) -> None:
     """The repairer's list of defects must hold only what it can touch."""
 
-    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
         return CheckResult(kind, kind != "test", "suite is red", "fake")
 
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
     check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
     report = str(check(VerifyState(kinds=("test", "coverage")))["report"])
 
@@ -947,10 +961,10 @@ def test_a_blocked_check_is_named_below_the_findings_not_among_them(tmp_path: Pa
 def test_a_ring_in_the_configured_order_ends_the_run(tmp_path: Path) -> None:
     """Not a red check: no repair pass closes a cycle in the configuration."""
 
-    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
         return CheckResult(kind, True, "", "fake")  # pragma: no cover  # never reached
 
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
     config = Config(root=tmp_path, test_paths=("tests/",), after={"test": "coverage"})
     check = make_check(config, runner)
 
@@ -959,3 +973,77 @@ def test_a_ring_in_the_configured_order_ends_the_run(tmp_path: Path) -> None:
 
     assert raised.value.code == _EXIT_STILL_RED
     assert "cycle" in str(raised.value)
+
+
+def test_a_report_of_nothing_but_blocked_checks_does_not_open_on_blank_lines() -> None:
+    """`_render` takes any tuple of red results, and the flow is not its only caller."""
+    rendered = _render((CheckResult("coverage", False, "did not run", BLOCKED),))
+
+    assert rendered == "Nicht gelaufen, weil ein Vorgänger rot war: coverage"
+
+
+def test_the_real_runner_may_not_be_handed_in_directly() -> None:
+    """It typechecks and it works -- and spends max_parallel per check, not per run."""
+    with pytest.raises(ValueError, match="process cap"):
+        make_check(_config(), run_check)
+
+
+def test_a_blocked_check_does_not_buy_an_unrepairable_project_five_rounds(
+    tmp_path: Path,
+) -> None:
+    """A Godot project that was never imported: `test` unready, `coverage` blocked.
+
+    The whole flow and not `_out_of_reach_only` alone, because the change this
+    guards against moves the path *through* that predicate: counting the blocked
+    check as repairable makes `failing` a superset of `unfixable`, the run takes
+    the repair edge, and a model is paid five times over a project no edit turns
+    green.
+    """
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, False, "never been imported", UNREADY)
+
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=runner,
+        differ=lambda _root: (),
+        baseline=frozenset(),
+    )
+    model = FakeModel([])
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
+        VerifyState(kinds=("test", "coverage"))
+    )
+
+    assert not model.seen  # not one paid repair round
+    assert result.state.data.rounds == 1
+    assert result.exit_code == 1
+    assert "out of reach" in (result.detail or "")
+
+
+def test_a_blocked_check_beside_a_repairable_one_still_gets_its_rounds(
+    tmp_path: Path,
+) -> None:
+    """The other direction: an ordinary red `test` blocks `coverage` and is repaired."""
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    passes = _Passes([{"test": False}, {"test": True}])
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        ok = passes.outcome(kind)
+        return CheckResult(kind, ok, "" if ok else "suite is red", "test")
+
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=runner,
+        differ=lambda _root: ("src/thing.py",),
+        baseline=frozenset(),
+    )
+    model = FakeModel([Reply(RepairResult("fixed the suite", changed=True), tokens=0)])
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
+        VerifyState(kinds=("test", "coverage"))
+    )
+
+    assert len(model.seen) == 1  # the blocked check did not end the run early
+    assert result.status == "done"
