@@ -105,12 +105,26 @@ def test_the_prompt_carries_the_report_and_the_forbidden_paths() -> None:
     assert "conftest.py" in prompt
 
 
-def test_the_node_may_edit_and_thinks_hard() -> None:
+def test_the_node_may_edit_and_gets_more_than_one_attempt() -> None:
     node = make_repair(test_paths=("tests/",))
 
     assert node.tools == "edit"
-    assert node.effort == "high"
     assert node.schema is RepairResult
+    assert node.max_visits == 5
+
+
+def test_the_prompt_forbids_suppressing_a_check_instead_of_fixing_it() -> None:
+    prompt = make_repair(test_paths=("tests/",)).prompt(VerifyState())
+
+    assert "# noqa" in prompt
+    assert "# type: ignore" in prompt
+    assert "# pragma: no cover" in prompt
+    assert "pyproject.toml" in prompt
+
+
+def test_a_flow_without_test_paths_is_refused() -> None:
+    with pytest.raises(ValueError, match="test_paths"):
+        make_repair(test_paths=())
 
 
 def test_the_reply_becomes_the_summary_of_the_pass() -> None:

@@ -96,11 +96,23 @@ class RepairResult:
 
 REPAIR_PROMPT = """The project's checks are failing. Fix the source so they pass.
 
+## Report
+
+```
 {report}
+```
 
 Rules:
-- Do NOT edit, weaken, skip or delete anything under: {forbidden}
+- Do NOT edit, weaken, skip or delete any of these paths, or anything below a
+  directory among them: {forbidden}
   A failing test is a finding about the source, not a problem with the test.
+- Do NOT silence a check instead of fixing it: no new `# noqa`,
+  `# type: ignore`, `# pragma: no cover` or any other suppression, and no
+  change to a configuration file that sets a threshold or a rule set
+  (`pyproject.toml`,
+  `setup.cfg`, `.ruff.toml`, `mypy.ini` and their like). Suppressions that are
+  already there with a stated reason may stay. If a check would only go green
+  by silencing it, say that in the summary and leave the code alone.
 - Change as little as possible. A narrow fix beats a rewrite.
 - If a check fails for a reason you cannot fix in the source, say so in the
   summary and change nothing.
@@ -110,17 +122,34 @@ Answer with a summary of what you changed and whether you changed anything.
 
 
 def make_repair(test_paths: tuple[str, ...]) -> AgentNode[VerifyState]:
-    """The `repair` node, told which paths it must keep its hands off."""
+    """The `repair` node, told which paths it must keep its hands off.
+
+    Refuses an empty `test_paths`: the rule would then name nothing and read as
+    a licence to touch the tests. The flow already declines to start without
+    `[verify].tests`; this is the second line of the same rule.
+    """
+    if not test_paths:
+        raise ValueError("repair needs test_paths to protect; configure [verify].tests")
+
     forbidden = ", ".join(test_paths)
 
     def apply(_state: VerifyState, reply: object) -> Delta:
         if not isinstance(reply, RepairResult):
-            # The runner types the reply as `object`, so this is the one place
-            # a wrong shape can still be caught before it reaches the journal.
+            # The adapter validates the reply too; this is the second line,
+            # catching a wrong shape before it reaches state and journal.
             raise TypeError(f"expected a RepairResult, got {type(reply).__name__}")
+        # `changed` deliberately does not enter the state: the guard reads the
+        # truth out of the working tree, and the model's own word about it is
+        # worth nothing next to that -- carrying it along would only invite
+        # someone to believe it later.
+        #
         # The summary replaces the report on purpose: the next `check` pass
         # overwrites it anyway, and carrying the old failures forward would let
         # a stale report reach the next prompt if that pass ever fails to run.
+        # Between `repair` and that pass the state therefore reads mixed --
+        # `failing` and `unfixable` still hold the old round's values while
+        # `report` already holds the summary -- and the guard is the node that
+        # sees it that way.
         return {"report": reply.summary}
 
     return AgentNode(
