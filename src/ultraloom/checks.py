@@ -8,13 +8,13 @@ reliability — and a missing tool is a failure, never a skipped check.
 from __future__ import annotations
 
 import shlex
-import subprocess
 import sys
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+from ultraloom import process
 from ultraloom.config import Config
 
 KINDS = ("lint", "types", "test", "coverage")
@@ -242,21 +242,7 @@ def _run_command(command: Command, config: Config) -> CheckResult:
 
 def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> CheckResult:
     try:
-        completed = subprocess.run(
-            argv,
-            cwd=config.root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=config.timeout,
-        )
-    except subprocess.TimeoutExpired as expired:
-        # A red result and not an exception: a check that never finished is a
-        # check that failed, and giving it its own exception would buy the flow
-        # a special path that ends in exactly the same place.
-        partial = _decode(expired.stdout) + _decode(expired.stderr)
-        detail = f"{shlex.join(argv)!r} timed out after {config.timeout}s"
-        return CheckResult(kind, False, f"{detail}\n{partial}".rstrip(), source)
+        completed = process.run(argv, cwd=config.root, timeout=config.timeout)
     except OSError as error:
         # A tool that is not installed must read as a failed check, not as a
         # traceback that takes the whole chain down with it.
@@ -274,30 +260,40 @@ def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> Check
                 f"relative to the project root. Use `uv run` (or an absolute path)."
             )
         return CheckResult(kind, False, detail, source)
+
     output = completed.stdout + completed.stderr
+    if completed.timed_out:
+        # A red result and not an exception: a check that never finished is a
+        # check that failed, and giving it its own exception would buy the flow
+        # a special path that ends in exactly the same place.
+        detail = f"{shlex.join(argv)!r} timed out after {config.timeout}s"
+        return CheckResult(kind, False, _with(detail, completed, output), source)
+    if completed.output_abandoned:
+        # Red although the tool may well have exited 0: what came back is a
+        # prefix, and a threshold or a failure count could be in the part that
+        # did not. Grundsatz 4 -- a check nobody could read is not a passed
+        # check.
+        detail = f"{shlex.join(argv)!r} exited {completed.returncode}"
+        return CheckResult(kind, False, _with(detail, completed, output), source)
     return CheckResult(kind, completed.returncode == 0, output, source)
 
 
-def _decode(captured: bytes | str | None) -> str:
-    """What a timed-out process managed to write before it was killed.
-
-    TimeoutExpired types its capture as bytes|str|None regardless of text=True,
-    and the partial output is the only clue to *where* the tool hung.
-    """
-    if captured is None:
-        return ""
-    if isinstance(captured, bytes):
-        return captured.decode("utf-8", errors="replace")
-    return captured
+def _with(detail: str, completed: process.Completed, output: str) -> str:
+    """The reason, what arrived, and -- if it is a prefix -- that it is one."""
+    if completed.output_abandoned:
+        # Said out loud: a descendant still holds the pipe, so what follows is
+        # what had arrived by then and not everything the tool wrote.
+        detail += " (output incomplete: a reader had to be given up on)"
+    return f"{detail}\n{output}".rstrip()
 
 
 def run_all(config: Config) -> tuple[CheckResult, ...]:
     """Run every resolvable check at once, and report them in a fixed order.
 
-    Concurrent with plain threads: subprocess.run releases the GIL while it
-    waits, so parallel waiting reaches most of its ceiling without a special
-    interpreter (spec 9.4). The order of the result is KINDS, never the order
-    in which the checks happened to finish — a report whose lines move around
+    Concurrent with plain threads: process.run spends its time waiting on a
+    child, with the GIL released, so parallel waiting reaches most of its
+    ceiling without a special interpreter (spec 9.4). The order of the result is
+    KINDS, never the order in which the checks happened to finish — a report whose lines move around
     between runs cannot be compared.
     """
     with ThreadPoolExecutor(max_workers=len(KINDS)) as pool:

@@ -2,18 +2,17 @@
 
 import json
 import shlex
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
 
+from ultraloom import process
 from ultraloom.checks import (
     KINDS,
     CheckUnavailableError,
     Command,
-    _decode,
     _run_command,
     resolve_check,
     run_all,
@@ -254,7 +253,7 @@ def test_an_unexpected_failure_in_one_check_is_reported_not_raised(
     def explode(*args: object, **kwargs: object) -> object:
         raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "tool wrote binary")
 
-    monkeypatch.setattr(subprocess, "run", explode)
+    monkeypatch.setattr(process, "run", explode)
     results = {result.kind: result for result in run_all(load_config(tmp_path))}
 
     assert set(results) == set(KINDS), "the other checks must still be reported"
@@ -464,16 +463,26 @@ def test_the_measuring_step_gets_the_limit_too(tmp_path: Path) -> None:
     assert "timed out after 1s" in result.output
 
 
-def test_partial_output_survives_every_shape_the_exception_can_carry() -> None:
-    """text=True makes it str in practice, but the exception promises less.
+def test_a_truncated_capture_is_never_a_passed_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exit code 0 over a prefix of the output is not evidence of anything.
 
-    A wrong assumption here would turn a timeout report into a TypeError, so
-    the two shapes the type allows but this call never produces are covered
-    directly rather than through a process that cannot produce them.
+    Faked rather than provoked: a reader is abandoned only when a descendant
+    outlives its parent *and* the command still exits by itself, which no real
+    command can be made to do reliably.
     """
-    assert _decode(None) == ""
-    assert _decode(b"half a line\xff") == "half a line\ufffd"
-    assert _decode("half a line") == "half a line"
+    truncated = process.Completed(
+        returncode=0, stdout="ran 3 of ", stderr="", output_abandoned=True
+    )
+    monkeypatch.setattr(process, "run", lambda *args, **kwargs: truncated)
+    config = Config(root=tmp_path, commands={"lint": _sleep_command(0)}, timeout=30)
+
+    result = run_check("lint", config)
+
+    assert not result.ok
+    assert "output incomplete" in result.output
+    assert "ran 3 of" in result.output
 
 
 def test_a_configured_coverage_report_is_the_coverage_command(tmp_path: Path) -> None:
@@ -660,3 +669,37 @@ def test_a_script_project_gets_no_invented_binary_either(tmp_path: Path) -> None
 
     assert "godot --headless" not in output
     assert "--headless --path . --import" in output
+
+
+def test_a_timed_out_check_names_its_partial_output(tmp_path: Path) -> None:
+    """The timeout costs its limit even when a grandchild keeps the pipe open.
+
+    The shape every real check command has: `uv run pytest` is a chain of at
+    least two processes. subprocess.run kills the direct child and then waits
+    for the pipes, which the surviving grandchild still holds -- so the run
+    hangs for as long as the grandchild lives, and the partial output arrives
+    only after it dies.
+    """
+    python_project(tmp_path)
+    linger = py("import time; time.sleep(20)")
+    config = Config(
+        root=tmp_path,
+        commands={
+            "lint": py(
+                "import shlex, subprocess, sys, time; "
+                "print('half done', flush=True); "
+                f"subprocess.Popen(shlex.split({linger!r})); "
+                "time.sleep(20)"
+            )
+        },
+        timeout=1,
+    )
+
+    started = time.monotonic()
+    result = run_check("lint", config)
+    elapsed = time.monotonic() - started
+
+    assert not result.ok
+    assert "timed out after 1s" in result.output
+    assert "half done" in result.output
+    assert elapsed < 12, "the run waited for the grandchild instead of for its own limit"
