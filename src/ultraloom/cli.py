@@ -199,17 +199,18 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
 
     if args.command == "run":
         run_id, flow_name = next_run_id(root), args.flow
+        options = _flow_options(args)
     else:
         run_id = args.run_id
         journal_path = root / RUN_DIR / f"{run_id}.jsonl"
         if not journal_path.exists():
             print(f"no run {run_id!r} under {root / RUN_DIR}", file=sys.stderr)
             return _EXIT_FAIL
-        recorded = _flow_of(root, run_id)
+        recorded = _recorded_run(root, run_id)
         if recorded is None:
             print(f"run {run_id!r} does not say which flow it belongs to", file=sys.stderr)
             return _EXIT_FAIL
-        flow_name = recorded
+        flow_name, options = recorded
         if args.command == "replay":
             gate = pending_gate(Journal(journal_path))
             if gate is not None:
@@ -223,7 +224,7 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
                 )
                 return _EXIT_FAIL
 
-    context = FlowContext(root=root, config=config, options=_flow_options(args))
+    context = FlowContext(root=root, config=config, options=options)
     try:
         loaded = find_flow(flow_name, root, context)
     except (FlowNotFoundError, FlowLoadError) as error:
@@ -231,7 +232,7 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
         return _EXIT_FAIL
 
     if args.command == "run":
-        _remember_flow(root, run_id, flow_name)
+        _remember_run(root, run_id, flow_name, options)
     runner: Runner[object] = Runner(
         loaded.graph,
         Journal(root / RUN_DIR / f"{run_id}.jsonl"),
@@ -274,22 +275,29 @@ def _show(root: Path, run_id: str) -> int:
     return _EXIT_OK
 
 
-def _flow_of(root: Path, run_id: str) -> str | None:
-    """Which flow a run belongs to, remembered beside its journal.
+def _recorded_run(root: Path, run_id: str) -> tuple[str, dict[str, str]] | None:
+    """Which flow a run belongs to, and which options it was started with.
 
     The journal records what each node did, not which graph the nodes came
     from, so resume and replay would have nothing to load without this marker.
+    The options belong to the same answer: a flow that builds itself from them
+    would otherwise be rebuilt differently on every continuation, and a replay
+    would re-derive a graph that is not the one the journal recorded.
     """
     marker = root / RUN_DIR / f"{run_id}.flow"
     if not marker.exists():
         return None
-    return marker.read_text(encoding="utf-8").strip()
+    flow_name, *rest = marker.read_text(encoding="utf-8").splitlines()
+    return flow_name.strip(), dict(line.split("=", 1) for line in rest if line)
 
 
-def _remember_flow(root: Path, run_id: str, flow_name: str) -> None:
+def _remember_run(root: Path, run_id: str, flow_name: str, options: dict[str, str]) -> None:
     marker = root / RUN_DIR / f"{run_id}.flow"
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(flow_name + "\n", encoding="utf-8")
+    # One line each, not JSON: the file is read by eye as often as by code, and
+    # the first line means what it always meant.
+    lines = [flow_name, *(f"{name}={value}" for name, value in options.items())]
+    marker.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _model(root: Path) -> Model:

@@ -88,8 +88,8 @@ any more, or until the round ceiling is reached.
 `--checks` takes a comma-separated list of check kinds, or the name of a
 profile from `[verify.profiles]`. Left out, the flow runs every check.
 `--max-rounds` caps the repair rounds; left out, the flow's own limit applies.
-Both are rejected with a message naming what was expected, so a typo never
-turns into a long run.
+The flow itself checks both while it builds, and refuses to start with a
+message naming what it expected — so a typo never turns into a long run.
 
 The repairer may not touch the paths in `[verify].tests` — a check that goes
 green because its test was edited is the one repair worth nothing. Coverage is
@@ -109,10 +109,10 @@ full = ["lint", "types", "test", "coverage"]
 ```
 
 Exit codes: `0` green, `1` still red after the last round, `3` waiting at an
-approval point, `4` the repairer touched a protected test path and the run was
-stopped.
+approval point, `4` the run was stopped over the protected test paths — either
+the repairer touched one, or the working tree could not be read to tell.
 
-Die ausführliche Beschreibung des Ablaufs steht in
+The flow is described at length — in German — in
 `docs/abläufe/verify-until-green.md`.
 
 ### Writing a flow
@@ -175,7 +175,7 @@ changing it needs.
 | 1 | a check failed, or the command could not be carried out |
 | 2 | argparse rejected the command line (its own convention) |
 | 3 | the flow paused at an approval point and is waiting for an answer |
-| 4 | a flow stopped itself; verify-until-green uses it for a touched test path |
+| 4 | a flow stopped itself; verify-until-green uses it for the protected test paths |
 
 ## Licence
 

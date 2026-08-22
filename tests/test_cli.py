@@ -580,8 +580,104 @@ def test_a_flow_without_the_options_is_unaffected(tmp_path: Path) -> None:
     assert main(["run", "plain_options", "--root", str(tmp_path), "--no-model"]) == 0
 
 
-def test_max_rounds_must_be_a_number(tmp_path: Path) -> None:
+def test_max_rounds_must_be_a_number(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         main(["run", "anything", "--root", str(tmp_path), "--max-rounds", "soon"])
 
     assert raised.value.code == 2, "argparse's own usage error"
+    # The message, not just the code: an unknown flag would exit 2 as well, and
+    # then the test would pass without the option existing at all.
+    assert "invalid int value" in capsys.readouterr().err
+
+
+A_GATED_FLOW_THAT_ECHOES_ITS_OPTIONS = '''
+"""A gated flow that asserts its options on every load, start or continuation."""
+
+from dataclasses import dataclass
+
+from ultraloom.discovery import LoadedFlow
+from ultraloom.graph import END, GateNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Payload:
+    answer: str = ""
+
+
+def build(context):
+    expected = {"checks": "lint,types", "max_rounds": "2"}
+    assert context.options == expected, repr(context.options)
+    flow = Graph("gated_options", start="ask")
+    flow.add(GateNode("ask", lambda _d: "Proceed?", lambda _d, a: {"answer": a}))
+    flow.edge("ask", END)
+    return LoadedFlow(flow, Payload())
+'''
+
+
+A_GATED_FLOW_WITHOUT_OPTIONS = '''
+"""A gated flow that asserts it never sees options it was not given."""
+
+from dataclasses import dataclass
+
+from ultraloom.discovery import LoadedFlow
+from ultraloom.graph import END, GateNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Payload:
+    answer: str = ""
+
+
+def build(context):
+    assert context.options == {}, repr(context.options)
+    flow = Graph("gated_plain", start="ask")
+    flow.add(GateNode("ask", lambda _d: "Proceed?", lambda _d, a: {"answer": a}))
+    flow.edge("ask", END)
+    return LoadedFlow(flow, Payload())
+'''
+
+
+def _start_with_options(root: Path, name: str, body: str) -> None:
+    write_flow(root, name, body)
+    assert (
+        main(
+            [
+                "run",
+                name,
+                "--root",
+                str(root),
+                "--no-model",
+                "--checks",
+                "lint,types",
+                "--max-rounds",
+                "2",
+            ]
+        )
+        == 3
+    )
+
+
+def test_resume_sees_the_options_the_run_was_started_with(tmp_path: Path) -> None:
+    """Otherwise a continuation would rebuild a different graph than it continues."""
+    _start_with_options(tmp_path, "gated_options", A_GATED_FLOW_THAT_ECHOES_ITS_OPTIONS)
+
+    code = main(["resume", "0001", "--answer", "yes", "--root", str(tmp_path)])
+
+    assert code == 0
+
+
+def test_replay_sees_the_options_the_run_was_started_with(tmp_path: Path) -> None:
+    """A replay that rebuilt the graph from different options would not be a replay."""
+    _start_with_options(tmp_path, "gated_options", A_GATED_FLOW_THAT_ECHOES_ITS_OPTIONS)
+    assert main(["resume", "0001", "--answer", "yes", "--root", str(tmp_path)]) == 0
+
+    assert main(["replay", "0001", "--root", str(tmp_path)]) == 0
+
+
+def test_a_run_started_without_options_is_continued_without_them(tmp_path: Path) -> None:
+    write_flow(tmp_path, "gated_plain", A_GATED_FLOW_WITHOUT_OPTIONS)
+    assert main(["run", "gated_plain", "--root", str(tmp_path), "--no-model"]) == 3
+
+    code = main(["resume", "0001", "--answer", "yes", "--root", str(tmp_path)])
+
+    assert code == 0
