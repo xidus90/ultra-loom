@@ -52,6 +52,55 @@ offen ist, ist die Token-Abrechnung unbestätigt. `usage.get("output_tokens", 0)
 liefert bei einer Umbenennung still Kosten von 0 — der Drift-Wächter kann
 Dictionary-Schlüssel strukturell nicht abdecken.
 
+## Was das Abschlussreview nachgetragen hat
+
+Vier Punkte, die während der Ausführung von Teilprojekt 2 gesehen und verschoben
+wurden und bis zum Abschlussreview nur im Ausführungsledger standen — der ist
+git-ignoriert und stirbt mit dem Arbeitsbereich.
+
+**Die Zeitgrenze tötet nur das Kind, nicht die Enkel.** `checks._run` ruft
+`subprocess.run(..., timeout=…)` — die Grenze aus §8 der Spec, Vorgabe 600
+Sekunden. `subprocess.run` beendet bei Zeitüberschreitung **den direkten
+Kindprozess** und ruft danach `communicate()`, um dessen Ausgabe einzusammeln.
+Hält ein überlebender Enkel dieselben Pipe-Enden noch offen, kommt dieser Aufruf
+nicht zurück, und der Lauf hängt genau dort unbegrenzt, wo die Grenze ihn
+gerade davor bewahren sollte. Das ist kein Randfall: `uv run pytest` ist eine
+Kette aus mindestens zwei Prozessen, ein Godot-Starter ebenso, und jede Prüfung,
+die über ein Präfix aus `[exec].prefix` läuft, hat dieselbe Form. Verschoben,
+weil die Reparatur die Prozessführung austauscht — `Popen` mit einer
+Prozessgruppe beziehungsweise einem Job-Objekt unter Windows, `kill` auf die
+ganze Gruppe, und ein zweites, kürzeres Zeitfenster für das Einsammeln der
+Ausgabe. Kosten des Liegenlassens: die Zeitgrenze ist auf genau den Prüfketten
+wirkungslos, für die sie geschrieben wurde. **Dies ist der wichtigste der vier.**
+
+**Committet der Reparateur, sieht die Wache nichts.** `guard` misst über
+`git status`, also über den *Arbeitsbaum*. Ein Agent, der seine Änderung
+committet, hinterlässt einen sauberen Baum: `changed_files` meldet nichts, kein
+Pfad wird geprüft, und eine geänderte Testdatei geht durch. Heute entschärft,
+nicht gelöst — das Werkzeugprofil `edit` enthält kein Bash, der Agent hat also
+keinen Weg zu `git commit`. Verschoben, weil die härtere Grundlage eine andere
+Messung wäre: der Vergleich gegen einen beim Laufstart festgehaltenen
+Ausgangs-Commit statt gegen den Arbeitsbaum. Das berührt die Grundlinie, den
+Fall „Projekt ohne Repository" und die Frage, was bei einem Lauf auf einem
+Detached Head gilt. Kosten: die Sperre hängt an einer Profilentscheidung, die
+anderswo aus einem ganz anderen Grund gelockert werden kann.
+
+**Das Pausenfenster gehört niemandem.** Die Grundlinie wird beim `run`
+aufgenommen und im `.flow`-Marker mitgeführt. Ändert ein Mensch zwischen `run`
+und `resume` eine geschützte Datei — legitim, an seinem eigenen Baum —, steht
+sie in keiner Grundlinie: nicht in der aufgezeichneten, denn die ist älter, und
+eine neue wird bewusst nicht genommen. Die Wache lastet sie dem Reparateur an,
+Exit 4 gegen einen Unschuldigen. Verschoben, weil die naheliegende Abhilfe die
+Lücke aufmacht, gegen die die Aufzeichnung überhaupt existiert: nähme `resume`
+eine frische Grundlinie, wäre alles, was der Reparateur vor der Pause schon
+geändert hat, entschuldigt. Eine ehrliche Lösung müsste die beiden Urheber
+auseinanderhalten können, und dazu fehlt jeder Anhaltspunkt. Kosten: gering,
+solange `verify_until_green` kein Gate hat — der Ablauf pausiert heute nie. Der
+Punkt wird scharf, sobald Teilprojekt 4 die Gate-Variante der Testsperre baut.
+
+**Reihenfolge zwischen Prüfungen** stand schon oben, aus dem space-Lauf, und ist
+dort als oberster Punkt der Liste vermerkt.
+
 ## Kleinere offene Punkte
 
 - `runner._why_it_looped` erklärt die Besuchsgrenze erst, wenn sie erreicht ist.

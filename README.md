@@ -81,9 +81,13 @@ The flow ultraloom ships with. It runs the checks, hands every red one to the
 repairer, and runs them again — until everything is green, until nothing moves
 any more, or until the round ceiling is reached.
 
-    ultraloom run verify-until-green
-    ultraloom run verify-until-green --checks lint,types
-    ultraloom run verify-until-green --checks quick --max-rounds 5
+    ultraloom run verify_until_green
+    ultraloom run verify_until_green --checks lint,types
+    ultraloom run verify_until_green --checks quick --max-rounds 5
+
+Underscores on the command line: a flow name is a Python identifier, so
+`ultraloom run verify-until-green` is refused with exit 1. The graph is still
+called `verify-until-green` inside — only the invocation is not.
 
 `--checks` takes a comma-separated list of check kinds, or the name of a
 profile from `[verify.profiles]`. Left out, the flow runs every check.

@@ -131,6 +131,16 @@ Pfade werden segmentweise verglichen (`PurePosixPath`), damit `tests/` nicht
 `testsuite/thing.py` einfängt, und die Groß-/Kleinschreibung wird exakt
 verglichen, auch unter Windows.
 
+Die Pfade werden vorher auf die Projektwurzel bezogen. git meldet sie relativ
+zur **Repository**-Wurzel, gleich in welchem Verzeichnis es aufgerufen wird, und
+kein Porcelain-Schalter ändert das. Sind beide dasselbe Verzeichnis, fällt der
+Unterschied nicht auf — in einem Monorepo mit `--root paket` aber antwortet git
+`paket/tests/test_x.py`, während `[verify].tests` `tests/` sagt: kein
+konfigurierter Pfad trifft je, und die Testsperre wäre ohne eine einzige Meldung
+aus. `changed_files` schneidet deshalb den Präfix aus
+`git rev-parse --show-prefix` ab und lässt alles weg, was außerhalb der
+Projektwurzel liegt.
+
 Ist der Arbeitsbaum nicht lesbar — git bricht ab oder lässt sich gar nicht
 starten —, endet der Lauf. Eine unbeantwortbare Frage als „nichts geändert" zu
 lesen, hebelte genau die Regel aus, für die dieser Knoten da ist.
@@ -218,12 +228,21 @@ Parametern aufbauen wie der ursprüngliche Lauf.
 
 | Ausgang | Exit-Code | Wann |
 | --- | --- | --- |
-| grün | 0 | `check` findet keine rote Prüfung. |
+| grün | 0 | `check` findet keine rote Prüfung — oder, unter `ultraloom replay`, das Journal eines Laufs, der so endete. Ein `replay` prüft nichts nach; er leitet das aufgezeichnete Ende neu ab. |
 | rot, außer Reichweite | 1 | Es ist nichts Reparierbares mehr übrig: jede rote Prüfung ist unreparierbar. Eine unreparierbare *neben* reparierbaren beendet den Lauf **nicht** — sonst erreichte ein Projekt, dessen Coverage-Prüfung über die Tests misst, bei einem einzigen roten Test nie eine Reparaturrunde. |
 | rot, Runden aufgebraucht | 1 | `rounds > max_rounds`. |
 | rot, stagniert | 1 | Dieselben Prüfungen sind wieder rot, und der Reparaturlauf dazwischen hat keine Datei geändert. |
 | rot, keine Prüfung | 1 | Der Zustand benennt keine Prüfart. Ein grünes Ergebnis, nach dem niemand gesehen hat, ist der eine Fehler, den dieser Ablauf nie erzeugen darf. |
 | abgebrochen, Tests angefasst | 4 | Der Reparateur hat einen geschützten Pfad geändert, oder der Arbeitsbaum ist nicht lesbar. |
+
+`ultraloom resume` gibt es für diesen Ablauf nicht: er kennt kein Gate, also
+wartet nie einer seiner Läufe auf eine Antwort. Ein `resume` über ein
+vollständiges Journal führte null Knoten aus und meldete `done` mit Exit 0 —
+grün, ohne dass irgendetwas geprüft worden wäre. Die CLI lehnt deshalb jedes
+`resume` auf einem Lauf ab, der an keinem Gate wartet, mit Exit 1 und dem
+Hinweis auf `replay` beziehungsweise auf einen neuen `run`. Das ist das
+Spiegelbild der schon vorhandenen Regel, die `replay` auf einem pausierten Lauf
+ablehnt.
 
 Die Gründe für einen roten Ausgang schließen einander in dieser Reihenfolge aus:
 zuerst „außer Reichweite", dann „Runden aufgebraucht", sonst „stagniert". Die

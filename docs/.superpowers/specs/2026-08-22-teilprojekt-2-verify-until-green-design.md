@@ -372,3 +372,125 @@ findet, die der Plan nicht vorgemacht hat, baut sie dazu.
 - Ob das Agent SDK space' `coverage_gate.py` als Claude-Code-Hook zusätzlich
   ausführt und damit doppelt prüft. Abschnitt 17 des Kern-Designs hat diese
   Frage an Teilprojekt 2 adressiert; Schritt 2 der Abnahme beantwortet sie.
+
+---
+
+## 11. Was sich in der Ausführung geändert hat
+
+Die Abschnitte oben bleiben, wie sie geschrieben wurden: eine Spec ist ein
+historisches Dokument und soll zeigen, was gedacht war. Dieser Abschnitt sagt,
+was daraus geworden ist. Er ist an mehreren Stellen nötig, weil die Spec den Code
+**strenger** beschreibt, als er ist — und eine Beschreibung, die mehr verspricht
+als die Mechanik hält, ist der schlimmere der beiden möglichen Fehler.
+
+**Der aktuelle Stand steht auf `docs/abläufe/verify-until-green.md`.** Die Seite
+wird von `tests/test_flow_docs.py` gegen den echten Graphen gehalten; dieser
+Abschnitt wird von niemandem geprüft und ist eine Wegbeschreibung dorthin.
+
+### §4.1 — der Zustand hat ein Feld mehr, und `kinds` hat eine Vorgabe
+
+`VerifyState` trägt zusätzlich `previous_failing: tuple[str, ...] = ()`: was die
+vorige Runde gefunden hat. Eine Kantenbedingung sieht genau einen Zustand, und
+„dieselben Prüfungen sind schon wieder rot" — die Stagnation aus §4.3 — ist ohne
+dieses Feld nicht beantwortbar. `kinds` hat inzwischen ebenfalls einen
+Standardwert (`()`), damit ein Test einen Zustand ohne Argumente bauen kann; der
+leere Fall wird dafür im `check`-Knoten abgefangen und endet rot, statt als
+grüner Lauf durchzugehen, der keine einzige Prüfung gestartet hat.
+
+### §4.2 — `guard` misst mit `status`, nicht mit `diff`
+
+Die Spec sagt „prüft per `git diff --name-only`". Tatsächlich liest
+`worktree.changed_files` mit `git status --porcelain -z -uall`. Der Grund: ein
+Reparateur darf Dateien **anlegen**, und eine neu angelegte, unverfolgte Datei
+ist für `diff` unsichtbar — ein beiseite geschriebener Test käme so an der
+Sperre vorbei. `-z` hält Pfade mit Nicht-ASCII unquotiert lesbar, `-uall` sorgt
+dafür, dass ein unverfolgtes Verzeichnis nicht zu einem einzigen Eintrag
+zusammenfällt, der auf keine Datei zeigt.
+
+Dazu kam im Abschlussreview: git meldet seine Pfade relativ zur
+**Repository**-Wurzel, nicht zum Aufrufverzeichnis. `changed_files` bezieht sie
+über `git rev-parse --show-prefix` auf die Projektwurzel, sonst wäre die
+Testsperre bei `--root <unterverzeichnis>` still abgeschaltet.
+
+### §4.2 — alle Zyklusknoten tragen `max_rounds + 1`
+
+Die Tabelle nennt 6/5/5/1. Tatsächlich bekommen `check`, `repair` und `guard`
+alle drei `max_rounds + 1`; nur `report_red` bleibt bei 1. Der Grund steht in
+`assemble`: die Besuchsgrenze ist der Notnagel des Ausführers gegen eine
+entlaufene Schleife, das Tor dieses Ablaufs ist der Rundenzähler, und der
+Notnagel muss *über* dem Tor liegen. Läge er gleichauf, wären `repair` und
+`guard` bei `--max-rounds 1` Ein-Besuch-Knoten auf einem Zyklus — was `validate()`
+rundheraus ablehnt — und jeder Lauf an seiner Obergrenze endete an der Wache des
+Ausführers, ohne Exit-Code und mit einer Meldung über `max_visits` statt über den
+Grund, aus dem er rot ist.
+
+### §4.3 — die Kante `guard → report_red` gibt es nicht
+
+Die Spec zeichnet sie, und §6 zeichnet sie noch einmal. Der Graph hat sie nicht:
+`guard` wirft bei einem berührten geschützten Pfad `FlowExit(4)` direkt, und ein
+Exit-Code von 4 ist etwas anderes als der rote Ausgang mit 1. Das Diagramm aus §6
+würde damit den Doku-Test, den §6 selbst fordert, nicht bestehen — geprüft wird
+die Zeichnung auf der Ablaufseite, und die zeichnet stattdessen
+`report_red --> END`, eine Kante, die nie genommen wird und nur existiert, weil
+`validate()` einen Knoten ohne Ausgang ablehnt.
+
+### §4.3 — die rote Bedingung ist materiell eine andere
+
+Die Spec schreibt `failing and (unfixable or stagnated)`. Der Code prüft
+`_out_of_reach_only(state) or _stagnated(state) or out_of_rounds(state)`, und
+`_out_of_reach_only` ist ein **Teilmengentest**: `set(failing) <= set(unfixable)`.
+Der Unterschied ist der Punkt. Nach der Fassung der Spec beendete eine einzige
+unreparierbare Prüfung neben reparierbaren den ganzen Lauf — ein Projekt, dessen
+Coverage-Prüfung über die Tests misst, erreichte bei einem einzigen roten Test
+nie eine Reparaturrunde. Genau das ist im echten Lauf 0003 passiert. Dazu zählt
+seit dem space-Lauf auch eine Prüfung mit `source="unavailable"` als außer
+Reichweite, ohne den Lauf sofort zu beenden: ein Projekt ohne Typechecker soll
+seine übrigen Prüfungen trotzdem reparieren dürfen.
+
+### §5 — die Grundlinie fehlt in der Spec ganz
+
+Das Folgenreichste am Guard steht dort nicht, weil es beim Entwurf nicht gesehen
+wurde: **eine Grundlinie**, einmal pro Lauf beim Start aufgenommen und im
+`.flow`-Marker mitgeführt. `guard` zieht sie ab, bevor er irgendeinen Pfad
+bewertet. Ohne sie beantwortet er die Frage „was ist an diesem Baum schmutzig"
+und reicht die Antwort als „was hat der Reparateur getan" weiter — jeder Lauf auf
+einem Arbeitsbaum, in dem ein geschützter Pfad schon vorher geändert war, endete
+mit Exit 4 gegen einen Unschuldigen. Lauf 0004 ist genau das.
+
+Sie wird bewusst **nicht** bei `resume` neu genommen: alles, was der Reparateur
+vor der Pause schon geändert hat, stünde sonst in der neuen Grundlinie. Der Preis
+läuft in die andere Richtung und ist so gewollt: eine schon vorher schmutzige
+Datei, die der Agent zusätzlich anfasst, sieht die Wache nicht mehr. Ein
+verpasster Fang kostet eine Reparatur, die nicht gestoppt wurde; ein Fehlalarm
+kostet jeden Lauf auf einem nicht makellosen Baum, und das sind die meisten.
+
+### §7.1 — `--checks` ohne Angabe nimmt *alle* Arten
+
+Die Tabelle sagt „Vorgabe: alle auflösbaren". Der Code nimmt `checks.KINDS`,
+also alle — auflösbar oder nicht. Eine Art, die sich in diesem Projekt zu keinem
+Werkzeug auflösen lässt, kommt als rotes Ergebnis mit `source="unavailable"`
+zurück und gilt als unreparierbar. Das ist der Normalfall in einem Projekt, dem
+ein Werkzeug dauerhaft fehlt, und keine Ausnahme; wer ihn nicht will, lässt die
+Art über `--checks` weg.
+
+Dazu, kleiner: der Ablauf heißt auf der Kommandozeile `verify_until_green`, mit
+Unterstrichen. `find_flow` lehnt jeden Namen ab, der kein Python-Identifier ist;
+nur der Graph heißt intern weiter `verify-until-green`.
+
+### §7.3 — `resume` ohne wartendes Gate wird abgelehnt
+
+Dieser Ablauf hat kein Gate, also wartet keiner seiner Läufe je auf eine
+Antwort. Ein `resume` über ein vollständiges Journal führte null Knoten aus und
+meldete `done` mit Exit 0 — grün, ohne dass etwas geprüft worden wäre. Die CLI
+lehnt das seit dem Abschlussreview mit Exit 1 ab und nennt `replay`
+beziehungsweise einen neuen `run` als das, was gemeint war. Spiegelbild der schon
+vorhandenen Regel, die `replay` auf einem pausierten Lauf ablehnt.
+
+### §8 — die Zeitgrenze steht, hält aber nicht gegen Enkelprozesse
+
+`checks._run` übergibt `timeout=config.timeout` wie vorgesehen. Was die Spec
+nicht sieht: `subprocess.run` beendet bei Zeitüberschreitung nur den direkten
+Kindprozess und sammelt danach dessen Ausgabe ein — an Pipes, die ein
+überlebender Enkel noch offen hält. Unter `uv run pytest` oder einem
+Godot-Starter kann die Grenze deshalb unbegrenzt hängen. Festgehalten in
+`docs/.superpowers/specs/2026-08-21-teilprojekt-2-backlog.md`.

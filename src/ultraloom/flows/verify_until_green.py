@@ -466,10 +466,15 @@ def _kinds_from(requested: str | None, config: Config) -> tuple[str, ...]:
 def _max_rounds_from(requested: str | None) -> int:
     """How many repair rounds the caller allows.
 
-    Read here rather than trusted: `int()` on a word raises a message about
-    literals that never mentions the option, and a ceiling of zero or less
-    reaches the graph as an unbounded cycle -- reported as a GraphError about a
-    node's max_visits, which is true and tells the caller nothing.
+    The CLI declares `--max-rounds` as `type=int`, so a word never gets this
+    far from there: argparse refuses it first, with exit 2. The parse survives
+    because the CLI is not the only way in. A hand-written `.flow` marker and a
+    direct `build()` call both reach here with whatever string they hold, and
+    for those `int()` alone would raise a message about literals that never
+    mentions the option. The lower bound has no argparse equivalent at all: a
+    ceiling of zero or less reaches the graph as an unbounded cycle and is
+    reported as a GraphError about a node's max_visits, which is true and tells
+    the caller nothing.
     """
     if requested is None:
         return 5
