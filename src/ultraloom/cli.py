@@ -128,7 +128,14 @@ def _check(kind: str, config: Config, threshold: int | None) -> int:
     if kind == "all":
         # One process pays the startup cost once and waits concurrently
         # (spec 9.4). Unresolvable checks come back as failures, not silence.
-        results = run_all(config)
+        try:
+            results = run_all(config)
+        except ConfigError as error:
+            # The scheduler is the first reader of the *effective* check order,
+            # so it is the first place a ring between the project's edges and
+            # the preset's can show up -- long after load_config was happy.
+            print(str(error), file=sys.stderr)
+            return _EXIT_FAIL
         for result in results:
             _report(result)
         return _EXIT_OK if all(result.ok for result in results) else _EXIT_FAIL

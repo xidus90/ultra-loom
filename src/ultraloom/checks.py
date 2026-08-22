@@ -3,6 +3,11 @@
 Four stages, first hit wins: explicit configuration, a script at a named path,
 the language preset, then refusal. Detection saves work; guessing would cost
 reliability — and a missing tool is a failure, never a skipped check.
+
+Two languages on purpose, and the line runs along the reader: what lands in a
+`CheckResult.output` speaks German, because it is read by a person and by the
+repairing model (the spec prescribes those strings word for word), while every
+tool-facing message — argv, exceptions, log lines — stays English.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from pathlib import Path
 from threading import BoundedSemaphore, Semaphore
 
 from ultraloom import process
-from ultraloom.config import Config
+from ultraloom.config import Config, ConfigError
 
 KINDS = ("lint", "types", "test", "coverage")
 
@@ -615,6 +620,10 @@ def run_kinds(
             "run_kinds needs at least one check; a run that checks nothing is not a pass"
         )
 
+    # Deduplicated, not run twice: two `test` entries in one profile would put
+    # two `coverage run -m pytest` on the same .coverage file at the same time.
+    # A repeated kind means the same check, and a check runs once per run.
+    kinds = tuple(dict.fromkeys(kinds))
     alongside = frozenset(kinds)
     marker = _marker(config.root)
     results: dict[str, CheckResult] = {}
@@ -633,10 +642,13 @@ def run_kinds(
         if not pending:
             continue
         with ThreadPoolExecutor(max_workers=len(pending)) as pool:
-            for result in pool.map(
-                lambda kind: _run_or_report(kind, config, alongside, run), pending
-            ):
-                results[result.kind] = result
+            reported = pool.map(lambda kind: _run_or_report(kind, config, alongside, run), pending)
+            # Filed under the kind that was asked for, never under the kind the
+            # result names itself: an injected runner that answers about
+            # something else would otherwise leave a KeyError at the end of the
+            # run instead of a result nobody can miss.
+            for kind, result in zip(pending, reported, strict=True):
+                results[kind] = result
 
     return tuple(results[kind] for kind in kinds)
 
@@ -665,21 +677,36 @@ def _stages(
     would be waiting for something that is never going to come. Whether it then
     reads a stale report is a question ultraloom cannot answer, and
     `resolve_check` says so in a warning rather than guessing.
+
+    The ring is caught here and not at load time, because here is where the
+    edges actually are. `[verify.after]` is checked against itself by the config
+    loader, but an order is only half configured: the project names some edges
+    and the preset supplies the rest, and half a ring from each side passes both
+    halves of the check. A single line `test = "coverage"` against Python's
+    `coverage after test` is exactly that -- accepted by the loader, and a walk
+    with no end for whoever follows the effective edges.
     """
     requested = set(kinds)
     depth: dict[str, int] = {}
 
-    def level(kind: str) -> int:
+    def level(kind: str, walked: tuple[str, ...]) -> int:
         if kind in depth:
             return depth[kind]
+        if kind in walked:
+            # Named as a path and not as a node: a ring the reader has to find
+            # for themselves is a refusal that does not help.
+            ring = " -> ".join((*walked[walked.index(kind) :], kind))
+            raise ConfigError(f"the check order has a cycle: {ring}")
         predecessor = _predecessor_of(kind, marker, config)
-        # The config loader rejects cycles, so this recursion terminates.
-        depth[kind] = level(predecessor) + 1 if predecessor in requested else 0
+        # Only an edge into this run can hold anything up, so only those are
+        # walked -- a ring whose other half was not requested is not a ring
+        # anybody waits in.
+        depth[kind] = level(predecessor, (*walked, kind)) + 1 if predecessor in requested else 0
         return depth[kind]
 
     ordered: dict[int, list[str]] = {}
     for kind in kinds:
-        ordered.setdefault(level(kind), []).append(kind)
+        ordered.setdefault(level(kind, ()), []).append(kind)
     return tuple(tuple(ordered[key]) for key in sorted(ordered))
 
 

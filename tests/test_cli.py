@@ -821,3 +821,18 @@ def test_an_empty_recorded_baseline_holds_no_path(tmp_path: Path) -> None:
     """
     assert _decode_baseline("") == frozenset()
     assert _decode_baseline("a.py\n\ntests/b.py") == frozenset({"a.py", "tests/b.py"})
+
+
+def test_check_all_refuses_a_ring_in_the_effective_check_order(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """load_config takes the single edge; the preset closes the ring behind it."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    config = tmp_path / ".ultraloom" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text('[verify.after]\ntest = "coverage"\n', encoding="utf-8")
+
+    code = main(["check", "all", "--root", str(tmp_path)])
+
+    assert code == 1
+    assert "has a cycle" in capsys.readouterr().err

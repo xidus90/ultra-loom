@@ -26,7 +26,7 @@ from ultraloom.checks import (
     run_check,
     run_kinds,
 )
-from ultraloom.config import Config, load_config
+from ultraloom.config import Config, ConfigError, load_config
 
 # The interpreter path goes into a TOML string that is later split with shlex
 # in POSIX mode, where a Windows backslash is an escape character. Forward
@@ -1268,3 +1268,82 @@ def test_run_all_still_runs_every_kind(tmp_path: Path) -> None:
     python_project(tmp_path)
 
     assert tuple(result.kind for result in run_all(Config(root=tmp_path))) == KINDS
+
+
+def test_a_ring_between_the_project_and_the_preset_is_refused(tmp_path: Path) -> None:
+    """Half a ring from [verify.after], half from the preset.
+
+    `test = "coverage"` is one edge and no ring, so the config loader takes it.
+    Python's preset adds `coverage after test`, and the effective order closes.
+    Walked rather than checked at load time, the scheduler used to recurse until
+    the interpreter gave up -- a traceback where a refusal belongs.
+    """
+    write_config(tmp_path, '[verify.after]\ntest = "coverage"\n')
+    python_project(tmp_path)
+
+    with pytest.raises(ConfigError, match="cycle: test -> coverage -> test"):
+        run_kinds(("test", "coverage"), load_config(tmp_path), _fake([]))
+
+
+def test_a_ring_whose_other_half_was_not_asked_for_is_not_a_ring(tmp_path: Path) -> None:
+    """Only an edge into this run can hold anything up."""
+    write_config(tmp_path, '[verify.after]\ntest = "coverage"\n')
+    python_project(tmp_path)
+    record: list[str] = []
+
+    run_kinds(("test",), load_config(tmp_path), _fake(record))
+
+    assert record == ["test"]
+
+
+def test_a_kind_asked_for_twice_runs_once(tmp_path: Path) -> None:
+    """Two `test` entries would put two suites on the same .coverage file at once."""
+    python_project(tmp_path)
+    record: list[str] = []
+
+    results = run_kinds(("test", "test", "lint"), Config(root=tmp_path), _fake(record))
+
+    assert record.count("test") == 1
+    assert [result.kind for result in results] == ["test", "lint"]
+
+
+def test_a_result_is_filed_under_the_kind_that_was_asked_for(tmp_path: Path) -> None:
+    """An injected runner that answers about something else must not end the run
+    in a KeyError -- Task 10 injects exactly such runners."""
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return CheckResult("something-else", True, "", "fake")
+
+    python_project(tmp_path)
+
+    results = run_kinds(("lint",), Config(root=tmp_path), runner)
+
+    assert [result.kind for result in results] == ["something-else"]
+
+
+def test_one_cap_over_nested_pools_does_not_deadlock(tmp_path: Path) -> None:
+    """The structural property behind `_run_command`'s contract.
+
+    max_parallel = 1, a threaded kind with two commands inside a stage that also
+    holds other kinds: three thread pools deep, one permit. It only stays free
+    of deadlock because the cap is acquired at the process and nowhere else --
+    a pool that held a permit while waiting for the work below it to take one
+    would stop here forever. Real processes on purpose; a fake runner would
+    never touch the cap that is under test.
+    """
+    python_project(tmp_path)
+    config = Config(
+        root=tmp_path,
+        commands={
+            "lint": (py("print('lint a')"), py("print('lint b')")),
+            "types": (py("print('types')"),),
+            "test": (py("print('test')"),),
+        },
+        threaded=frozenset({"lint"}),
+        max_parallel=1,
+    )
+
+    results = run_kinds(("lint", "types", "test"), config)
+
+    assert [result.kind for result in results] == ["lint", "types", "test"]
+    assert all(result.ok for result in results), [result.output for result in results]
