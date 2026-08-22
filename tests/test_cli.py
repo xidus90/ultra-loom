@@ -861,8 +861,11 @@ def test_check_prints_the_heading_of_every_command_of_one_kind(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """_report passes the output through, so a multi-command report arrives whole."""
-    first = python_command("print(11)")
-    second = python_command("print(22); raise SystemExit(1)")
+    # The markers are computed, never spelled out in the command line: a marker
+    # that appears in argv would already be matched by the heading, and the
+    # assertion would pass over a _report that dropped the output entirely.
+    first = python_command("print(chr(102) + str(11 * 2 + 1))")
+    second = python_command("print(chr(115) + str(11 * 2 + 2)); raise SystemExit(1)")
     write_config(tmp_path, f"[verify]\nlint = ['{first}', '{second}']\n")
 
     code = main(["check", "lint", "--root", str(tmp_path)])
@@ -870,6 +873,6 @@ def test_check_prints_the_heading_of_every_command_of_one_kind(
     out = capsys.readouterr().out
     assert code == 1
     assert "lint: failed" in out
-    assert "11" in out
-    assert "22" in out
+    assert "f23" in out, "the first command's own output must survive"
+    assert "s24" in out, "and so must the second's"
     assert "(failed)" in out, "the heading carries the verdict of its own command"
