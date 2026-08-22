@@ -340,11 +340,18 @@ def assemble(
     graph: Graph[VerifyState] = Graph("verify-until-green", start="check")
     # One more than repair: the last check grades the last repair pass.
     graph.add(CodeNode("check", make_check(config, check_runner), max_visits=max_rounds + 1))
-    # The node's own ceiling moves with the option: left at its default of five
-    # a run allowed more rounds would end on the runner's visit guard -- no exit
-    # code, a detail about max_visits -- instead of this flow's red exit.
-    graph.add(dataclasses.replace(make_repair(config.test_paths), max_visits=max_rounds))
-    graph.add(CodeNode("guard", make_guard(root, config.test_paths, differ), max_visits=max_rounds))
+    # Every ceiling is max_rounds + 1, check's included. A visit limit is the
+    # runner's last resort against a runaway loop; the round counter is the gate
+    # this flow actually closes with. The last resort has to sit *above* the
+    # gate, never on it: level with it, `--max-rounds 1` would make repair and
+    # guard single-visit nodes on a cycle -- which the graph refuses outright --
+    # and any run reaching its ceiling would end on the runner's guard, without
+    # an exit code and with a message about max_visits instead of the reason it
+    # is red.
+    graph.add(dataclasses.replace(make_repair(config.test_paths), max_visits=max_rounds + 1))
+    graph.add(
+        CodeNode("guard", make_guard(root, config.test_paths, differ), max_visits=max_rounds + 1)
+    )
     graph.add(CodeNode("report_red", report_red))
 
     # Order matters: next_name takes the first edge whose condition holds, and

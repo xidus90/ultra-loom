@@ -548,11 +548,11 @@ def test_the_round_ceiling_may_be_raised_from_the_command_line(tmp_path: Path) -
     graph = build(context).graph
     graph.validate()
 
-    # The repair node's ceiling moves with the option. Fixed at five it would
-    # not show here -- validate() only asks whether a cycle is bounded at all --
-    # but a run of more than five rounds would end on the runner's visit guard
-    # instead of the flow's own red exit.
-    assert graph.node("repair").max_visits == 9
+    # The repair node's ceiling moves with the option, and sits one above it.
+    # Fixed at five it would not show here -- validate() only asks whether a
+    # cycle is bounded at all -- but a run of more than five rounds would end on
+    # the runner's visit guard instead of the flow's own red exit.
+    assert graph.node("repair").max_visits == 10
 
 
 def test_an_empty_checks_option_is_refused(tmp_path: Path) -> None:
@@ -629,3 +629,23 @@ def test_a_round_ceiling_below_one_says_so(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="max_rounds must be at least 1"):
         build(context)
+
+
+def test_a_single_round_allows_one_repair_and_then_ends_red(tmp_path: Path) -> None:
+    """`--max-rounds 1` is a valid wish: check, one repair attempt, check, red.
+
+    The visit ceilings must sit above the round counter, not on it: equal to it
+    they make `repair` and `guard` single-visit nodes on a cycle, which the
+    graph refuses before the first node runs.
+    """
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False}] * 3,
+        repairs=[RepairResult("one attempt", changed=True)],
+        touched=[("src/thing.py",)],
+        max_rounds=1,
+    )
+
+    assert result.exit_code == _EXIT_STILL_RED
+    assert result.state.data.rounds == 2  # one repair, two checks
+    assert "1 repair rounds" in (result.detail or "")
