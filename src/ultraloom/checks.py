@@ -263,18 +263,27 @@ def _measuring_state(
 ) -> tuple[tuple[str, ...], str]:
     """What this check still has to measure itself, and what to say if nobody did.
 
-    Three outcomes, and the middle one is the whole point of the pass: somebody
-    else measures for this check, so it drops its own step and the suite runs
-    once instead of twice. Otherwise it falls back on its own measuring step,
-    and only where there is none does the report get a warning -- the numbers
-    may then be from an older run, which is worth saying and is not a verdict.
+    The middle outcome is the whole point of the pass: somebody else measures
+    for this check, so it drops its own step and the suite runs once instead of
+    twice. Otherwise it falls back on its own measuring step.
+
+    The warning is the last resort and its condition is narrow on purpose (spec
+    8): `after` is named, the predecessor does *not* run in this pass, and there
+    is no measuring step to fall back on. A predecessor that runs silences it,
+    even where ultraloom cannot tell whether it measured anything -- that is
+    precisely what ultraloom cannot know, and warning about it would put the
+    line on every Godot run. A warning that always comes stops being read.
+
+    `[verify.after]` is an ordering statement over all four kinds, not a claim
+    about data: `test` after `types` is a perfectly ordinary line to write, and
+    it must not make every test report carry a warning about `types`.
     """
     after = _predecessor_of(kind, marker, config)
     if not after:
         return measure, ""
     if _measures_for(after, marker, config, alongside):
         return (), ""
-    if measure:
+    if measure or after in alongside:
         return measure, ""
     return (), (
         f"Achtung: `{after}` lief in diesem Lauf nicht; "
@@ -287,7 +296,21 @@ def _measures_for(kind: str, marker: str | None, config: Config, alongside: froz
 
     A kind the project configured itself never counts: ultraloom cannot know
     whether a foreign test command measures, and guessing here would produce a
-    coverage report over data nobody wrote.
+    coverage report over data nobody wrote. The refusal runs one way only --
+    about *another* check's command. What this check's own configured command
+    measures is not asked either, so a project that measures inside its own
+    `[verify.coverage].report` still keeps its `measure` empty. That direction
+    is the safe one: it can cost a warning, never a report over nothing.
+
+    `kind in alongside` means *requested*, not *finished*, and nothing here can
+    upgrade it: this runs while the pass is being planned, before any command
+    started. So a predecessor that is asked for and then dies -- timed out and
+    killed with its tree, or never started at all -- has already caused this
+    check to drop its own measuring step, and the report would read whatever an
+    earlier run left behind. The only thing standing between that and a green
+    report over stale data is the scheduler refusing to run a check whose
+    predecessor went red (`blocked`). Whoever changes that, or this, must change
+    the other.
     """
     if kind not in alongside or kind in config.commands:
         return False
@@ -300,10 +323,24 @@ def _measures_for(kind: str, marker: str | None, config: Config, alongside: froz
 
 
 def _has_dependant(kind: str, marker: str, config: Config, alongside: frozenset[str]) -> bool:
-    """Whether some kind in this pass waits for `kind`."""
-    return any(
-        _predecessor_of(other, marker, config) == kind for other in alongside if other != kind
-    )
+    """Whether some kind in this pass waits for `kind`, and can actually run.
+
+    A dependant that does not resolve is no dependant: switching to the
+    measuring command for a check that will leave the pass with
+    CheckUnavailableError would be measuring work done for nobody. Resolved with
+    the default empty `alongside`, which is both enough for the question --
+    availability does not depend on who else runs -- and what keeps this from
+    recursing back into itself.
+    """
+    for other in alongside:
+        if other == kind or _predecessor_of(other, marker, config) != kind:
+            continue
+        try:
+            resolve_check(other, config)
+        except CheckUnavailableError:
+            continue
+        return True
+    return False
 
 
 def _predecessor_of(kind: str, marker: str | None, config: Config) -> str:

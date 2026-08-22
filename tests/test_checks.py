@@ -1015,14 +1015,36 @@ def test_a_configured_report_warns_when_what_it_reads_never_ran(tmp_path: Path) 
     assert "lief in diesem Lauf nicht" in command.warning
 
 
-def test_a_configured_report_still_warns_when_the_measurer_measures_nothing(
-    tmp_path: Path,
-) -> None:
-    """GDScript's `test` preset has no measuring mode, so running it changes nothing."""
+def test_a_predecessor_that_runs_silences_the_warning(tmp_path: Path) -> None:
+    """GDScript's `test` has no measuring mode, and ultraloom still does not warn.
+
+    Whether a run of `test` left anything behind is what ultraloom structurally
+    cannot know. Warning about it would put the line on every Godot run, and a
+    warning that always comes stops being read.
+    """
     godot_project(tmp_path)
     config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
     command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
-    assert "lief in diesem Lauf nicht" in command.warning
+    assert command.warning == ""
+
+
+def test_a_plain_ordering_edge_never_warns(tmp_path: Path) -> None:
+    """`[verify.after]` orders all four kinds; `test` after `types` carries no data."""
+    python_project(tmp_path)
+    config = Config(root=tmp_path, after={"test": "types"})
+    command = resolve_check("test", config, alongside=frozenset({"types", "test"}))
+    assert command.warning == ""
+
+
+def test_measuring_is_not_switched_on_for_a_dependant_that_cannot_run(tmp_path: Path) -> None:
+    """Measuring for a check that leaves the pass unresolved would be work for nobody."""
+    python_project(tmp_path)
+    # An empty report command: `coverage` depends on `test` and is unavailable.
+    config = Config(root=tmp_path, coverage_report="")
+    with pytest.raises(CheckUnavailableError):
+        resolve_check("coverage", config)
+    command = resolve_check("test", config, alongside=frozenset({"test", "coverage"}))
+    assert command.argvs[0][:3] == ("uv", "run", "pytest")
 
 
 def test_a_configured_report_is_quiet_when_test_measures_for_it(tmp_path: Path) -> None:
@@ -1035,7 +1057,7 @@ def test_a_configured_report_is_quiet_when_test_measures_for_it(tmp_path: Path) 
 def test_a_report_in_a_project_of_no_known_language_warns_too(tmp_path: Path) -> None:
     """No marker file, so the predecessor can only come from the project's own [verify.after]."""
     config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
-    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    command = resolve_check("coverage", config, alongside=frozenset({"coverage"}))
     assert "lief in diesem Lauf nicht" in command.warning
 
 
@@ -1049,3 +1071,11 @@ def test_run_check_takes_the_pass_along(tmp_path: Path) -> None:
     result = run_check("coverage", config, frozenset({"coverage"}))
     assert result.output.startswith("Achtung:")
     assert result.ok
+
+
+def test_no_known_language_means_no_language_measurer(tmp_path: Path) -> None:
+    """Without a marker there is no preset to ask whether the predecessor measures."""
+    config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert command.measure == ()
+    assert command.warning == ""
