@@ -946,3 +946,106 @@ def test_a_preset_resolves_to_one_command(tmp_path: Path) -> None:
 
     assert command.source == "preset"
     assert len(command.argvs) == 1
+
+
+def test_test_measures_when_coverage_runs_too(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    command = resolve_check(
+        "test", Config(root=tmp_path), alongside=frozenset({"test", "coverage"})
+    )
+    assert command.argvs[0][:4] == ("uv", "run", "coverage", "run")
+
+
+def test_test_alone_stays_the_fast_path(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    command = resolve_check("test", Config(root=tmp_path), alongside=frozenset({"test"}))
+    assert command.argvs[0][:3] == ("uv", "run", "pytest")
+
+
+def test_coverage_drops_its_own_measuring_when_test_measures_for_it(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    command = resolve_check(
+        "coverage", Config(root=tmp_path), alongside=frozenset({"test", "coverage"})
+    )
+    assert command.measure == (), "the suite must not run twice in one pass"
+
+
+def test_coverage_alone_measures_for_itself(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    command = resolve_check("coverage", Config(root=tmp_path), alongside=frozenset({"coverage"}))
+    assert command.measure[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_the_empty_default_behaves_like_running_alone(tmp_path: Path) -> None:
+    """Every existing caller keeps the behaviour it had."""
+    python_project(tmp_path)
+    assert resolve_check("coverage", Config(root=tmp_path)).measure[:4] == (
+        "uv",
+        "run",
+        "coverage",
+        "run",
+    )
+
+
+def test_a_configured_test_command_never_counts_as_measuring(tmp_path: Path) -> None:
+    """ultraloom cannot know whether a foreign test command measures, so it does not guess."""
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"test": ("my-own-suite",)})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert command.measure[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_a_test_script_never_counts_as_measuring(tmp_path: Path) -> None:
+    """Same reason as a configured command: a project's own script may measure nothing."""
+    python_project(tmp_path)
+    scripts = tmp_path / ".ultraloom" / "checks"
+    scripts.mkdir(parents=True)
+    (scripts / "test.bat").write_text("echo hi\n", encoding="utf-8")
+    command = resolve_check(
+        "coverage", Config(root=tmp_path), alongside=frozenset({"test", "coverage"})
+    )
+    assert command.measure[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_a_configured_report_warns_when_what_it_reads_never_ran(tmp_path: Path) -> None:
+    """A report with no measuring step of its own, and no measurer in this pass."""
+    godot_project(tmp_path)
+    config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"coverage"}))
+    assert "lief in diesem Lauf nicht" in command.warning
+
+
+def test_a_configured_report_still_warns_when_the_measurer_measures_nothing(
+    tmp_path: Path,
+) -> None:
+    """GDScript's `test` preset has no measuring mode, so running it changes nothing."""
+    godot_project(tmp_path)
+    config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert "lief in diesem Lauf nicht" in command.warning
+
+
+def test_a_configured_report_is_quiet_when_test_measures_for_it(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    config = Config(root=tmp_path, coverage_report="coverage report", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert command.warning == ""
+
+
+def test_a_report_in_a_project_of_no_known_language_warns_too(tmp_path: Path) -> None:
+    """No marker file, so the predecessor can only come from the project's own [verify.after]."""
+    config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert "lief in diesem Lauf nicht" in command.warning
+
+
+def test_run_check_takes_the_pass_along(tmp_path: Path) -> None:
+    """The warning reaches the report, not just the Command."""
+    config = Config(
+        root=tmp_path,
+        coverage_report=py("print('report')"),
+        after={"coverage": "test"},
+    )
+    result = run_check("coverage", config, frozenset({"coverage"}))
+    assert result.output.startswith("Achtung:")
+    assert result.ok

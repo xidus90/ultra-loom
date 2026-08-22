@@ -31,10 +31,10 @@ class Preset:
     `after`     -- this check reads what another one leaves behind
     `measure`   -- if nobody measures for me, I measure myself
 
-    Only `argv` and `measure` are acted on here. `measuring` and `after` are
-    carried for the scheduler that orders the chain into stages; a field that
-    arrives with the table it describes cannot be forgotten when the reader for
-    it is written.
+    Which of them applies follows from the set of kinds requested in one pass,
+    never from the table alone: `measuring` is taken up only when something in
+    that pass reads what this check leaves behind, and `measure` is skipped only
+    when the check named by `after` did the measuring instead.
     """
 
     argv: tuple[str, ...]
@@ -175,10 +175,29 @@ class CheckResult:
     source: str
 
 
-def resolve_check(kind: str, config: Config) -> Command:
-    """Find the command for this check, or refuse to guess."""
+def resolve_check(
+    kind: str,
+    config: Config,
+    *,
+    alongside: frozenset[str] = frozenset(),
+) -> Command:
+    """Find the command for this check, or refuse to guess.
+
+    `alongside` names the kinds running in this same pass. It decides who
+    measures: a check that can measure as a by-product does so when something
+    depends on it, and a check that depends on it then skips its own measuring
+    step. Empty by default, so a caller that resolves one kind on its own gets
+    a check that stands alone -- correct, and possibly slower than what the
+    scheduler would have built. That silent precedence is the price of a
+    signature that does not force every caller to know about the others.
+    """
     if kind not in KINDS:
         raise CheckUnavailableError(f"unknown check {kind!r}; known: {', '.join(KINDS)}")
+
+    # Read up front rather than in the preset branch alone: the language also
+    # answers who measures, and that question is asked of a project-configured
+    # report too.
+    marker = _marker(config.root)
 
     if kind == "coverage" and config.coverage_report is not None:
         # The one check whose command does not live in [verify]: coverage has
@@ -189,7 +208,8 @@ def resolve_check(kind: str, config: Config) -> Command:
         words = tuple(shlex.split(config.coverage_report))
         if not words:
             raise CheckUnavailableError("empty command configured for [verify.coverage].report")
-        return Command(kind, (config.exec_prefix + words,), "config")
+        _, warning = _measuring_state(kind, marker, config, alongside, ())
+        return Command(kind, (config.exec_prefix + words,), "config", warning=warning)
 
     if kind in config.commands:
         # Config itself refuses an empty list and a blank command, so every
@@ -197,13 +217,14 @@ def resolve_check(kind: str, config: Config) -> Command:
         argvs = tuple(
             config.exec_prefix + tuple(shlex.split(line)) for line in config.commands[kind]
         )
-        return Command(kind, argvs, "config", threaded=kind in config.threaded)
+        _, warning = _measuring_state(kind, marker, config, alongside, ())
+        return Command(kind, argvs, "config", threaded=kind in config.threaded, warning=warning)
 
     script = _script_for(kind, config.root)
     if script is not None:
-        return Command(kind, (config.exec_prefix + script,), "script")
+        _, warning = _measuring_state(kind, marker, config, alongside, ())
+        return Command(kind, (config.exec_prefix + script,), "script", warning=warning)
 
-    marker = _marker(config.root)
     if marker is None:
         raise CheckUnavailableError(
             f"could not tell what kind of project {config.root} is; "
@@ -216,15 +237,91 @@ def resolve_check(kind: str, config: Config) -> Command:
             f"{_LANGUAGE_NAMES[marker]} has no {kind} tool — a known limitation, not a passed check"
         )
     entry = preset[kind]
+    argv = entry.argv
+    if entry.measuring and _has_dependant(kind, marker, config, alongside):
+        # Something in this pass reads what this check leaves behind, so it
+        # measures as it goes -- and that dependant drops its own measuring
+        # step below. One suite run instead of two.
+        argv = entry.measuring
+
+    measure, warning = _measuring_state(kind, marker, config, alongside, entry.measure)
     return Command(
         kind,
-        (config.exec_prefix + entry.argv,),
+        (config.exec_prefix + argv,),
         "preset",
-        measure=(config.exec_prefix + entry.measure) if entry.measure else (),
+        measure=(config.exec_prefix + measure) if measure else (),
+        warning=warning,
     )
 
 
-def run_check(kind: str, config: Config) -> CheckResult:
+def _measuring_state(
+    kind: str,
+    marker: str | None,
+    config: Config,
+    alongside: frozenset[str],
+    measure: tuple[str, ...],
+) -> tuple[tuple[str, ...], str]:
+    """What this check still has to measure itself, and what to say if nobody did.
+
+    Three outcomes, and the middle one is the whole point of the pass: somebody
+    else measures for this check, so it drops its own step and the suite runs
+    once instead of twice. Otherwise it falls back on its own measuring step,
+    and only where there is none does the report get a warning -- the numbers
+    may then be from an older run, which is worth saying and is not a verdict.
+    """
+    after = _predecessor_of(kind, marker, config)
+    if not after:
+        return measure, ""
+    if _measures_for(after, marker, config, alongside):
+        return (), ""
+    if measure:
+        return measure, ""
+    return (), (
+        f"Achtung: `{after}` lief in diesem Lauf nicht; "
+        "dieser Bericht kann von einem älteren Lauf stammen."
+    )
+
+
+def _measures_for(kind: str, marker: str | None, config: Config, alongside: frozenset[str]) -> bool:
+    """Whether `kind` runs in this pass *and* measures while it does.
+
+    A kind the project configured itself never counts: ultraloom cannot know
+    whether a foreign test command measures, and guessing here would produce a
+    coverage report over data nobody wrote.
+    """
+    if kind not in alongside or kind in config.commands:
+        return False
+    if _script_for(kind, config.root) is not None:
+        return False
+    if marker is None:
+        return False
+    entry = PRESETS[marker].get(kind)
+    return entry is not None and bool(entry.measuring)
+
+
+def _has_dependant(kind: str, marker: str, config: Config, alongside: frozenset[str]) -> bool:
+    """Whether some kind in this pass waits for `kind`."""
+    return any(
+        _predecessor_of(other, marker, config) == kind for other in alongside if other != kind
+    )
+
+
+def _predecessor_of(kind: str, marker: str | None, config: Config) -> str:
+    """What this kind waits for: the project's answer first, then the language's.
+
+    A project of no recognisable language has no language answer to fall back
+    on -- handled here rather than at each caller, so that "no marker" cannot
+    turn into an order nobody configured.
+    """
+    if kind in config.after:
+        return config.after[kind]
+    if marker is None:
+        return ""
+    entry = PRESETS[marker].get(kind)
+    return entry.after if entry is not None else ""
+
+
+def run_check(kind: str, config: Config, alongside: frozenset[str] = frozenset()) -> CheckResult:
     """Run the check and report what it said.
 
     A check with a measuring step runs that first. Its failure is the check's
@@ -232,7 +329,7 @@ def run_check(kind: str, config: Config) -> CheckResult:
     or over data left behind by an earlier run -- would be green for reasons
     that have nothing to do with this one.
     """
-    command = resolve_check(kind, config)
+    command = resolve_check(kind, config, alongside=alongside)
     unready = _unready(command, config)
     if unready is not None:
         return unready
