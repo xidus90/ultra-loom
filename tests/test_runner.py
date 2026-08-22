@@ -468,6 +468,32 @@ def test_a_resume_executes_a_second_pass_of_a_node_the_journal_covers(
     assert result.status == "paused", "the cycle comes back to the gate and pauses again"
 
 
+def test_a_run_after_a_resume_on_the_same_runner_still_executes(tmp_path: Path) -> None:
+    """Each entry method states its own mode; none inherits it from the last call.
+
+    Without `run` resetting the switch, a runner that resumed once would carry
+    the retrace into every later run and serve it from the journal.
+    """
+    calls: list[int] = []
+
+    def tick(data: Counter) -> dict[str, object]:
+        calls.append(1)
+        return {"n": data.n + 1}
+
+    graph: Graph[Counter] = Graph("count", start="tick")
+    graph.add(CodeNode("tick", tick))
+    graph.edge("tick", END)
+    journal = Journal(tmp_path / "run.jsonl")
+    runner = Runner(graph, journal, clock=ticking_clock())
+
+    runner.run(Counter(0))
+    runner.resume(Counter(0))
+    calls.clear()
+    runner.run(Counter(0))
+
+    assert calls == [1], "a fresh run must not inherit the retrace of the resume before it"
+
+
 def test_the_visit_limit_no_longer_blames_the_cache(tmp_path: Path) -> None:
     graph: Graph[Counter] = Graph("spin", start="tick")
     graph.add(CodeNode("tick", lambda _data: {}, max_visits=2))

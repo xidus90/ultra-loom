@@ -81,6 +81,10 @@ class Runner[T]:
 
         A replay is the exception: it retraces the journal instead.
         """
+        # Stated here rather than inherited from whatever this runner did last:
+        # a runner that resumed once would otherwise carry that retrace into
+        # every later run and be served the old journal instead of working.
+        self._retracing = self._replay
         try:
             self._graph.validate()
         except GraphError as error:
