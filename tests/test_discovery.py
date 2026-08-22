@@ -336,9 +336,13 @@ def test_a_flow_may_postpone_its_annotations(tmp_path: Path) -> None:
 
 
 def test_loading_a_flow_leaves_no_trace_in_sys_modules(tmp_path: Path) -> None:
-    """A project's module table is not ultraloom's to grow."""
-    before = set(sys.modules)
+    """A project's module table is not ultraloom's to grow.
+
+    Only the flow's own entry is asserted about, not the whole table: a flow
+    may legitimately import something that was not loaded before, and failing
+    over that would be a failure about someone else's import.
+    """
     write_flow(tmp_path, "postponed", A_POSTPONED_FLOW)
     find_flow("postponed", tmp_path)
 
-    assert set(sys.modules) == before
+    assert not [name for name in sys.modules if name.startswith("ultraloom_flow_")]

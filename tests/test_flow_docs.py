@@ -43,19 +43,28 @@ def _mermaid_block(page: Path) -> str:
     return match.group(1)
 
 
+# One drawn edge: a source identifier, an arrow with an optional `|label|`, a
+# target identifier. The lines of a mermaid block are indented, so the source is
+# anchored against the stripped line -- anchoring against the raw one would see
+# every node only as a target, and an invented node that merely points somewhere
+# would walk past the check.
+_EDGE = re.compile(r"^([A-Za-z_]\w*)\s*-->\s*(?:\|[^|]*\|\s*)?([A-Za-z_]\w*)")
+
+
+def _edges_drawn(diagram: str) -> set[tuple[str, str]]:
+    """Every edge the diagram draws, as (source, target)."""
+    found = (_EDGE.match(line.strip()) for line in diagram.splitlines())
+    return {(match.group(1), match.group(2)) for match in found if match is not None}
+
+
 def _nodes_drawn(diagram: str) -> set[str]:
-    """Every identifier the diagram uses as a node: at a line's start or after an arrow."""
-    drawn: set[str] = set()
-    for line in diagram.splitlines():
-        for part in re.findall(r"(?:^|-->\s*(?:\|[^|]*\|\s*)?)([A-Za-z_][A-Za-z0-9_]*)", line):
-            drawn.add(part)
-    return drawn
+    """Every identifier the diagram uses as a node, on either end of an arrow."""
+    return {name for edge in _edges_drawn(diagram) for name in edge}
 
 
 def _edge_drawn(diagram: str, source: str, target: str) -> bool:
-    """Whether one line of the diagram draws `source --> target`."""
-    pattern = re.compile(rf"\b{re.escape(source)}\s*-->\s*(?:\|[^|]*\|\s*)?{re.escape(target)}\b")
-    return any(pattern.search(line) for line in diagram.splitlines())
+    """Whether the diagram draws `source --> target`."""
+    return (source, target) in _edges_drawn(diagram)
 
 
 def test_every_bundled_flow_has_a_documentation_page() -> None:
@@ -82,6 +91,16 @@ def test_every_page_names_every_node_and_every_edge() -> None:
             )
 
 
+def test_no_page_draws_an_edge_the_graph_does_not_have() -> None:
+    """A deleted edge that stayed in the drawing is exactly the drift to catch."""
+    for name in _bundled_names():
+        graph = _graph_for(name)
+        real = {(source, target if target != END else "END") for source, target in graph.edges()}
+
+        for edge in _edges_drawn(_mermaid_block(_page_for(name))):
+            assert edge in real, f"{name}: the diagram draws edge {edge[0]} -> {edge[1]}"
+
+
 def test_no_page_draws_a_node_the_graph_does_not_have() -> None:
     for name in _bundled_names():
         graph = _graph_for(name)
@@ -93,14 +112,32 @@ def test_no_page_draws_a_node_the_graph_does_not_have() -> None:
 
 
 def test_a_page_that_lost_an_edge_fails_the_check() -> None:
-    """The check has to be able to fail, or it is decoration."""
-    diagram = "check --> repair\n    repair --> guard\n"
+    """The check has to be able to fail, or it is decoration.
+
+    Indented, like every line inside a real mermaid block: an example without
+    the indentation would exercise a shape no page actually has.
+    """
+    diagram = "    check --> repair\n    repair --> guard\n"
 
     assert not _edge_drawn(diagram, "guard", "check")
 
 
 def test_a_page_that_lost_a_node_fails_the_check() -> None:
     """The same, for the node direction of the comparison."""
-    diagram = "check --> repair\n"
+    diagram = "    check --> repair\n"
 
     assert "guard" not in _nodes_drawn(diagram)
+
+
+def test_a_node_drawn_only_as_a_source_is_still_seen() -> None:
+    """An invented node points somewhere; it need never be pointed at."""
+    diagram = "    bogus --> check\n"
+
+    assert _nodes_drawn(diagram) == {"bogus", "check"}
+
+
+def test_an_edge_the_graph_does_not_have_is_seen() -> None:
+    """The direction that catches a deleted edge left standing in the drawing."""
+    diagram = "    check -->|kein Fehler| END\n    guard --> report_red\n"
+
+    assert _edges_drawn(diagram) == {("check", "END"), ("guard", "report_red")}

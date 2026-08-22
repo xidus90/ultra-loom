@@ -151,7 +151,10 @@ def find_flow(name: str, root: Path, context: FlowContext | None = None) -> Load
     except Exception as error:
         raise FlowLoadError(f"{path}: {error}") from error
     finally:
-        del sys.modules[spec.name]
+        # pop and not del: a flow that loads the same flow again during its own
+        # exec, or a second thread doing it, removes the entry first, and `del`
+        # would then raise a KeyError over a cleanup that already happened.
+        sys.modules.pop(spec.name, None)
 
     builder = getattr(module, "build", _ABSENT)
     has_flow = getattr(module, "flow", _ABSENT) is not _ABSENT

@@ -148,7 +148,8 @@ Auf der Kommandozeile:
 | `--checks` | Eine kommaseparierte Liste von Arten oder der Name eines Profils. Ohne sie laufen alle. Eine Auswahl, die keine Prüfung benennt, wird abgelehnt. |
 | `--max-rounds` | Wie viele Reparaturrunden erlaubt sind. Standard 5, Minimum 1. |
 
-Beide werden beim Start neben dem `.flow`-Marker des Laufs vermerkt, damit
+Beide werden beim Start in den `.flow`-Marker des Laufs geschrieben — hinter den
+Namen des Ablaufs, eine Zeile `name=wert` je Option —, damit
 `ultraloom resume` und `ultraloom replay` denselben Graphen mit denselben
 Parametern aufbauen wie der ursprüngliche Lauf.
 
