@@ -134,14 +134,15 @@ def load_config(root: Path) -> Config:
     if not isinstance(godot_import, bool):
         raise ConfigError(f"{path}: [verify].godot_import must be true or false")
 
-    max_parallel = verify.get("max_parallel", _default_parallelism())
-    # Booleans are ints in TOML, the same trap the timeout key has.
-    if not isinstance(max_parallel, int) or isinstance(max_parallel, bool):
-        raise ConfigError(f"{path}: [verify].max_parallel must be an integer")
-    if max_parallel <= 0:
-        raise ConfigError(f"{path}: [verify].max_parallel must be greater than zero")
+    # Spelling the default here too would give it two sources that can drift
+    # apart unnoticed -- a file that omits the key would take the copy in this
+    # line, never the field's. Absent means absent; the field decides.
+    raw_max_parallel = verify.get("max_parallel")
+    max_parallel = (
+        _default_parallelism() if raw_max_parallel is None else _parallelism(raw_max_parallel, path)
+    )
 
-    after = _after_from(_table(verify, "after", path), path)
+    after = _after_from(_table(verify, "after", path, "verify.after"), path)
 
     profiles: dict[str, tuple[str, ...]] = {}
     for name, kinds in _table(verify, "profiles", path).items():
@@ -189,6 +190,16 @@ def load_config(root: Path) -> Config:
     )
 
 
+def _parallelism(value: object, path: Path) -> int:
+    """What the file says about the cap, or a refusal."""
+    # Booleans are ints in TOML, the same trap the timeout key has.
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ConfigError(f"{path}: [verify].max_parallel must be an integer")
+    if value <= 0:
+        raise ConfigError(f"{path}: [verify].max_parallel must be greater than zero")
+    return value
+
+
 def _after_from(raw: Mapping[str, Any], path: Path) -> Mapping[str, str]:
     """The dependency edges, validated so a bad one cannot become a run that hangs."""
     edges: dict[str, str] = {}
@@ -205,13 +216,16 @@ def _after_from(raw: Mapping[str, Any], path: Path) -> Mapping[str, str]:
     # Refused here rather than in the scheduler, where it would be a run that
     # waits for itself and never ends.
     for kind in edges:
-        seen = {kind}
+        # Kept as a path rather than a set so the refusal can name the edges
+        # that form the ring; a single node leaves the reader to find them.
+        walked = [kind]
         current = kind
         while current in edges:
             current = edges[current]
-            if current in seen:
-                raise ConfigError(f"{path}: [verify.after] has a cycle through {current!r}")
-            seen.add(current)
+            if current in walked:
+                ring = " -> ".join([*walked[walked.index(current) :], current])
+                raise ConfigError(f"{path}: [verify.after] has a cycle: {ring}")
+            walked.append(current)
     return edges
 
 
@@ -268,8 +282,16 @@ def _checked(commands: tuple[object, ...], kind: str, path: Path) -> tuple[str, 
     return tuple(str(command) for command in commands)
 
 
-def _table(raw: Mapping[str, Any], name: str, path: Path) -> Mapping[str, Any]:
+def _table(
+    raw: Mapping[str, Any], name: str, path: Path, label: str | None = None
+) -> Mapping[str, Any]:
+    """One nested table, or a refusal that names it as the file spells it.
+
+    A nested table's key is only its leaf, so `label` carries the full heading
+    -- otherwise `after = "test"` under [verify] is refused as `[after]`, which
+    appears nowhere in the file.
+    """
     value = raw.get(name, {})
     if not isinstance(value, dict):
-        raise ConfigError(f"{path}: [{name}] must be a table")
+        raise ConfigError(f"{path}: [{label or name}] must be a table")
     return value

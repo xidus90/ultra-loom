@@ -408,6 +408,21 @@ def test_max_parallel_defaults_to_the_available_cpus(
     assert load_config(tmp_path).max_parallel == 7
 
 
+def test_max_parallel_defaults_the_same_way_with_a_config_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file that omits the key must reach the same default as no file at all.
+
+    Without this the load path's default is untested: a project with no config
+    returns early on the field's default, so a wrong number spelled in the
+    parser would go unseen through a fully covered suite.
+    """
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 7)
+    write_config(tmp_path, "[verify]\ntimeout = 60\n")
+
+    assert load_config(tmp_path).max_parallel == 7
+
+
 def test_max_parallel_falls_back_to_one_when_the_cpus_are_unknown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -503,3 +518,21 @@ def test_after_allows_a_chain_that_ends(tmp_path: Path) -> None:
     write_config(tmp_path, '[verify.after]\ncoverage = "test"\ntest = "lint"\n')
 
     assert load_config(tmp_path).after == {"coverage": "test", "test": "lint"}
+
+
+def test_a_cycle_is_reported_as_the_ring_of_edges(tmp_path: Path) -> None:
+    """The refusal has to be readable without opening the file again."""
+    write_config(
+        tmp_path,
+        '[verify.after]\ncoverage = "test"\ntest = "lint"\nlint = "coverage"\n',
+    )
+
+    with pytest.raises(ConfigError, match="coverage -> test -> lint -> coverage"):
+        load_config(tmp_path)
+
+
+def test_after_that_is_not_a_table_is_named_as_the_file_spells_it(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify]\nafter = "test"\n')
+
+    with pytest.raises(ConfigError, match=r"\[verify.after\] must be a table"):
+        load_config(tmp_path)
