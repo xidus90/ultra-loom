@@ -299,3 +299,46 @@ def test_a_file_that_cannot_be_a_flow_is_listed_with_its_reason(tmp_path: Path) 
 def test_the_available_list_in_a_not_found_error_names_the_origins(tmp_path: Path) -> None:
     with pytest.raises(FlowNotFoundError, match=r"verify_until_green \(bundled\)"):
         find_flow("absent", tmp_path)
+
+
+A_POSTPONED_FLOW = '''
+"""A flow whose annotations are postponed, like every module in ultraloom."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ultraloom.graph import END, CodeNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Data:
+    done: bool = False
+
+
+flow: Graph[Data] = Graph("postponed", start="mark")
+flow.add(CodeNode("mark", lambda _d: {"done": True}))
+flow.edge("mark", END)
+
+initial = Data()
+'''
+
+
+def test_a_flow_may_postpone_its_annotations(tmp_path: Path) -> None:
+    """dataclasses resolves a string annotation through sys.modules[cls.__module__].
+
+    A flow module that is not registered there therefore cannot define a
+    dataclass at all -- which every flow ultraloom ships does.
+    """
+    write_flow(tmp_path, "postponed", A_POSTPONED_FLOW)
+
+    assert find_flow("postponed", tmp_path).graph.name == "postponed"
+
+
+def test_loading_a_flow_leaves_no_trace_in_sys_modules(tmp_path: Path) -> None:
+    """A project's module table is not ultraloom's to grow."""
+    before = set(sys.modules)
+    write_flow(tmp_path, "postponed", A_POSTPONED_FLOW)
+    find_flow("postponed", tmp_path)
+
+    assert set(sys.modules) == before

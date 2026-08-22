@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,12 +138,20 @@ def find_flow(name: str, root: Path, context: FlowContext | None = None) -> Load
         raise FlowLoadError(f"{path}: cannot be loaded as a module")
 
     module = importlib.util.module_from_spec(spec)
-    # Deliberately not registered in sys.modules: a flow is loaded for one call,
-    # and a project's module table is not ultraloom's to grow.
+    # Registered only for the duration of the exec, and removed again after: a
+    # flow is loaded for one call, and a project's module table is not
+    # ultraloom's to grow. It cannot simply stay out, though -- `dataclasses`
+    # resolves a postponed annotation through `sys.modules[cls.__module__]`, so
+    # a module that is absent from it cannot define a dataclass at all, and
+    # every flow ultraloom ships does. The lookup happens while the decorator
+    # runs, which is inside this block.
+    sys.modules[spec.name] = module
     try:
         spec.loader.exec_module(module)
     except Exception as error:
         raise FlowLoadError(f"{path}: {error}") from error
+    finally:
+        del sys.modules[spec.name]
 
     builder = getattr(module, "build", _ABSENT)
     has_flow = getattr(module, "flow", _ABSENT) is not _ABSENT
