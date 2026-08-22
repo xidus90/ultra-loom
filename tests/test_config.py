@@ -98,13 +98,17 @@ def test_a_blank_command_is_refused(tmp_path: Path) -> None:
 def test_a_blank_command_is_refused_even_with_an_exec_prefix(tmp_path: Path) -> None:
     """Otherwise the bare prefix runs, and a prefix that exits 0 reports green.
 
-    Checked at load time, before the prefix can be prepended: with a prefix
-    configured, a blank command line leaves the bare prefix to run.
+    The guard sits at load time now, so the same file is refused with or
+    without the prefix. The working file is loaded first all the same: it shows
+    that this prefix does reach the parser, which is what makes the refusal of
+    the second file a statement about the blank command and not about the file.
     """
     write_config(
-        tmp_path,
-        '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = ""\n',
+        tmp_path, '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = "gdlint ."\n'
     )
+    assert load_config(tmp_path).exec_prefix == ("docker", "compose", "exec", "-T", "web")
+
+    write_config(tmp_path, '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = ""\n')
 
     with pytest.raises(ConfigError, match="empty"):
         load_config(tmp_path)
@@ -129,6 +133,53 @@ def test_a_command_of_an_unusable_shape_is_refused(tmp_path: Path) -> None:
     write_config(tmp_path, "[verify]\nlint = 7\n")
 
     with pytest.raises(ConfigError, match="must be a string, a list of strings, or a table"):
+        load_config(tmp_path)
+
+
+def test_a_handmade_config_cannot_carry_a_blank_command(tmp_path: Path) -> None:
+    """The guard belongs to Config, not only to the file that fills it.
+
+    An argv that is nothing but the [exec].prefix runs the prefix, and a prefix
+    that exits 0 reports a check nobody configured as passed.
+    """
+    with pytest.raises(ConfigError, match="empty"):
+        Config(root=tmp_path, commands={"lint": ("",)}, exec_prefix=("docker", "exec", "web"))
+
+
+def test_a_handmade_config_cannot_carry_a_whitespace_command(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="empty"):
+        Config(root=tmp_path, commands={"lint": ("  ",)})
+
+
+def test_a_handmade_config_cannot_carry_a_kind_without_commands(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="empty"):
+        Config(root=tmp_path, commands={"lint": ()})
+
+
+def test_the_coverage_table_refuses_the_keys_it_does_not_honour(tmp_path: Path) -> None:
+    """[verify.coverage] looks like the new table form and is not one.
+
+    Swallowing `commands` there would leave coverage on its preset with nothing
+    saying the configuration was never read.
+    """
+    write_config(tmp_path, '[verify.coverage]\ncommands = ["nano-coverage"]\n')
+
+    with pytest.raises(ConfigError, match="report"):
+        load_config(tmp_path)
+
+
+def test_the_coverage_table_refuses_the_threaded_switch(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify.coverage]\nthreaded = true\n")
+
+    with pytest.raises(ConfigError, match="report"):
+        load_config(tmp_path)
+
+
+def test_an_unknown_key_in_the_table_form_is_refused(tmp_path: Path) -> None:
+    """`thread = true` is a typo, and a silently ungthreaded check hides it."""
+    write_config(tmp_path, '[verify.lint]\ncommands = ["x"]\nthread = true\n')
+
+    with pytest.raises(ConfigError, match="thread"):
         load_config(tmp_path)
 
 

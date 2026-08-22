@@ -124,8 +124,8 @@ def resolve_check(kind: str, config: Config) -> Command:
 
     if kind in config.commands:
         # One argv, although a kind may now name several commands: running the
-        # rest is Task 6's job, and load_config has already refused an empty
-        # list, so the first one always exists.
+        # rest is Task 6's job. Config itself refuses an empty list and a blank
+        # command, so the first one exists and is never a bare [exec].prefix.
         words = tuple(shlex.split(config.commands[kind][0]))
         return Command(kind, config.exec_prefix + words, "config")
 

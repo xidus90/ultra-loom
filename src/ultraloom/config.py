@@ -18,6 +18,10 @@ CONFIG_NAME = ".ultraloom/config.toml"
 
 _KINDS = ("lint", "types", "test")
 
+# Everything the table form of a check kind understands. Also what
+# [verify.coverage] must *not* carry, which is why it is named once.
+_TABLE_KEYS = ("commands", "threaded")
+
 # The check kinds a profile may name. Deliberately a copy of checks.KINDS and
 # not an import: config sits below checks, and test_module_boundary keeps it
 # there. test_config asserts the two lists stay equal.
@@ -49,6 +53,19 @@ class Config:
     godot_import: bool = True
     profiles: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """No check kind may carry a command that runs nothing.
+
+        Not only load_config's business: whoever builds a Config by hand gets
+        the same assurance. An argv that is blank leaves nothing but the
+        [exec].prefix, and a prefix that exits 0 reports a check nobody
+        configured as passed -- the one failure in this system that actually
+        does damage.
+        """
+        for kind, commands in self.commands.items():
+            if not commands or any(not command.strip() for command in commands):
+                raise ConfigError(f"check {kind!r} has an empty command")
+
 
 def load_config(root: Path) -> Config:
     """Read the project's configuration, or return empty defaults."""
@@ -68,6 +85,17 @@ def load_config(root: Path) -> Config:
     verify = _table(raw, "verify", path)
     coverage = _table(verify, "coverage", path)
     agent = _table(raw, "agent", path)
+
+    # [verify.coverage] has the shape of the new table form without being one:
+    # coverage is configured through `report`, and swallowing `commands` here
+    # would leave the check on its preset with nothing saying why.
+    unhonoured = tuple(key for key in _TABLE_KEYS if key in coverage)
+    if unhonoured:
+        raise ConfigError(
+            f"{path}: [verify.coverage] does not take "
+            f"{', '.join(repr(key) for key in unhonoured)}; "
+            f"name the command as [verify.coverage].report"
+        )
 
     commands: dict[str, tuple[str, ...]] = {}
     threaded: set[str] = set()
@@ -153,6 +181,15 @@ def _commands_for(kind: str, value: object, path: Path) -> tuple[tuple[str, ...]
     if isinstance(value, list):
         return _checked(tuple(value), kind, path), False
     if isinstance(value, dict):
+        # A typo such as `thread = true` would otherwise leave the check
+        # unthreaded with nothing to read the mistake off.
+        unknown = sorted(set(value) - set(_TABLE_KEYS))
+        if unknown:
+            raise ConfigError(
+                f"{path}: [verify.{kind}] does not know "
+                f"{', '.join(repr(key) for key in unknown)}; "
+                f"it takes {', '.join(repr(key) for key in _TABLE_KEYS)}"
+            )
         raw = value.get("commands")
         if raw is None:
             raise ConfigError(f"{path}: [verify.{kind}] must name `commands`")
@@ -164,7 +201,7 @@ def _commands_for(kind: str, value: object, path: Path) -> tuple[tuple[str, ...]
         if not isinstance(is_threaded, bool):
             raise ConfigError(f"{path}: [verify.{kind}].threaded must be true or false")
         return _checked(tuple(raw), kind, path), is_threaded
-    raise ConfigError(f"{path}: [verify].{kind} must be a string, a list of strings, or a table")
+    raise ConfigError(f"{path}: [verify.{kind}] must be a string, a list of strings, or a table")
 
 
 def _checked(commands: tuple[object, ...], kind: str, path: Path) -> tuple[str, ...]:
@@ -178,9 +215,9 @@ def _checked(commands: tuple[object, ...], kind: str, path: Path) -> tuple[str, 
         raise ConfigError(f"{path}: [verify.{kind}] names an empty list of commands")
     for command in commands:
         if not isinstance(command, str):
-            raise ConfigError(f"{path}: [verify].{kind} must hold strings")
+            raise ConfigError(f"{path}: [verify.{kind}] must hold strings")
         if not command.strip():
-            raise ConfigError(f"{path}: [verify].{kind} holds an empty command")
+            raise ConfigError(f"{path}: [verify.{kind}] holds an empty command")
     # The isinstance check above is per item; str() only tells mypy that.
     return tuple(str(command) for command in commands)
 
