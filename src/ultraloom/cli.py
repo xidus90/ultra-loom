@@ -219,18 +219,31 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
             print(f"run {run_id!r} does not say which flow it belongs to", file=sys.stderr)
             return _EXIT_FAIL
         flow_name, options, baseline = recorded
-        if args.command == "replay":
-            gate = pending_gate(Journal(journal_path))
-            if gate is not None:
-                # Replaying would hit a ReplayGapError at the gate, because the
-                # answer's `ok` entry does not exist. Say what is true — the run
-                # never finished — instead of reporting a pause it cannot reach.
-                print(
-                    f"run {run_id} never finished: it is waiting at gate {gate.node!r}; "
-                    "answer it with `ultraloom resume` before replaying",
-                    file=sys.stderr,
-                )
-                return _EXIT_FAIL
+        gate = pending_gate(Journal(journal_path))
+        if args.command == "replay" and gate is not None:
+            # Replaying would hit a ReplayGapError at the gate, because the
+            # answer's `ok` entry does not exist. Say what is true — the run
+            # never finished — instead of reporting a pause it cannot reach.
+            print(
+                f"run {run_id} never finished: it is waiting at gate {gate.node!r}; "
+                "answer it with `ultraloom resume` before replaying",
+                file=sys.stderr,
+            )
+            return _EXIT_FAIL
+        if args.command == "resume" and gate is None:
+            # The mirror image of the refusal above. A resume over a complete
+            # journal executes no node at all and reports `done` — exit 0 for a
+            # run nobody carried onward. For a flow with no gate anywhere,
+            # verify-until-green among them, that is a green verdict over
+            # checks that were never started, which is the one answer this tool
+            # must never give.
+            print(
+                f"run {run_id} is not waiting at a gate; there is nothing to answer. "
+                "Use `ultraloom replay` to re-derive it, or `ultraloom run` to start "
+                "a new one",
+                file=sys.stderr,
+            )
+            return _EXIT_FAIL
 
     context = FlowContext(root=root, config=config, options=options, baseline=baseline)
     try:

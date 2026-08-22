@@ -780,3 +780,27 @@ def test_a_blank_line_in_a_marker_is_not_a_broken_option(tmp_path: Path) -> None
     marker.write_text('plain\n\nchecks="edit"\n\n', encoding="utf-8")
 
     assert _recorded_run(tmp_path, "0001") == ("plain", {"checks": "edit"}, None)
+
+
+def test_resume_of_a_run_that_is_not_waiting_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A finished run has no gate, so resuming it executes nothing and reports green.
+
+    The symmetry to `replay` on a paused run: neither is the operation the
+    caller meant, and answering with a false verdict is worse than refusing.
+    A flow without any gate at all -- verify-until-green is one -- would
+    otherwise report exit 0 having verified nothing.
+    """
+    write_flow(tmp_path, "smoke", A_FLOW)
+    main(["run", "smoke", "--root", str(tmp_path)])
+    capsys.readouterr()
+
+    code = main(["resume", "0001", "--root", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert code == 1, "a run with nothing to answer must not come back green"
+    assert "not waiting" in captured.err
+    assert "replay" in captured.err
+    assert "done" not in captured.out
+
