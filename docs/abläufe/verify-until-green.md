@@ -384,3 +384,80 @@ Das heißt: der Prompt trägt besser als erwartet, und **die Wache ist gegen ein
 echten Agenten weiterhin unbewiesen**. Ihre Mechanik ist durch Unit-Tests
 abgedeckt, ausgelöst hat sie in einem echten Lauf noch nie zu Recht. Das bleibt
 so stehen, bis ein Lauf sie auslöst.
+
+## Der Lauf in einem zweiten Projekt: space
+
+Am 22.08.2026 lief derselbe Ablauf zum ersten Mal in einem Projekt, das nichts
+mit Python zu tun hat: space, ein Godot-4-Spiel in GDScript, mit
+headless-gdUnit4-Suite, Nano Coverage nach LCOV und ohne Typechecker.
+Unterschieden allein durch `.ultraloom/config.toml` — an ultraloom war nichts
+projektspezifisch zu ändern. Die Behauptung des Teilprojekts hält damit; sie
+hielt aber erst nach zwei Korrekturen, die dieser Lauf gefunden hat.
+
+| Lauf | Aufruf | Exit | Runden | Token | Laufzeit |
+| --- | --- | --- | --- | --- | --- |
+| 0001 | `--checks edit` (nur `lint`) | 0 | 1 | 0 | 6,6 s |
+| 0004 | `--checks precommit`, volle Suite | 1 | 1 | 0 | 471 s |
+| 0005 | `--checks lint`, echter gdlint-Fehler | 0 | 2 | 1200 | 40,9 s |
+
+Lauf 0004 lief 471 s, `lint` und `test` grün — die headless-Suite ist also
+wirklich gelaufen. Rot war allein `coverage`, korrekt als außer Reichweite
+gemeldet. Lauf 0005 rief ein echtes Modell, das genau die eine zu lange Zeile
+entfernte; die zweite Runde war grün.
+
+### Was die ersten Läufe an ultraloom fanden
+
+- **`[verify.coverage].report` war totes Konfigurat.** Der Schlüssel wurde
+  gelesen, geprüft und hier als Berichtskommando dokumentiert — und nie
+  ausgeführt. Ein Projekt, das seine Abdeckung nicht über das Preset seiner
+  Sprache misst, konnte Coverage gar nicht prüfen. Jetzt ist `report` das
+  Kommando der Coverage-Prüfung, mit `source="config"`.
+- **Eine unauflösbare Prüfung riss den ganzen Lauf mit.** Der `check`-Knoten
+  rief `run_check` direkt, und das *wirft*. Die Übersetzung in ein rotes
+  Ergebnis mit `source="unavailable"` — oben als Normalfall für GDScript
+  beschrieben — steckte allein in `run_all`, das der Ablauf nicht benutzt. In
+  space endete deshalb jeder Lauf nach fünf Sekunden mit `error`, bevor Suite
+  oder Linter geantwortet hatten.
+
+### Die Grundlinie hält sich auch in einem fremden Baum
+
+Der erste Engine-Start in einem frischen Worktree legt `.godot/` an und ändert
+dabei `project.godot` und jede `*.import`-Datei — fünfzehn Pfade, darunter ein
+geschützter. Ohne die Grundlinie hätte hier jeder Lauf mit Exit 4 geendet und
+den Agenten für die Arbeit des Godot-Editors beschuldigt.
+
+### Was nicht mitwandert: der Exit-Code als Urteil
+
+ultraloom liest den Exit-Code eines Prüfkommandos als das ganze Urteil. space'
+`coverage_gate.py` ist ein Claude-Code-Stop-Hook: er meldet über
+`hookSpecificOutput` und beendet sich **immer** mit 0, weil Exit 2 auf `Stop`
+dem Agenten das Ende des Zuges verweigern würde. Direkt eingetragen las ein
+fehlender LCOV-Bericht als bestandene Coverage-Prüfung — der eine Fehlschlag,
+den dieser Ablauf nie erzeugen darf, und ultraloom kann ihn nicht bemerken. In
+space steht deshalb eine dünne Hülle davor, die dieselben `findings()` ruft und
+nur den Kanal wechselt. Wer ultraloom in ein Projekt trägt, dessen Prüfungen
+Hook-Skripte sind, sieht jede einzeln daraufhin an.
+
+Zweitens misst space seine Abdeckung als *Nebenprodukt des Suitenlaufs*. Die
+Prüfungen laufen nebenläufig (Spec 9.4), also liest das Coverage-Tor den
+Bericht, den die Suite erst acht Minuten später schreibt. Das Python-Preset löst
+das mit einem `measure`-Schritt, der die Suite ein zweites Mal fährt; für eine
+Godot-Suite ist das keine Option. Eine Reihenfolge zwischen Prüfungen kennt der
+Ablauf heute nicht — das ist die offene Stelle, die space hinterlässt.
+
+### Führt das SDK die Hooks des Projekts zusätzlich aus?
+
+Abschnitt 17 des Kern-Designs fragt es, und die Antwort aus dem
+Sitzungsprotokoll von Lauf 0005 ist: **teilweise ja.** `SessionStart`
+(`session_start.py`, 760 ms) und `Stop` (`lint.py`, 1180 ms) liefen mit; der
+`SessionStart`-Hook schrieb dabei eine `override.cfg` in den Arbeitsbaum.
+`PostToolUse` — und damit die teure Prüfung `godot_quality.py` nach jeder
+Bearbeitung — erscheint nach dem `Edit` des Reparateurs **nicht** im Protokoll.
+Doppelt geprüft wird also nicht, aber der Reparaturlauf zahlt rund zwei Sekunden
+Hook-Zeit und bekommt einen Seiteneffekt im Baum. Wer das nicht will, setzt
+`setting_sources` im SDK-Adapter; ultraloom setzt das Feld heute nicht.
+
+Nebenbei zeigte dasselbe Protokoll, dass das SDK dem Reparateur die globalen
+MCP-Server des Benutzers anbietet. Er versuchte, über einen davon eine Shell zu
+erreichen, und wurde von `permission_mode: "dontAsk"` abgewiesen — die Sperre
+hält, aber die Werkzeuge kosten Prompt und eine Runde.
