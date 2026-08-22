@@ -474,3 +474,29 @@ def test_partial_output_survives_every_shape_the_exception_can_carry() -> None:
     assert _decode(None) == ""
     assert _decode(b"half a line\xff") == "half a line\ufffd"
     assert _decode("half a line") == "half a line"
+
+
+def test_a_configured_coverage_report_is_the_coverage_command(tmp_path: Path) -> None:
+    """Found in space: Nano Coverage's gate is neither a preset nor a script.
+
+    `[verify.coverage].report` was read, validated and documented as the
+    coverage check's command, and then no code path ever ran it -- a Godot
+    project could not configure coverage at all.
+    """
+    config = Config(root=tmp_path, coverage_report="uv run --script gate.py")
+
+    command = resolve_check("coverage", config)
+
+    assert command.argv == ("uv", "run", "--script", "gate.py")
+    assert command.source == "config"
+    assert command.measure == ()
+
+
+def test_a_blank_coverage_report_command_is_refused(tmp_path: Path) -> None:
+    """The same trap as a blank [verify] command: with an [exec] prefix set,
+    what is left to run is the bare prefix, and a prefix that exits 0 turns a
+    check nobody configured into a green line."""
+    config = Config(root=tmp_path, coverage_report="   ")
+
+    with pytest.raises(CheckUnavailableError, match="empty command"):
+        resolve_check("coverage", config)

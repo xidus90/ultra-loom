@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from ultraloom.checks import KINDS, CheckResult, run_check
+from ultraloom.checks import KINDS, CheckResult, CheckUnavailableError, run_check
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext, LoadedFlow
 from ultraloom.graph import END, AgentNode, CodeNode, Graph
@@ -77,7 +77,7 @@ def make_check(config: Config, runner: CheckRunner = run_check) -> Callable[[Ver
         # releases the GIL while it waits. Not run_all itself, because that one
         # runs every kind and this node runs the kinds the caller asked for.
         with ThreadPoolExecutor(max_workers=max(1, len(state.kinds))) as pool:
-            results = tuple(pool.map(lambda kind: runner(kind, config), state.kinds))
+            results = tuple(pool.map(lambda kind: _result_for(kind, config, runner), state.kinds))
 
         red = tuple(result for result in results if not result.ok)
         return {
@@ -92,6 +92,22 @@ def make_check(config: Config, runner: CheckRunner = run_check) -> Callable[[Ver
         }
 
     return check
+
+
+def _result_for(kind: str, config: Config, runner: CheckRunner) -> CheckResult:
+    """One check, with "cannot be resolved" turned into the red result it is.
+
+    checks.run_all does the same translation, and this node needs it for the
+    same reason: an unresolvable check escaping as an exception takes the whole
+    round down with it, discarding every check that already answered. In a
+    Godot project that is not an edge case -- there is no GDScript typechecker
+    and no coverage preset, so a raise here ended every run before the suite
+    had started.
+    """
+    try:
+        return runner(kind, config)
+    except CheckUnavailableError as error:
+        return CheckResult(kind, False, str(error), UNAVAILABLE)
 
 
 def _out_of_reach(result: CheckResult) -> bool:

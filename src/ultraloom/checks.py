@@ -95,6 +95,17 @@ def resolve_check(kind: str, config: Config) -> Command:
     if kind not in KINDS:
         raise CheckUnavailableError(f"unknown check {kind!r}; known: {', '.join(KINDS)}")
 
+    if kind == "coverage" and config.coverage_report is not None:
+        # The one check whose command does not live in [verify]: coverage has
+        # its own table, because a threshold belongs next to the command that
+        # reports against it. Space measures through Nano Coverage into LCOV
+        # and enforces the threshold in a script of its own -- neither a
+        # preset nor a [verify] key could name that.
+        words = tuple(shlex.split(config.coverage_report))
+        if not words:
+            raise CheckUnavailableError("empty command configured for [verify.coverage].report")
+        return Command(kind, config.exec_prefix + words, "config")
+
     if kind in config.commands:
         words = tuple(shlex.split(config.commands[kind]))
         if not words:

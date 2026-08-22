@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.checks import KINDS, CheckResult
+from ultraloom.checks import KINDS, CheckResult, CheckUnavailableError
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext
 from ultraloom.flows.verify_until_green import (
@@ -855,3 +855,24 @@ def test_an_unavailable_check_beside_a_repairable_one_still_gets_its_rounds(
     assert len(model.seen) == 1  # the repairable half was tried
     assert result.exit_code == 1
     assert "out of reach: types" in (result.detail or "")
+
+
+def test_an_unresolvable_check_is_red_and_out_of_reach_not_an_exception() -> None:
+    """Found in space: a Godot project has no coverage preset.
+
+    `run_check` raises for a check it cannot resolve, and the node used to let
+    that escape -- the whole run died with a traceback-shaped error before any
+    other check was even reported. The documented behaviour is a red result
+    with source "unavailable", which is what makes it out of reach.
+    """
+
+    def run(kind: str, _config: Config) -> CheckResult:
+        if kind == "coverage":
+            raise CheckUnavailableError("GDScript has no coverage tool")
+        return CheckResult(kind, True, "", "preset")
+
+    delta = make_check(_config(), run)(VerifyState(kinds=("lint", "coverage")))
+
+    assert delta["failing"] == ("coverage",)
+    assert delta["unfixable"] == ("coverage",)
+    assert "unavailable" in str(delta["report"])
