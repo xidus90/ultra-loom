@@ -1,11 +1,19 @@
-"""Tests for the verify-until-green flow's state and its check node."""
+"""Tests for the verify-until-green flow's state and its check and repair nodes."""
 
 from collections.abc import Mapping
 from pathlib import Path
 
+import pytest
+
 from ultraloom.checks import CheckResult
 from ultraloom.config import Config
-from ultraloom.flows.verify_until_green import CheckRunner, VerifyState, make_check
+from ultraloom.flows.verify_until_green import (
+    CheckRunner,
+    RepairResult,
+    VerifyState,
+    make_check,
+    make_repair,
+)
 
 
 def _config() -> Config:
@@ -84,3 +92,37 @@ def test_rounds_counts_up_from_where_the_state_stood() -> None:
     step = make_check(_config(), _runner({"lint": True}))
 
     assert step(VerifyState(kinds=("lint",), rounds=2))["rounds"] == 3
+
+
+def test_the_prompt_carries_the_report_and_the_forbidden_paths() -> None:
+    node = make_repair(test_paths=("tests/", "conftest.py"))
+    state = VerifyState(kinds=("lint",), failing=("lint",), report="## lint\nE501 too long")
+
+    prompt = node.prompt(state)
+
+    assert "E501 too long" in prompt
+    assert "tests/" in prompt
+    assert "conftest.py" in prompt
+
+
+def test_the_node_may_edit_and_thinks_hard() -> None:
+    node = make_repair(test_paths=("tests/",))
+
+    assert node.tools == "edit"
+    assert node.effort == "high"
+    assert node.schema is RepairResult
+
+
+def test_the_reply_becomes_the_summary_of_the_pass() -> None:
+    node = make_repair(test_paths=("tests/",))
+
+    delta = node.apply(VerifyState(), RepairResult(summary="shortened the line", changed=True))
+
+    assert delta == {"report": "shortened the line"}
+
+
+def test_a_reply_of_the_wrong_type_is_refused() -> None:
+    node = make_repair(test_paths=("tests/",))
+
+    with pytest.raises(TypeError, match="RepairResult"):
+        node.apply(VerifyState(), "I fixed it")

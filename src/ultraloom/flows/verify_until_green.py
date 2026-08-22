@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from ultraloom.checks import CheckResult, run_check
 from ultraloom.config import Config
+from ultraloom.graph import AgentNode
 from ultraloom.state import Delta
 
 type CheckRunner = Callable[[str, Config], CheckResult]
@@ -78,3 +79,56 @@ def _render(red: tuple[CheckResult, ...]) -> str:
     paid-for noise in a prompt.
     """
     return "\n\n".join(f"## {result.kind} ({result.source})\n{result.output}" for result in red)
+
+
+@dataclass(frozen=True, slots=True)
+class RepairResult:
+    """What the repairer says it did.
+
+    Scalars only, because that is what a model adapter can describe as a JSON
+    schema. `changed` is the model's own claim and is never trusted on its own:
+    the guard node reads the working tree.
+    """
+
+    summary: str
+    changed: bool = False
+
+
+REPAIR_PROMPT = """The project's checks are failing. Fix the source so they pass.
+
+{report}
+
+Rules:
+- Do NOT edit, weaken, skip or delete anything under: {forbidden}
+  A failing test is a finding about the source, not a problem with the test.
+- Change as little as possible. A narrow fix beats a rewrite.
+- If a check fails for a reason you cannot fix in the source, say so in the
+  summary and change nothing.
+
+Answer with a summary of what you changed and whether you changed anything.
+"""
+
+
+def make_repair(test_paths: tuple[str, ...]) -> AgentNode[VerifyState]:
+    """The `repair` node, told which paths it must keep its hands off."""
+    forbidden = ", ".join(test_paths)
+
+    def apply(_state: VerifyState, reply: object) -> Delta:
+        if not isinstance(reply, RepairResult):
+            # The runner types the reply as `object`, so this is the one place
+            # a wrong shape can still be caught before it reaches the journal.
+            raise TypeError(f"expected a RepairResult, got {type(reply).__name__}")
+        # The summary replaces the report on purpose: the next `check` pass
+        # overwrites it anyway, and carrying the old failures forward would let
+        # a stale report reach the next prompt if that pass ever fails to run.
+        return {"report": reply.summary}
+
+    return AgentNode(
+        "repair",
+        prompt=lambda state: REPAIR_PROMPT.format(report=state.report, forbidden=forbidden),
+        schema=RepairResult,
+        apply=apply,
+        tools="edit",
+        effort="high",
+        max_visits=5,
+    )
