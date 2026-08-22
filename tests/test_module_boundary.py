@@ -15,9 +15,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-# checks.run_all uses a *thread* pool, so every check resolves and runs inside
-# this one process. That is what makes a single sys.modules snapshot after
-# `check all` a complete answer rather than a sample of one worker.
+# checks.run_kinds -- the scheduler behind run_all -- uses *thread* pools, one
+# per stage, and walks the stages in this same thread. So every check resolves
+# and runs inside this one process, and a single sys.modules snapshot after
+# `check all` is a complete answer rather than a sample of one worker. The
+# stages did not weaken that: they only serialise pools that are still threads.
+# What would weaken it is a check running in a child of ours -- process.py
+# spawns the *tools*, whose imports are none of our business, but nothing in
+# ultraloom runs its own scheduler in a subprocess.
 _FORBIDDEN = (
     "ultraloom.graph",
     "ultraloom.state",
@@ -89,6 +94,7 @@ IMPORT_CHECK_SIDE = (
 import ultraloom.checks
 import ultraloom.cli
 import ultraloom.config
+import ultraloom.process
 
 print("EXIT: 0")
 report()

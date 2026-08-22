@@ -836,3 +836,40 @@ def test_check_all_refuses_a_ring_in_the_effective_check_order(
 
     assert code == 1
     assert "has a cycle" in capsys.readouterr().err
+
+
+def test_check_all_reports_a_blocked_check_as_failed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Never green, never silent: the line is there and the exit code is red."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    write_config(
+        tmp_path,
+        f"[verify]\ntest = '{python_command('raise SystemExit(1)')}'\n\n"
+        '[verify.after]\ncoverage = "test"\n',
+    )
+
+    code = main(["check", "all", "--root", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "coverage: failed [blocked]" in out
+    assert "läuft nicht, weil `test` rot war" in out
+
+
+def test_check_prints_the_heading_of_every_command_of_one_kind(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """_report passes the output through, so a multi-command report arrives whole."""
+    first = python_command("print(11)")
+    second = python_command("print(22); raise SystemExit(1)")
+    write_config(tmp_path, f"[verify]\nlint = ['{first}', '{second}']\n")
+
+    code = main(["check", "lint", "--root", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "lint: failed" in out
+    assert "11" in out
+    assert "22" in out
+    assert "(failed)" in out, "the heading carries the verdict of its own command"
