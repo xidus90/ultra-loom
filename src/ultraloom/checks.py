@@ -123,15 +123,10 @@ def resolve_check(kind: str, config: Config) -> Command:
         return Command(kind, config.exec_prefix + words, "config")
 
     if kind in config.commands:
-        words = tuple(shlex.split(config.commands[kind]))
-        if not words:
-            # Checked before the prefix is prepended, not after: with a prefix
-            # configured, a blank command line leaves the bare prefix, and
-            # ultraloom would run *that* and report its exit code as the
-            # check's. A prefix that exits 0 would turn a check nobody
-            # configured into a green line -- the one failure in this system
-            # that actually does damage.
-            raise CheckUnavailableError(f"empty command configured for check {kind!r}")
+        # One argv, although a kind may now name several commands: running the
+        # rest is Task 6's job, and load_config has already refused an empty
+        # list, so the first one always exists.
+        words = tuple(shlex.split(config.commands[kind][0]))
         return Command(kind, config.exec_prefix + words, "config")
 
     script = _script_for(kind, config.root)

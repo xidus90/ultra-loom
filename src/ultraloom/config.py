@@ -38,7 +38,8 @@ class Config:
     """What a project says about how it is checked."""
 
     root: Path
-    commands: Mapping[str, str] = field(default_factory=dict)
+    commands: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    threaded: frozenset[str] = frozenset()
     exec_prefix: tuple[str, ...] = ()
     coverage_report: str | None = None
     coverage_threshold: int = 100
@@ -68,14 +69,14 @@ def load_config(root: Path) -> Config:
     coverage = _table(verify, "coverage", path)
     agent = _table(raw, "agent", path)
 
-    commands: dict[str, str] = {}
+    commands: dict[str, tuple[str, ...]] = {}
+    threaded: set[str] = set()
     for kind in _KINDS:
         if kind not in verify:
             continue
-        value = verify[kind]
-        if not isinstance(value, str):
-            raise ConfigError(f"{path}: [verify].{kind} must be a string")
-        commands[kind] = value
+        commands[kind], is_threaded = _commands_for(kind, verify[kind], path)
+        if is_threaded:
+            threaded.add(kind)
 
     raw_tests = verify.get("tests", [])
     if not isinstance(raw_tests, list) or not all(isinstance(item, str) for item in raw_tests):
@@ -128,6 +129,7 @@ def load_config(root: Path) -> Config:
     return Config(
         root=root,
         commands=commands,
+        threaded=frozenset(threaded),
         exec_prefix=tuple(shlex.split(prefix)),
         coverage_report=report,
         coverage_threshold=threshold,
@@ -137,6 +139,50 @@ def load_config(root: Path) -> Config:
         godot_import=godot_import,
         profiles=profiles,
     )
+
+
+def _commands_for(kind: str, value: object, path: Path) -> tuple[tuple[str, ...], bool]:
+    """One kind's commands, from any of its three shapes.
+
+    A string is one command, a list is several, a table is several plus the
+    switches. TOML itself rules out the string-and-table collision: a key
+    cannot be both, and the parser refuses the file before it reaches here.
+    """
+    if isinstance(value, str):
+        return _checked((value,), kind, path), False
+    if isinstance(value, list):
+        return _checked(tuple(value), kind, path), False
+    if isinstance(value, dict):
+        raw = value.get("commands")
+        if raw is None:
+            raise ConfigError(f"{path}: [verify.{kind}] must name `commands`")
+        if not isinstance(raw, list):
+            raise ConfigError(f"{path}: [verify.{kind}].commands must be a list of strings")
+        is_threaded = value.get("threaded", False)
+        # Booleans are ints in TOML, so `threaded = 1` is refused rather than
+        # read as "on" -- the same trap the timeout and godot_import keys have.
+        if not isinstance(is_threaded, bool):
+            raise ConfigError(f"{path}: [verify.{kind}].threaded must be true or false")
+        return _checked(tuple(raw), kind, path), is_threaded
+    raise ConfigError(f"{path}: [verify].{kind} must be a string, a list of strings, or a table")
+
+
+def _checked(commands: tuple[object, ...], kind: str, path: Path) -> tuple[str, ...]:
+    """Every command is a non-blank string, checked before any prefix is prepended.
+
+    With an [exec].prefix configured, a blank command line leaves the bare
+    prefix, and a prefix that exits 0 turns a check nobody configured into a
+    green line -- the one failure in this system that actually does damage.
+    """
+    if not commands:
+        raise ConfigError(f"{path}: [verify.{kind}] names an empty list of commands")
+    for command in commands:
+        if not isinstance(command, str):
+            raise ConfigError(f"{path}: [verify].{kind} must hold strings")
+        if not command.strip():
+            raise ConfigError(f"{path}: [verify].{kind} holds an empty command")
+    # The isinstance check above is per item; str() only tells mypy that.
+    return tuple(str(command) for command in commands)
 
 
 def _table(raw: Mapping[str, Any], name: str, path: Path) -> Mapping[str, Any]:

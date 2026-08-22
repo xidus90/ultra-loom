@@ -19,6 +19,7 @@ def test_a_project_without_a_config_gets_empty_defaults(tmp_path: Path) -> None:
 
     assert config.root == tmp_path
     assert config.commands == {}
+    assert config.threaded == frozenset()
     assert config.exec_prefix == ()
     assert config.coverage_report is None
     assert config.coverage_threshold == 100
@@ -30,14 +31,118 @@ def test_check_commands_are_read(tmp_path: Path) -> None:
 
     config = load_config(tmp_path)
 
-    assert config.commands["lint"] == "uvx gdlint ."
-    assert config.commands["test"] == "godot --headless"
+    assert config.commands["lint"] == ("uvx gdlint .",)
+    assert config.commands["test"] == ("godot --headless",)
+
+
+def test_a_string_command_stays_one_command(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify]\nlint = "gdlint ."\n')
+
+    assert load_config(tmp_path).commands["lint"] == ("gdlint .",)
+
+
+def test_a_list_holds_several_commands_in_order(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify]\nlint = ["gdlint .", "gdformat --check ."]\n')
+
+    assert load_config(tmp_path).commands["lint"] == ("gdlint .", "gdformat --check .")
+
+
+def test_the_table_form_carries_commands_and_the_switch(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        '[verify.lint]\ncommands = ["gdlint .", "gdformat --check ."]\nthreaded = true\n',
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.commands["lint"] == ("gdlint .", "gdformat --check .")
+    assert "lint" in config.threaded
+
+
+def test_threaded_defaults_to_off(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.lint]\ncommands = ["gdlint ."]\n')
+
+    assert load_config(tmp_path).threaded == frozenset()
+
+
+def test_the_table_form_needs_commands(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify.lint]\nthreaded = true\n")
+
+    with pytest.raises(ConfigError, match="commands"):
+        load_config(tmp_path)
+
+
+def test_the_table_form_wants_a_list_of_commands(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.lint]\ncommands = "gdlint ."\n')
+
+    with pytest.raises(ConfigError, match="list of strings"):
+        load_config(tmp_path)
+
+
+def test_an_empty_command_list_is_refused(tmp_path: Path) -> None:
+    """A kind that names no command is a check nobody runs -- and it must not look green."""
+    write_config(tmp_path, "[verify.lint]\ncommands = []\n")
+
+    with pytest.raises(ConfigError, match="empty"):
+        load_config(tmp_path)
+
+
+def test_a_blank_command_is_refused(tmp_path: Path) -> None:
+    """Moved here from resolve_check: the file is refused before anything runs."""
+    write_config(tmp_path, '[verify]\nlint = ""\n')
+
+    with pytest.raises(ConfigError, match="empty"):
+        load_config(tmp_path)
+
+
+def test_a_blank_command_is_refused_even_with_an_exec_prefix(tmp_path: Path) -> None:
+    """Otherwise the bare prefix runs, and a prefix that exits 0 reports green.
+
+    Checked at load time, before the prefix can be prepended: with a prefix
+    configured, a blank command line leaves the bare prefix to run.
+    """
+    write_config(
+        tmp_path,
+        '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = ""\n',
+    )
+
+    with pytest.raises(ConfigError, match="empty"):
+        load_config(tmp_path)
+
+
+def test_a_blank_command_in_a_list_is_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify]\nlint = ["gdlint .", "  "]\n')
+
+    with pytest.raises(ConfigError, match="empty"):
+        load_config(tmp_path)
+
+
+def test_a_command_that_is_not_a_string_is_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify]\nlint = [7]\n")
+
+    with pytest.raises(ConfigError, match="strings"):
+        load_config(tmp_path)
+
+
+def test_a_command_of_an_unusable_shape_is_refused(tmp_path: Path) -> None:
+    """A number is neither of the three shapes, and must not read as no config at all."""
+    write_config(tmp_path, "[verify]\nlint = 7\n")
+
+    with pytest.raises(ConfigError, match="must be a string, a list of strings, or a table"):
+        load_config(tmp_path)
+
+
+def test_threaded_must_be_a_boolean(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.lint]\ncommands = ["x"]\nthreaded = 1\n')
+
+    with pytest.raises(ConfigError, match="true or false"):
+        load_config(tmp_path)
 
 
 def test_a_command_of_an_unknown_kind_is_ignored(tmp_path: Path) -> None:
     write_config(tmp_path, '[verify]\nlint = "ruff check ."\ndeploy = "ship it"\n')
 
-    assert load_config(tmp_path).commands == {"lint": "ruff check ."}
+    assert load_config(tmp_path).commands == {"lint": ("ruff check .",)}
 
 
 def test_the_exec_prefix_is_split_into_argv(tmp_path: Path) -> None:

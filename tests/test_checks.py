@@ -226,21 +226,18 @@ def test_run_all_skips_a_check_it_cannot_resolve_and_says_which(tmp_path: Path) 
     assert all("could not tell" in result.output for result in unavailable)
 
 
-def test_an_empty_configured_command_is_refused(tmp_path: Path) -> None:
-    """A blank config line must never reach subprocess as an empty argv."""
-    python_project(tmp_path)
-    write_config(tmp_path, '[verify]\nlint = ""\n')
-
-    with pytest.raises(CheckUnavailableError, match="empty command"):
-        resolve_check("lint", load_config(tmp_path))
-
-
-def test_an_empty_configured_command_does_not_take_the_chain_down(tmp_path: Path) -> None:
-    verify_config(tmp_path, lint="", types=py("pass"))
+def test_an_unresolvable_command_does_not_take_the_chain_down(tmp_path: Path) -> None:
+    """A blank [verify] command never reaches here now -- load_config refuses the
+    file. A blank coverage report is the one empty command left to the resolver,
+    and it must be reported rather than stop every other check.
+    """
+    types = json.dumps(py("pass"))
+    body = f"[verify]\ntypes = {types}\n[verify.coverage]\nreport = '   '\n"
+    write_config(tmp_path, body)
 
     results = {result.kind: result for result in run_all(load_config(tmp_path))}
 
-    assert results["lint"].source == "unavailable"
+    assert results["coverage"].source == "unavailable"
     assert results["types"].ok is True
 
 
@@ -292,22 +289,6 @@ def test_run_all_actually_overlaps_the_waiting(tmp_path: Path) -> None:
     assert three < 2 * one + 0.3, (
         f"one check took {one:.2f}s, three concurrent took {three:.2f}s; they did not overlap"
     )
-
-
-def test_an_empty_configured_command_is_refused_even_with_an_exec_prefix(tmp_path: Path) -> None:
-    """Otherwise the bare prefix runs, and a prefix that exits 0 reports green."""
-    python_project(tmp_path)
-    write_config(
-        tmp_path,
-        '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = ""\n',
-    )
-    config = load_config(tmp_path)
-    # Without this the test proves nothing: with an empty prefix the argv is
-    # empty either way, and the guard's position stops being observable.
-    assert config.exec_prefix, "the prefix must reach the resolver for this to be a test"
-
-    with pytest.raises(CheckUnavailableError, match="empty command"):
-        resolve_check("lint", config)
 
 
 def test_a_directory_that_matches_the_script_glob_is_not_a_script(tmp_path: Path) -> None:
@@ -434,7 +415,7 @@ def _argv(command: str) -> tuple[str, ...]:
 
 
 def test_a_command_that_overruns_is_a_red_result(tmp_path: Path) -> None:
-    config = Config(root=tmp_path, commands={"lint": _sleep_command(5)}, timeout=1)
+    config = Config(root=tmp_path, commands={"lint": (_sleep_command(5),)}, timeout=1)
 
     result = run_check("lint", config)
 
@@ -444,7 +425,7 @@ def test_a_command_that_overruns_is_a_red_result(tmp_path: Path) -> None:
 
 
 def test_a_command_within_the_limit_is_untouched(tmp_path: Path) -> None:
-    config = Config(root=tmp_path, commands={"lint": _sleep_command(0)}, timeout=30)
+    config = Config(root=tmp_path, commands={"lint": (_sleep_command(0),)}, timeout=30)
 
     assert run_check("lint", config).ok
 
@@ -476,7 +457,7 @@ def test_a_truncated_capture_is_never_a_passed_check(
         returncode=0, stdout="ran 3 of ", stderr="", output_abandoned=True
     )
     monkeypatch.setattr(process, "run", lambda *args, **kwargs: truncated)
-    config = Config(root=tmp_path, commands={"lint": _sleep_command(0)}, timeout=30)
+    config = Config(root=tmp_path, commands={"lint": (_sleep_command(0),)}, timeout=30)
 
     result = run_check("lint", config)
 
@@ -685,11 +666,13 @@ def test_a_timed_out_check_names_its_partial_output(tmp_path: Path) -> None:
     config = Config(
         root=tmp_path,
         commands={
-            "lint": py(
-                "import shlex, subprocess, sys, time; "
-                "print('half done', flush=True); "
-                f"subprocess.Popen(shlex.split({linger!r})); "
-                "time.sleep(20)"
+            "lint": (
+                py(
+                    "import shlex, subprocess, sys, time; "
+                    "print('half done', flush=True); "
+                    f"subprocess.Popen(shlex.split({linger!r})); "
+                    "time.sleep(20)"
+                ),
             )
         },
         timeout=1,
