@@ -20,38 +20,74 @@ from ultraloom.config import Config
 
 KINDS = ("lint", "types", "test", "coverage")
 
-# marker file -> check kind -> the tool's argv
-# A preset is a *sequence* of commands, because not every tool measures what
-# it reports. The last one is the check; anything before it prepares the data
-# the check reads. Only Python's coverage needs the distinction today, and it
-# is spelled out for every preset rather than special-cased at the one place
-# that has it.
-PRESETS: Mapping[str, Mapping[str, tuple[tuple[str, ...], ...]]] = {
+
+@dataclass(frozen=True, slots=True)
+class Preset:
+    """What a language's tool for one check kind looks like.
+
+    Three fields with distinct jobs, and the distinction is the whole point:
+
+    `measuring` -- this check can measure as a by-product, if somebody needs it
+    `after`     -- this check reads what another one leaves behind
+    `measure`   -- if nobody measures for me, I measure myself
+
+    Only `argv` and `measure` are acted on here. `measuring` and `after` are
+    carried for the scheduler that orders the chain into stages; a field that
+    arrives with the table it describes cannot be forgotten when the reader for
+    it is written.
+    """
+
+    argv: tuple[str, ...]
+    measuring: tuple[str, ...] = ()
+    measure: tuple[str, ...] = ()
+    after: str = ""
+
+
+# The tools are asked to be terse wherever a flag says so: a check report is
+# read by a repairer that pays for every token of it, on every round. Each of
+# these flags was run against a failing project first -- one that turned a red
+# check green would be worse than any amount of noise.
+_PYTEST = ("uv", "run", "pytest", "-q", "--tb=short", "--no-header")
+_COVERAGE_RUN = ("uv", "run", "coverage", "run", "-m", "pytest", "-q", "--tb=short", "--no-header")
+
+# marker file -> check kind -> the preset for it
+PRESETS: Mapping[str, Mapping[str, Preset]] = {
     "pyproject.toml": {
-        "lint": (("uvx", "ruff", "check", "."),),
-        "types": (("uvx", "mypy"),),
-        "test": (("uv", "run", "pytest"),),
-        # Two steps: `coverage report` reads .coverage and never writes it. A
-        # single-step preset is therefore red in every project that has not
-        # measured by some other route -- and `run_all` cannot supply one,
-        # because the four checks run at the same time and `test` measures
-        # nothing. The tests run twice, once here and once under `test`; that
-        # is the price of checks that stay independent of each other (spec 9.4).
-        "coverage": (
-            ("uv", "run", "coverage", "run", "-m", "pytest"),
-            ("uv", "run", "coverage", "report"),
+        "lint": Preset(("uvx", "ruff", "check", ".", "--output-format=concise")),
+        "types": Preset(("uvx", "mypy", "--no-error-summary", "--no-pretty")),
+        # `measuring` rather than a second suite run: with coverage in the same
+        # run, `test` measures as it goes and the report reads what it wrote.
+        # Alone, `test` stays the fast path and pays no measuring overhead.
+        "test": Preset(_PYTEST, measuring=_COVERAGE_RUN),
+        # `--skip-covered --skip-empty`: the files at 100% are the ones nobody
+        # needs to read, and in a project that holds the line they are almost
+        # all of them.
+        "coverage": Preset(
+            ("uv", "run", "coverage", "report", "--skip-covered", "--skip-empty"),
+            measure=_COVERAGE_RUN,
+            after="test",
         ),
     },
     "package.json": {
-        "lint": (("eslint", "."),),
-        "types": (("tsc", "--noEmit"),),
-        "test": (("vitest", "run"),),
-        # One step: vitest measures and reports in the same run.
-        "coverage": (("vitest", "run", "--coverage"),),
+        "lint": Preset(("eslint", ".")),
+        "types": Preset(("tsc", "--noEmit")),
+        "test": Preset(("vitest", "run")),
+        # One stage: vitest measures and reports in the same run, so there is
+        # nothing for coverage to wait on.
+        "coverage": Preset(("vitest", "run", "--coverage")),
     },
     "project.godot": {
-        "lint": (("uvx", "gdlint", "."),),
-        "test": (("godot", "--headless", "--quit"),),
+        "lint": Preset(("uvx", "gdlint", ".")),
+        "test": Preset(("godot", "--headless", "--quit")),
+        # No coverage preset, deliberately. GDScript coverage in the project
+        # this came from is the Nano Coverage *editor addon*: it instruments the
+        # sources in place and writes lcov.info as a by-product of the suite,
+        # and the threshold over that file is enforced by a project-owned
+        # script. Neither half is a command a second Godot project could run, so
+        # there is nothing general to name here. A guessed command would be the
+        # worse outcome: it would look like a check and be none. Such a project
+        # configures its report under [verify.coverage] and its order under
+        # [verify.after].
     },
 }
 
@@ -169,13 +205,13 @@ def resolve_check(kind: str, config: Config) -> Command:
         raise CheckUnavailableError(
             f"{_LANGUAGE_NAMES[marker]} has no {kind} tool — a known limitation, not a passed check"
         )
-    steps = tuple(config.exec_prefix + step for step in preset[kind])
-    # A preset with more than two steps has no meaning here: the last one is
-    # the check, the one before it prepares its data, and a third would have
-    # nowhere to be reported from.
-    if len(steps) > 2:  # pragma: no cover  # guards the preset table, not any input
-        raise CheckUnavailableError(f"the {kind!r} preset has more than two steps")
-    return Command(kind, (steps[-1],), "preset", measure=steps[0] if len(steps) == 2 else ())
+    entry = preset[kind]
+    return Command(
+        kind,
+        (config.exec_prefix + entry.argv,),
+        "preset",
+        measure=config.exec_prefix + entry.measure if entry.measure else (),
+    )
 
 
 def run_check(kind: str, config: Config) -> CheckResult:
@@ -248,7 +284,7 @@ def _preset_godot_binary(config: Config) -> str | None:
     """The engine the `test` preset would start, or None if the project names its own."""
     if "test" in config.commands or _script_for("test", config.root) is not None:
         return None
-    return shlex.join((*config.exec_prefix, PRESETS["project.godot"]["test"][0][0]))
+    return shlex.join((*config.exec_prefix, PRESETS["project.godot"]["test"].argv[0]))
 
 
 def _run_command(command: Command, config: Config, gate: Semaphore | None = None) -> CheckResult:

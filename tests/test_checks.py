@@ -12,8 +12,10 @@ import pytest
 from ultraloom import process
 from ultraloom.checks import (
     KINDS,
+    PRESETS,
     CheckUnavailableError,
     Command,
+    Preset,
     _run_command,
     resolve_check,
     run_all,
@@ -311,8 +313,8 @@ def test_the_python_coverage_preset_measures_before_it_reports(tmp_path: Path) -
 
     command = resolve_check("coverage", load_config(tmp_path))
 
-    assert command.measure == ("uv", "run", "coverage", "run", "-m", "pytest")
-    assert command.argvs[0] == ("uv", "run", "coverage", "report")
+    assert command.measure[:4] == ("uv", "run", "coverage", "run")
+    assert command.argvs[0][:4] == ("uv", "run", "coverage", "report")
 
 
 def test_the_exec_prefix_is_put_in_front_of_the_measuring_step_too(tmp_path: Path) -> None:
@@ -329,16 +331,14 @@ def test_the_exec_prefix_is_put_in_front_of_the_measuring_step_too(tmp_path: Pat
 def test_a_measuring_step_runs_before_the_check_itself(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ultraloom.checks import PRESETS
-
     python_project(tmp_path)
     marker = tmp_path / "measured.txt"
     monkeypatch.setitem(
         PRESETS["pyproject.toml"],
         "coverage",
-        (
-            tuple(shlex.split(py(f"open({str(marker)!r}, 'w').write('yes')"))),
+        Preset(
             tuple(shlex.split(py("import sys; print(open('measured.txt').read())"))),
+            measure=tuple(shlex.split(py(f"open({str(marker)!r}, 'w').write('yes')"))),
         ),
     )
 
@@ -352,16 +352,14 @@ def test_a_failed_measuring_step_fails_the_check_and_stops_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The report would otherwise run on stale data and call it green."""
-    from ultraloom.checks import PRESETS
-
     python_project(tmp_path)
     ran = tmp_path / "reported.txt"
     monkeypatch.setitem(
         PRESETS["pyproject.toml"],
         "coverage",
-        (
-            tuple(shlex.split(py("import sys; print('the tests failed'); sys.exit(1)"))),
+        Preset(
             tuple(shlex.split(py(f"open({str(ran)!r}, 'w').write('x')"))),
+            measure=tuple(shlex.split(py("import sys; print('the tests failed'); sys.exit(1)"))),
         ),
     )
 
@@ -873,3 +871,54 @@ def test_the_merged_report_ends_in_a_newline_like_a_single_one(tmp_path: Path) -
     config = Config(root=tmp_path, commands={"lint": (py("print('a')"), py("print('b')"))})
 
     assert run_check("lint", config).output.endswith("\n")
+
+
+def test_the_python_test_preset_can_measure_when_asked() -> None:
+    """`measuring` is the second face of `test`: the same suite, counting as it goes.
+
+    Carried here, read by the scheduler later -- nothing in this task acts on it.
+    """
+    assert PRESETS["pyproject.toml"]["test"].measuring[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_the_python_coverage_preset_waits_for_test() -> None:
+    assert PRESETS["pyproject.toml"]["coverage"].after == "test"
+
+
+def test_the_python_coverage_preset_can_still_measure_alone() -> None:
+    assert PRESETS["pyproject.toml"]["coverage"].measure[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_godot_has_no_coverage_preset_at_all(tmp_path: Path) -> None:
+    """There is no general GDScript coverage command to name, so none is invented.
+
+    Space measures with the Nano Coverage editor addon, which writes lcov.info
+    as a by-product of the suite, and enforces the threshold from a script of
+    its own. Neither half is a command another Godot project could run.
+    """
+    assert "coverage" not in PRESETS["project.godot"]
+
+    godot_project(tmp_path)
+    with pytest.raises(CheckUnavailableError, match="known limitation"):
+        resolve_check("coverage", load_config(tmp_path))
+
+
+def test_the_node_preset_stays_one_stage() -> None:
+    assert PRESETS["package.json"]["coverage"].after == ""
+
+
+def test_the_presets_ask_their_tools_to_be_terse() -> None:
+    """Every token of a check report is a token the repairer pays for, every round."""
+    assert "--output-format=concise" in PRESETS["pyproject.toml"]["lint"].argv
+    assert "--tb=short" in PRESETS["pyproject.toml"]["test"].argv
+    assert "--skip-covered" in PRESETS["pyproject.toml"]["coverage"].argv
+    assert "--no-error-summary" in PRESETS["pyproject.toml"]["types"].argv
+
+
+def test_a_preset_resolves_to_one_command(tmp_path: Path) -> None:
+    python_project(tmp_path)
+
+    command = resolve_check("lint", load_config(tmp_path))
+
+    assert command.source == "preset"
+    assert len(command.argvs) == 1
