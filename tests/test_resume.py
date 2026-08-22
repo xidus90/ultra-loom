@@ -1,12 +1,12 @@
 """Tests for resume from the journal, replay without a model, and reproducibility."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from itertools import count
 from pathlib import Path
 
 from ultraloom.graph import END, AgentNode, CodeNode, GateNode, Graph
-from ultraloom.journal import Journal
+from ultraloom.journal import Entry, Journal
 from ultraloom.model.fake import FakeModel
 from ultraloom.model.port import Reply
 from ultraloom.runner import Runner
@@ -284,37 +284,99 @@ def test_an_agent_node_is_replayed_without_asking_the_model(tmp_path: Path) -> N
     assert result.state.data.steps == "patched"
 
 
-def test_a_replay_reaches_the_recorded_journal_entry_by_entry(tmp_path: Path) -> None:
-    """The golden-journal test: reproducibility is measured, not assumed.
+class _WatchingJournal(Journal):
+    """A journal that records every lookup a walk was served from.
 
-    Two runs of the same flow are no longer the comparison — a second `run`
-    executes again by design. The recorded journal is the golden artefact, and
-    a replay against it has to arrive at exactly those entries: same nodes,
-    same keys, same deltas, same order, and the same end state.
+    A replay writes nothing by construction, so comparing the file before and
+    after says only that the replay ran. What has to be measured is which
+    entries it walked: this records node, key and delta in the order the walk
+    asked for them.
     """
-    path = tmp_path / "r.jsonl"
-    journal = Journal(path)
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.served: list[tuple[str, str, Mapping[str, object]]] = []
+
+    def lookup(self, node: str, node_input_hash: str, outcome: str | None = None) -> Entry | None:
+        entry = super().lookup(node, node_input_hash, outcome)
+        if entry is not None:
+            self.served.append((entry.node, entry.input_hash, entry.delta))
+        return entry
+
+
+def _golden_flow() -> Graph[Data]:
+    """Three nodes, so the entry-by-entry comparison has an order to get wrong."""
+    graph: Graph[Data] = Graph("golden", start="first")
+    graph.add(CodeNode("first", lambda d: {"steps": d.steps + "1"}))
+    graph.add(
+        AgentNode(
+            "review",
+            prompt=lambda _d: "ask",
+            schema=Verdict,
+            apply=lambda d, reply: {"steps": d.steps + getattr(reply, "fix", "")},
+        )
+    )
+    graph.add(CodeNode("last", lambda d: {"steps": d.steps + "z"}))
+    graph.edge("first", "review")
+    graph.edge("review", "last")
+    graph.edge("last", END)
+    return graph
+
+
+def _golden_run(path: Path, journal: Journal | None = None) -> Journal:
+    """One recorded run of the golden flow, with a fixed clock and a fixed reply."""
+    written = journal if journal is not None else Journal(path)
     Runner(
-        _asking_flow(),
-        journal,
+        _golden_flow(),
+        written,
         model=FakeModel([Reply(Verdict(fix="patched"), tokens=5)]),
         clock=ticking_clock(),
     ).run(Data())
-    recorded = journal.entries()
-    bytes_before = path.read_bytes()
+    return written
 
+
+def test_a_replay_walks_the_recorded_entries_in_order(tmp_path: Path) -> None:
+    """The golden-journal test: the replay is compared entry by entry.
+
+    Not "the replay changed nothing" — that is true of any replay by
+    construction. What is asserted is that the walk was served exactly the
+    recorded entries, in the recorded order, with the recorded keys and deltas,
+    and arrived at the same end state.
+    """
+    path = tmp_path / "r.jsonl"
+    watching = _WatchingJournal(path)
+    _golden_run(path, watching)
+    recorded = [(e.node, e.input_hash, e.delta) for e in watching.entries() if e.outcome == "ok"]
+    assert [node for node, _key, _delta in recorded] == ["first", "review", "last"]
+
+    watching.served.clear()
     replayed = Runner(
-        _asking_flow(),
-        journal,
+        _golden_flow(),
+        watching,
         model=FakeModel([]),
         clock=ticking_clock(),
         replay=True,
     ).run(Data())
 
     assert replayed.status == "done"
-    assert replayed.state.data.steps == "patched"
-    assert journal.entries() == recorded, "a replay reproduces the journal, it does not change it"
-    assert path.read_bytes() == bytes_before
+    assert watching.served == recorded, "the replay must walk the recorded entries, in order"
+    assert replayed.state.data.steps == "1patchedz", "and arrive where the recorded run arrived"
+
+
+def test_two_runs_of_the_same_flow_write_the_same_bytes(tmp_path: Path) -> None:
+    """The other half of the golden test: the write path itself is deterministic.
+
+    Separate journal paths, because a second run over the same file appends to
+    it. Byte equality covers what an entry-by-entry comparison does not — field
+    order, serialisation, and the durations the injected clock fixes.
+    """
+    first = tmp_path / "a.jsonl"
+    second = tmp_path / "b.jsonl"
+
+    _golden_run(first)
+    _golden_run(second)
+
+    assert first.read_bytes() == second.read_bytes()
 
 
 def test_a_replay_gap_names_the_missing_node(tmp_path: Path) -> None:

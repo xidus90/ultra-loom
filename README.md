@@ -113,20 +113,19 @@ from. The module is executed on every load and is never registered in
 
 ### The journal, and what a resume replays
 
-Ein `run` führt jeden Knoten aus, den er erreicht. Der Journal-Cache greift nur,
-solange ein Lauf einen bestehenden Verlauf *nachvollzieht*: ein `replay` tut das
-von Anfang bis Ende, ein `resume` bis zu der Stelle, an der der frühere Lauf
-stehen geblieben ist — ab da wird wieder wirklich gearbeitet.
+A `run` executes every node it reaches. The journal is read only while a walk
+is *retracing* one: a `replay` retraces from the first entry to the last, a
+`resume` retraces up to the point where the earlier run stopped and does real
+work from there.
 
-Nachvollzogen wird über den *Input* eines Knotens — seinen Namen und die Daten,
-die er gesehen hat — nicht über seinen Code. Wer einen Knoten mitten im Lauf
-ändert und dann wiedergibt, bekommt das alte Ergebnis zurück. Nach einer
-Änderung an einem Knoten gehört ein frischer Lauf gestartet.
+What is retraced is keyed on a node's *input* — its name and the data it saw —
+not on its code. Edit a node in the middle of a run and replay, and you get the
+old result back from the journal. Start a fresh run when a node changes.
 
-Damit tut eine Schleife auch dann Arbeit, wenn sie ihre Nutzlast nicht
-verändert: `max_visits` hebt die Obergrenze eines Knotens, und jeder Durchgang
-läuft wirklich. Genau das braucht ein Knoten, der die Außenwelt misst, ohne sie
-zu ändern.
+So a loop does work even when it leaves its payload alone. `max_visits` raises
+a node's ceiling so it may sit on a cycle, and every pass of that cycle really
+executes — which is what a node that measures the outside world without
+changing it needs.
 
 ### Exit codes
 
