@@ -40,6 +40,33 @@ _EXIT_STILL_RED = 1
 # repair pass for it would be an agent looking for a way around a rule.
 UNFIXABLE: tuple[str, ...] = ("coverage",)
 
+# Lines of one check's output the repairer gets to see. Every line past this is
+# a line paid for in every round of the loop, and a red pytest run is easily
+# two thousand of them.
+MODEL_OUTPUT_LINES = 200
+
+
+def clip(output: str, *, limit: int = MODEL_OUTPUT_LINES) -> str:
+    """Head and tail of a long output, with the gap named.
+
+    Tool-agnostic on purpose: a parser would need to know which tool wrote
+    this, and behind an [exec].prefix, a wrapper script and `uv run` that is
+    not reliably answerable.
+
+    The tail gets two thirds of the budget. pytest writes its summary last, and
+    so does coverage -- the end of a report is where the verdict lives.
+    """
+    lines = output.splitlines()
+    if len(lines) <= limit:
+        # Returned unchanged rather than rejoined: a single very long line has
+        # no lines to drop, and rejoining would silently eat a trailing newline.
+        return output
+
+    tail = limit * 2 // 3
+    head = limit - tail
+    dropped = len(lines) - limit
+    return "\n".join([*lines[:head], f"    [... {dropped} Zeilen ausgelassen ...]", *lines[-tail:]])
+
 
 @dataclass(frozen=True, slots=True)
 class VerifyState:
@@ -151,11 +178,16 @@ def _render(red: tuple[CheckResult, ...]) -> str:
     round on a check that has no defect. Named all the same, so a report with a
     green lint, a green types and a red test does not read as though coverage
     had been checked.
+
+    Each finding's output is clipped, the blocked line never is: it is one line
+    naming what did not run, and it is the whole reason the report is honest.
+    `CheckResult.output` stays untouched -- the journal keeps the full report,
+    or a run stops being auditable afterwards.
     """
     blocked = tuple(result.kind for result in red if result.source == BLOCKED)
     findings = tuple(result for result in red if result.source != BLOCKED)
     rendered = "\n\n".join(
-        f"## {result.kind} ({result.source})\n{result.output}" for result in findings
+        f"## {result.kind} ({result.source})\n{clip(result.output)}" for result in findings
     )
     if not blocked:
         return rendered

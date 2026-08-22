@@ -15,11 +15,13 @@ from ultraloom.checks import (
     CheckRunner,
     CheckUnavailableError,
     run_check,
+    run_kinds,
 )
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext
 from ultraloom.flows.verify_until_green import (
     _EXIT_STILL_RED,
+    MODEL_OUTPUT_LINES,
     Differ,
     RepairResult,
     VerifyState,
@@ -27,6 +29,7 @@ from ultraloom.flows.verify_until_green import (
     _render,
     assemble,
     build,
+    clip,
     make_check,
     make_guard,
     make_repair,
@@ -1047,3 +1050,84 @@ def test_a_blocked_check_beside_a_repairable_one_still_gets_its_rounds(
 
     assert len(model.seen) == 1  # the blocked check did not end the run early
     assert result.status == "done"
+
+
+def test_short_output_is_untouched() -> None:
+    assert clip("one\ntwo\n") == "one\ntwo\n"
+
+
+def test_output_without_any_line_break_survives() -> None:
+    assert clip("x" * 10_000) == "x" * 10_000
+
+
+def test_empty_output_stays_empty() -> None:
+    assert clip("") == ""
+
+
+def test_long_output_keeps_both_ends() -> None:
+    lines = "\n".join(str(number) for number in range(1000))
+
+    clipped = clip(lines)
+
+    assert clipped.splitlines()[0] == "0"
+    assert clipped.splitlines()[-1] == "999"
+    assert len(clipped.splitlines()) < MODEL_OUTPUT_LINES + 5
+
+
+def test_the_clip_says_how_much_it_dropped() -> None:
+    clipped = clip("\n".join(str(number) for number in range(1000)))
+
+    assert "Zeilen ausgelassen" in clipped
+
+
+def test_the_gap_is_named_with_the_exact_number_of_dropped_lines() -> None:
+    """A literal budget, so the arithmetic is checked and not merely restated."""
+    clipped = clip("\n".join(str(number) for number in range(90)), limit=30)
+
+    assert "60 Zeilen ausgelassen" in clipped
+    assert len(clipped.splitlines()) == 31
+
+
+def test_two_thirds_of_the_budget_go_to_the_tail() -> None:
+    """pytest writes its summary last, and the summary is the part worth keeping."""
+    clipped = clip("\n".join(str(number) for number in range(90)), limit=30)
+    body = clipped.splitlines()
+    marker = next(index for index, line in enumerate(body) if "ausgelassen" in line)
+
+    assert marker == 10  # ten lines of head, twenty of tail
+    assert body[:marker] == [str(number) for number in range(10)]
+    assert body[marker + 1 :] == [str(number) for number in range(70, 90)]
+
+
+def test_a_report_exactly_at_the_budget_is_not_clipped() -> None:
+    lines = "\n".join(str(number) for number in range(30))
+
+    assert clip(lines, limit=30) == lines
+
+
+def test_the_render_clips_each_check_but_not_the_blocked_line() -> None:
+    long_output = "\n".join(str(number) for number in range(1000))
+
+    rendered = _render(
+        (
+            CheckResult("test", False, long_output, "pytest"),
+            CheckResult("coverage", False, "did not run", BLOCKED),
+        )
+    )
+
+    assert "Zeilen ausgelassen" in rendered
+    assert rendered.endswith("Nicht gelaufen, weil ein Vorgänger rot war: coverage")
+    assert len(rendered.splitlines()) < MODEL_OUTPUT_LINES + 10
+
+
+def test_the_check_result_itself_keeps_everything(tmp_path: Path) -> None:
+    """Clipped towards the model, complete in the journal -- or a run stops being auditable."""
+    long_output = "\n".join(str(number) for number in range(1000))
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, False, long_output, "fake")
+
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    results = run_kinds(("lint",), Config(root=tmp_path, test_paths=("tests/",)), runner)
+
+    assert results[0].output == long_output
