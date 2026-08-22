@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.checks import KINDS, CheckResult, CheckUnavailableError
+from ultraloom.checks import BLOCKED, KINDS, CheckResult, CheckRunner, CheckUnavailableError
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext
 from ultraloom.flows.verify_until_green import (
     _EXIT_STILL_RED,
-    CheckRunner,
     Differ,
     RepairResult,
     VerifyState,
+    _out_of_reach,
     assemble,
     build,
     make_check,
@@ -36,7 +36,7 @@ def _config() -> Config:
 
 
 def _runner(outcomes: Mapping[str, bool]) -> CheckRunner:
-    def run(kind: str, _config: Config) -> CheckResult:
+    def run(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         ok = outcomes[kind]
         return CheckResult(kind, ok, "" if ok else f"{kind} is unhappy", "test")
 
@@ -75,7 +75,7 @@ def test_coverage_is_red_but_out_of_the_repairers_reach() -> None:
 def test_a_check_that_never_resolved_is_out_of_reach_too() -> None:
     """A missing tool is red with source "unavailable"; nobody can repair it."""
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         return CheckResult(kind, False, "no gdlint here", "unavailable")
 
     delta = make_check(_config(), runner)(VerifyState(kinds=("types",)))
@@ -87,7 +87,7 @@ def test_a_check_that_never_resolved_is_out_of_reach_too() -> None:
 def test_every_kind_the_state_names_is_run() -> None:
     seen: list[str] = []
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         seen.append(kind)
         return CheckResult(kind, True, "", "test")
 
@@ -282,7 +282,7 @@ def _run_flow(
     passes = _Passes(outcomes)
     diffs = iter(touched or [])
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         ok = passes.outcome(kind)
         return CheckResult(kind, ok, "" if ok else f"{kind} is unhappy", "test")
 
@@ -818,7 +818,7 @@ def test_an_unavailable_check_beside_a_repairable_one_still_gets_its_rounds(
     """
     passes = _Passes([{"lint": False}, {"lint": True}])
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         if kind == "types":
             return CheckResult(kind, False, "no typechecker here", "unavailable")
         ok = passes.outcome(kind)
@@ -850,7 +850,7 @@ def test_an_unresolvable_check_is_red_and_out_of_reach_not_an_exception() -> Non
     with source "unavailable", which is what makes it out of reach.
     """
 
-    def run(kind: str, _config: Config) -> CheckResult:
+    def run(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         if kind == "coverage":
             raise CheckUnavailableError("GDScript has no coverage tool")
         return CheckResult(kind, True, "", "preset")
@@ -886,10 +886,76 @@ def test_the_guard_holds_when_the_project_root_is_below_the_repository_root(
 def test_an_unready_project_is_out_of_the_repairers_reach() -> None:
     """No agent should run a Godot import; the project, not the code, is unready."""
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         return CheckResult(kind, False, "never been imported", "unready")
 
     delta = make_check(_config(), runner)(VerifyState(kinds=("test",)))
 
     assert delta["failing"] == ("test",)
     assert delta["unfixable"] == ("test",)
+
+
+def test_a_blocked_check_is_not_out_of_reach() -> None:
+    """It closes itself the moment `test` goes green -- giving up on it would end
+    the flow at every ordinary red test."""
+    assert not _out_of_reach(CheckResult("coverage", False, "", BLOCKED))
+
+
+def test_the_node_runs_checks_in_dependency_order(tmp_path: Path) -> None:
+    record: list[str] = []
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        record.append(kind)
+        return CheckResult(kind, True, "", "fake")
+
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
+    check(VerifyState(kinds=("test", "coverage")))
+
+    assert record.index("coverage") > record.index("test")
+
+
+def test_the_report_names_what_did_not_run(tmp_path: Path) -> None:
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, kind != "test", "suite is red", "fake")
+
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
+    delta = check(VerifyState(kinds=("test", "coverage")))
+
+    assert "Nicht gelaufen, weil ein Vorgänger rot war: coverage" in str(delta["report"])
+    # A check that did not run is never a passed check -- and never a defect
+    # the repairer is asked to close either.
+    assert delta["failing"] == ("test", "coverage")
+    assert delta["unfixable"] == ()
+
+
+def test_a_blocked_check_is_named_below_the_findings_not_among_them(tmp_path: Path) -> None:
+    """The repairer's list of defects must hold only what it can touch."""
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, kind != "test", "suite is red", "fake")
+
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
+    report = str(check(VerifyState(kinds=("test", "coverage")))["report"])
+
+    assert report.index("## test") < report.index("Nicht gelaufen")
+    assert "## coverage" not in report
+
+
+def test_a_ring_in_the_configured_order_ends_the_run(tmp_path: Path) -> None:
+    """Not a red check: no repair pass closes a cycle in the configuration."""
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, True, "", "fake")  # pragma: no cover  # never reached
+
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    config = Config(root=tmp_path, test_paths=("tests/",), after={"test": "coverage"})
+    check = make_check(config, runner)
+
+    with pytest.raises(FlowExit) as raised:
+        check(VerifyState(kinds=("test", "coverage")))
+
+    assert raised.value.code == _EXIT_STILL_RED
+    assert "cycle" in str(raised.value)
