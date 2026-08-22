@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from ultraloom.checks import KINDS, CheckResult, CheckUnavailableError, run_check
+from ultraloom.checks import KINDS, UNREADY, CheckResult, CheckUnavailableError, run_check
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext, LoadedFlow
 from ultraloom.graph import END, AgentNode, CodeNode, Graph
@@ -38,6 +38,10 @@ UNFIXABLE: tuple[str, ...] = ("coverage",)
 # space has no GDScript typechecker, and asking an agent to repair a tool that
 # is not installed is asking it to invent one.
 UNAVAILABLE = "unavailable"
+
+# A check that a project's own precondition made red (checks._unready): a Godot
+# project that has never been imported. Unrepairable for the same reason, and a
+# stricter one -- the handle is an editor run, and an agent must not start one.
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +116,7 @@ def _result_for(kind: str, config: Config, runner: CheckRunner) -> CheckResult:
 
 def _out_of_reach(result: CheckResult) -> bool:
     """Whether a red check is one no repair pass could close."""
-    return result.kind in UNFIXABLE or result.source == UNAVAILABLE
+    return result.kind in UNFIXABLE or result.source in (UNAVAILABLE, UNREADY)
 
 
 def _render(red: tuple[CheckResult, ...]) -> str:

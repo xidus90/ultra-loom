@@ -252,12 +252,26 @@ Liste** — er ist der Grund, warum in space kein grüner `precommit`-Lauf steht
   auch. Was fehlt, ist die Entscheidung, ob der Schlüssel überhaupt bleiben
   soll.
 - **Ein Projekt mit Build-Cache braucht einen Einrichtungsschritt, von dem der
-  Ablauf nichts weiß.** Ein frischer Godot-Worktree hat kein `.godot/`; ohne
-  `global_script_class_cache.cfg` findet gdUnit4 seine eigene Klasse nicht und
-  die Suite bricht mit einem Parse-Fehler ab, der wie ein Codefehler aussieht.
-  Zwei Editor-Läufe legen Cache und Importe an. Kein ultraloom-Befund, aber
-  jedes Projekt mit einem Build-Cache hat diese Stufe, und ultraloom bietet
-  keinen Ort, an dem sie stünde.
+  Ablauf nichts weiß.** *Erledigt für Godot:* fehlt
+  `.godot/global_script_class_cache.cfg`, sind `test` und `coverage` rot mit der
+  Quelle `"unready"`, bevor eine Engine startet. Offen bleibt die allgemeine
+  Form — jede andere Sprache mit Build-Cache bringt ihre eigene Markerdatei mit,
+  und die Vorbedingung steht heute als Sonderfall im Code statt als Feld neben
+  dem Preset.
+- **Die Sitzungs-Hook-Falle kann ultraloom nicht prüfen.** *Gesehen:* ein
+  Editor- oder Import-Lauf schreibt `project.godot` um, ein Coverage-Addon
+  trägt dabei einen zweiten Sitzungs-Hook ein; beide instrumentieren, beide
+  leeren den Datenspeicher, und ganze Dateien kommen mit null Treffern aus dem
+  Zusammenführen, obwohl ihre Suiten grün liefen. Das Coverage-Tor liest das als
+  nicht erreichte Zeilen. *Warum verschoben:* die Prüfung verlangt Wissen, das
+  die Prüfkette bewusst nicht hat — welche Addons es gibt, wie ihre Hooks
+  heißen, welcher davon einer zu viel ist. Eine Liste von Addon-Namen in
+  ultraloom wäre am Tag nach dem nächsten Addon falsch. *Was es kostet:* ein
+  Format, in dem ein Projekt seine eigenen Vorbedingungen als Daten beschreibt
+  (Datei, Muster, Meldung), plus die Entscheidung, wie viel davon ultraloom
+  auswerten darf, ohne zum halben Linter für fremde Konfigurationsdateien zu
+  werden. Bis dahin fängt es das Prüf-Tor des Projekts selbst ab, und die
+  Ablaufseite benennt die Falle.
 - **`uv pip install -e` bricht an einem absoluten Windows-Pfad mit `#`.** Die
   Meldung nennt `C:\Users\micro\Documents` und behauptet, dort liege kein
   Python-Projekt: der Pfad wird an `#` abgeschnitten. Ein relativer Pfad

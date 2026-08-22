@@ -86,15 +86,61 @@ Ein rotes Ergebnis gilt als außer Reichweite, wenn
 - seine Quelle `"unavailable"` ist, die Prüfung sich also gar nicht auflösen
   ließ. Sie ist rot, aber keine Änderung am Projekt behebt das — für GDScript
   gibt es keinen Typechecker, und einen Agenten zu bitten, ein nicht
-  installiertes Werkzeug zu reparieren, heißt ihn zu bitten, es zu erfinden.
+  installiertes Werkzeug zu reparieren, heißt ihn zu bitten, es zu erfinden;
+  oder
+- seine Quelle `"unready"` ist: die Prüfung ließ sich auflösen, aber das
+  Projekt ist für sie nicht bereit — siehe *Was ein Godot-Projekt vorher
+  braucht*. Der Griff ist ein Import-Lauf, und einen Editor zu starten ist
+  nichts, was ein Reparatur-Agent tun soll.
 
-Beides beendet den Lauf **nur dann sofort**, wenn nichts Reparierbares daneben
-steht. Für ein Projekt, dem ein Werkzeug dauerhaft fehlt, ist das der Normalfall
+Alle drei beenden den Lauf **nur dann sofort**, wenn nichts Reparierbares
+daneben steht. Für ein Projekt, dem ein Werkzeug dauerhaft fehlt, ist das der Normalfall
 und keine Ausnahme: in space ist `types` bei jedem einzelnen Lauf unverfügbar.
 Vorher endete dort jeder Lauf sofort mit Exit 1; jetzt bekommen die übrigen
 Prüfungen ihre Runden, und der Ablauf ruft bis zu `max_rounds` mal das Modell,
 wo vorher gar keiner kam. Das ist der gewollte Tausch — wer ihn nicht will,
 lässt die unverfügbare Art über `--checks` weg.
+
+## Was ein Godot-Projekt vorher braucht
+
+Ein Godot-Projekt muss **einmal importiert** worden sein, bevor irgendein
+Testergebnis dort etwas bedeutet. Der Import legt `.godot/` an; ohne ihn
+scheitert die Suite an Dingen, die nicht kaputt sind — oder sie misst gar nichts
+und sieht dabei grün aus.
+
+ultraloom prüft das jetzt, statt es zu dokumentieren: Ist die erkannte
+Markerdatei `project.godot` und fehlt `.godot/global_script_class_cache.cfg`,
+liefern `test` und `coverage` ein rotes Ergebnis mit der Quelle `"unready"` —
+**bevor** eine Engine startet. Die Meldung nennt den Griff:
+
+```
+this Godot project has never been imported, so no test result would mean anything
+run: godot --headless --path . --import
+```
+
+`lint` ist bewusst nicht betroffen: `gdlint` liest Quelltext und braucht kein
+`.godot/`. Und ultraloom fährt den Import **nicht selbst**. Ein Prüfwerkzeug,
+das ungefragt einen Editor startet und den Baum verändert, ist keine Prüfung
+mehr.
+
+`.godot/` ist gitignoriert. Jeder frische Checkout und jeder neue Worktree hat
+deshalb seinen eigenen Zustand und diese Stufe von vorn — nicht nur ein neues
+Projekt.
+
+### Die zweite Falle, die ultraloom nicht prüfen kann
+
+Ein Editor- oder Import-Lauf kann `project.godot` umschreiben, und manche
+Coverage-Addons tragen dabei einen eigenen Sitzungs-Hook ein. Laufen dann zwei
+Hooks, instrumentieren beide und leeren beide den Datenspeicher: ganze Dateien
+kommen mit null Treffern aus dem Zusammenführen, obwohl ihre Suiten grün
+liefen. Das Coverage-Tor liest die leeren Datensätze als nicht erreichte Zeilen
+und meldet eine Lücke, die es nicht gibt.
+
+ultraloom kann das nicht erkennen, weil es keine Addon-Namen kennt — was ein
+Sitzungs-Hook ist und welcher davon zu viel ist, steht in keinem Wissen, das die
+Prüfkette hat. Ein Projekt fängt es selbst ab, indem sein Prüf-Tor
+`project.godot` liest, bevor es Motoren startet. Der Griff ist, die Datei zu
+verwerfen.
 
 ## Der Agent
 

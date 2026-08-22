@@ -54,6 +54,22 @@ PRESETS: Mapping[str, Mapping[str, tuple[tuple[str, ...], ...]]] = {
     },
 }
 
+# A red result whose cause is the project's state, not a missing tool: reported
+# with a source of its own, because "unavailable" would say a tool is missing
+# when the tool is there and the project is not ready for it.
+UNREADY = "unready"
+
+# What a Godot import writes, and the only file here that an *empty* `.godot/`
+# does not have -- the directory itself appears long before the import fills it.
+# `.godot/` is gitignored, so every fresh checkout and every new worktree starts
+# without it, not just a new project.
+_GODOT_IMPORT_MARKER = Path(".godot") / "global_script_class_cache.cfg"
+
+# The checks that mean nothing before the import. `lint` is deliberately absent:
+# gdlint reads source text and needs no `.godot/`, so gating it would block a
+# check that would have worked.
+_NEEDS_GODOT_IMPORT = ("test", "coverage")
+
 _LANGUAGE_NAMES: Mapping[str, str] = {
     "pyproject.toml": "Python",
     "package.json": "Node",
@@ -151,7 +167,55 @@ def run_check(kind: str, config: Config) -> CheckResult:
     or over data left behind by an earlier run -- would be green for reasons
     that have nothing to do with this one.
     """
-    return _run_command(resolve_check(kind, config), config)
+    command = resolve_check(kind, config)
+    unready = _unready(command, config)
+    if unready is not None:
+        return unready
+    return _run_command(command, config)
+
+
+def _unready(command: Command, config: Config) -> CheckResult | None:
+    """The project's own precondition, checked before any engine is started.
+
+    A Godot project must have been imported once: the import builds `.godot/`,
+    and without it a suite fails on things that are not broken -- or measures
+    nothing and looks green doing it. ultraloom reports that and does *not* run
+    the import itself: a checking tool that starts an editor unasked and changes
+    the tree has stopped being a check.
+    """
+    if command.kind not in _NEEDS_GODOT_IMPORT:
+        return None
+    if _marker(config.root) != "project.godot":
+        return None
+    if (config.root / _GODOT_IMPORT_MARKER).exists():
+        return None
+    return CheckResult(command.kind, False, _import_message(config), UNREADY)
+
+
+def _import_message(config: Config) -> str:
+    """Why the check is red, and the one command that fixes it.
+
+    The engine is named only where the preset would have run it. A project that
+    configured `test` itself runs some other binary, and naming a path that may
+    not exist is worse than saying less.
+    """
+    engine = _preset_godot_binary(config)
+    handle = "--headless --path . --import"
+    run = (
+        f"{engine} {handle}" if engine is not None else f"the project's Godot binary with {handle}"
+    )
+    return (
+        "this Godot project has never been imported, "
+        "so no test result would mean anything\n"
+        f"run: {run}"
+    )
+
+
+def _preset_godot_binary(config: Config) -> str | None:
+    """The engine the `test` preset would start, or None if the project names its own."""
+    if "test" in config.commands or _script_for("test", config.root) is not None:
+        return None
+    return shlex.join((*config.exec_prefix, PRESETS["project.godot"]["test"][0][0]))
 
 
 def _run_command(command: Command, config: Config) -> CheckResult:

@@ -881,3 +881,15 @@ def test_the_guard_holds_when_the_project_root_is_below_the_repository_root(
 
     assert raised.value.code == 4
     assert "tests/test_x.py" in str(raised.value)
+
+
+def test_an_unready_project_is_out_of_the_repairers_reach() -> None:
+    """No agent should run a Godot import; the project, not the code, is unready."""
+
+    def runner(kind: str, _config: Config) -> CheckResult:
+        return CheckResult(kind, False, "never been imported", "unready")
+
+    delta = make_check(_config(), runner)(VerifyState(kinds=("test",)))
+
+    assert delta["failing"] == ("test",)
+    assert delta["unfixable"] == ("test",)

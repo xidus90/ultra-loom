@@ -500,3 +500,97 @@ def test_a_blank_coverage_report_command_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(CheckUnavailableError, match="empty command"):
         resolve_check("coverage", config)
+
+
+def imported_godot_project(root: Path) -> Path:
+    """A Godot project that has been through an editor import once."""
+    godot_project(root)
+    cache = root / ".godot" / "global_script_class_cache.cfg"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("list=[]\n", encoding="utf-8")
+    return root
+
+
+def test_an_unimported_godot_project_fails_test_before_an_engine_starts(tmp_path: Path) -> None:
+    """No engine is started: the result comes back red without any subprocess.
+
+    The preset command is `godot`, which is not installed on the machine this
+    test runs on -- so a result that is red for the *right* reason is the only
+    way this can pass.
+    """
+    godot_project(tmp_path)
+
+    result = run_check("test", load_config(tmp_path))
+
+    assert not result.ok
+    assert result.source == "unready"
+    assert "never been imported" in result.output
+    assert "godot --headless --path . --import" in result.output
+
+
+def test_an_unimported_godot_project_fails_coverage_too(tmp_path: Path) -> None:
+    godot_project(tmp_path)
+    config = Config(root=tmp_path, coverage_report=py("print('measured')"))
+
+    result = run_check("coverage", config)
+
+    assert not result.ok
+    assert result.source == "unready"
+
+
+def test_an_unimported_godot_project_still_lints(tmp_path: Path) -> None:
+    """gdlint reads source text; blocking it would stop a check that works."""
+    godot_project(tmp_path)
+    verify_config(tmp_path, lint=py("print('linted')"))
+
+    result = run_check("lint", load_config(tmp_path))
+
+    assert result.ok
+    assert result.source == "config"
+
+
+def test_an_imported_godot_project_runs_its_tests(tmp_path: Path) -> None:
+    imported_godot_project(tmp_path)
+    verify_config(tmp_path, test=py("print('ran')"))
+
+    result = run_check("test", load_config(tmp_path))
+
+    assert result.ok
+    assert result.source == "config"
+
+
+def test_an_empty_godot_cache_directory_is_not_an_import(tmp_path: Path) -> None:
+    """The directory exists long before the import that fills it."""
+    godot_project(tmp_path)
+    (tmp_path / ".godot").mkdir()
+
+    assert run_check("test", load_config(tmp_path)).source == "unready"
+
+
+def test_a_project_that_configures_test_itself_gets_no_invented_binary(tmp_path: Path) -> None:
+    """The preset's `godot` is not this project's engine, so it is not named."""
+    godot_project(tmp_path)
+    verify_config(tmp_path, test=py("print('ran')"))
+
+    result = run_check("test", load_config(tmp_path))
+
+    assert result.source == "unready"
+    assert "godot --headless" not in result.output
+    assert "--headless --path . --import" in result.output
+
+
+def test_the_import_precondition_only_applies_to_godot(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    verify_config(tmp_path, test=py("print('ran')"))
+
+    assert run_check("test", load_config(tmp_path)).ok
+
+
+def test_an_unimported_godot_project_reports_unready_from_run_all(tmp_path: Path) -> None:
+    godot_project(tmp_path)
+    verify_config(tmp_path, lint=py("print('linted')"), test=py("print('ran')"))
+
+    results = {result.kind: result for result in run_all(load_config(tmp_path))}
+
+    assert results["test"].source == "unready"
+    assert results["lint"].ok
