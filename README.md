@@ -75,6 +75,46 @@ aborted run from where it stopped.
     ultraloom resume <id> --answer "yes"
     ultraloom replay <id>      # re-derive the run from its journal, no model call
 
+### verify-until-green
+
+The flow ultraloom ships with. It runs the checks, hands every red one to the
+repairer, and runs them again — until everything is green, until nothing moves
+any more, or until the round ceiling is reached.
+
+    ultraloom run verify-until-green
+    ultraloom run verify-until-green --checks lint,types
+    ultraloom run verify-until-green --checks quick --max-rounds 5
+
+`--checks` takes a comma-separated list of check kinds, or the name of a
+profile from `[verify.profiles]`. Left out, the flow runs every check.
+`--max-rounds` caps the repair rounds; left out, the flow's own limit applies.
+Both are rejected with a message naming what was expected, so a typo never
+turns into a long run.
+
+The repairer may not touch the paths in `[verify].tests` — a check that goes
+green because its test was edited is the one repair worth nothing. Coverage is
+never repaired at all, for the same reason: closing a coverage gap means
+writing tests.
+
+```toml
+[verify]
+# Required by this flow: the paths the repairer must leave alone.
+tests = ["tests"]
+# Seconds a single check may take before it is cut off.
+timeout = 600
+
+[verify.profiles]
+quick = ["lint", "types"]
+full = ["lint", "types", "test", "coverage"]
+```
+
+Exit codes: `0` green, `1` still red after the last round, `3` waiting at an
+approval point, `4` the repairer touched a protected test path and the run was
+stopped.
+
+Die ausführliche Beschreibung des Ablaufs steht in
+`docs/abläufe/verify-until-green.md`.
+
 ### Writing a flow
 
 A flow is a Python module at `.ultraloom/flows/<name>.py`. Its name must be a
@@ -135,6 +175,7 @@ changing it needs.
 | 1 | a check failed, or the command could not be carried out |
 | 2 | argparse rejected the command line (its own convention) |
 | 3 | the flow paused at an approval point and is waiting for an answer |
+| 4 | a flow stopped itself; verify-until-green uses it for a touched test path |
 
 ## Licence
 

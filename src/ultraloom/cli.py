@@ -87,6 +87,17 @@ def _parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", parents=[common], help="run a flow from its start")
     run.add_argument("flow")
     run.add_argument("--no-model", action="store_true", help="run without a model, for diagnosis")
+    run.add_argument(
+        "--checks",
+        default=None,
+        help="which checks to run: a comma-separated list, or a profile from [verify.profiles]",
+    )
+    run.add_argument(
+        "--max-rounds",
+        type=int,
+        default=None,
+        help="how many repair rounds a flow may take (default: the flow's own limit)",
+    )
 
     show = subparsers.add_parser("show", parents=[common], help="print a run's journal")
     show.add_argument("run_id")

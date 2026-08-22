@@ -504,3 +504,84 @@ def test_run_builds_a_flow_that_defines_build(
 
     assert code == 0
     assert "done" in capsys.readouterr().out
+
+
+A_FLOW_THAT_ECHOES_ITS_OPTIONS = '''
+"""A flow that asserts what the command line handed it."""
+
+from dataclasses import dataclass
+
+from ultraloom.discovery import LoadedFlow
+from ultraloom.graph import END, CodeNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Payload:
+    note: str = ""
+
+
+def build(context):
+    assert context.options["checks"] == "lint,types"
+    assert context.options["max_rounds"] == "2", repr(context.options["max_rounds"])
+    flow = Graph("echo_options", start="only")
+    flow.add(CodeNode("only", lambda _data: {"note": "seen"}))
+    flow.edge("only", END)
+    return LoadedFlow(flow, Payload())
+'''
+
+
+A_FLOW_THAT_ECHOES_NOTHING = '''
+"""A flow that asserts the options are absent when nobody passed any."""
+
+from dataclasses import dataclass
+
+from ultraloom.discovery import LoadedFlow
+from ultraloom.graph import END, CodeNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Payload:
+    note: str = ""
+
+
+def build(context):
+    assert context.options == {}, repr(context.options)
+    flow = Graph("plain_options", start="only")
+    flow.add(CodeNode("only", lambda _data: {"note": "seen"}))
+    flow.edge("only", END)
+    return LoadedFlow(flow, Payload())
+'''
+
+
+def test_the_options_reach_the_flow_as_strings(tmp_path: Path) -> None:
+    """`--max-rounds 2` must arrive as "2", not as the int argparse parsed."""
+    write_flow(tmp_path, "echo_options", A_FLOW_THAT_ECHOES_ITS_OPTIONS)
+
+    code = main(
+        [
+            "run",
+            "echo_options",
+            "--root",
+            str(tmp_path),
+            "--no-model",
+            "--checks",
+            "lint,types",
+            "--max-rounds",
+            "2",
+        ]
+    )
+
+    assert code == 0
+
+
+def test_a_flow_without_the_options_is_unaffected(tmp_path: Path) -> None:
+    write_flow(tmp_path, "plain_options", A_FLOW_THAT_ECHOES_NOTHING)
+
+    assert main(["run", "plain_options", "--root", str(tmp_path), "--no-model"]) == 0
+
+
+def test_max_rounds_must_be_a_number(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as raised:
+        main(["run", "anything", "--root", str(tmp_path), "--max-rounds", "soon"])
+
+    assert raised.value.code == 2, "argparse's own usage error"
