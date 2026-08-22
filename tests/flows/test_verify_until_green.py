@@ -1,5 +1,6 @@
-"""Tests for the verify-until-green flow's state and its check and repair nodes."""
+"""Tests for the verify-until-green flow's state and its check, repair and guard nodes."""
 
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -11,9 +12,12 @@ from ultraloom.flows.verify_until_green import (
     CheckRunner,
     RepairResult,
     VerifyState,
+    changed_files,
     make_check,
+    make_guard,
     make_repair,
 )
+from ultraloom.runner import FlowExit
 
 
 def _config() -> Config:
@@ -140,3 +144,79 @@ def test_a_reply_of_the_wrong_type_is_refused() -> None:
 
     with pytest.raises(TypeError, match="RepairResult"):
         node.apply(VerifyState(), "I fixed it")
+
+
+def test_a_source_only_change_passes_and_is_recorded() -> None:
+    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("src/ultraloom/cli.py",))
+
+    delta = guard(VerifyState())
+
+    assert delta["touched"] == ("src/ultraloom/cli.py",)
+
+
+def test_a_touched_test_file_stops_the_run_with_code_4() -> None:
+    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("tests/test_cli.py",))
+
+    with pytest.raises(FlowExit) as raised:
+        guard(VerifyState())
+
+    assert raised.value.code == 4
+    assert "tests/test_cli.py" in str(raised.value)
+
+
+def test_a_prefix_match_is_not_a_path_match() -> None:
+    # "tests/" must not forgive "tests_helper.py" and must not catch "testsuite/".
+    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("testsuite/thing.py",))
+
+    assert guard(VerifyState())["touched"] == ("testsuite/thing.py",)
+
+
+def test_a_single_file_may_be_protected() -> None:
+    guard = make_guard(Path("."), ("conftest.py",), differ=lambda _root: ("conftest.py",))
+
+    with pytest.raises(FlowExit):
+        guard(VerifyState())
+
+
+def test_a_file_next_to_a_protected_one_is_not_protected() -> None:
+    guard = make_guard(Path("."), ("conftest.py",), differ=lambda _root: ("conftest_helper.py",))
+
+    assert guard(VerifyState())["touched"] == ("conftest_helper.py",)
+
+
+def test_nothing_changed_is_an_empty_record_not_a_failure() -> None:
+    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ())
+
+    assert guard(VerifyState())["touched"] == ()
+
+
+def test_a_guard_without_test_paths_is_refused() -> None:
+    with pytest.raises(ValueError, match="test_paths"):
+        make_guard(Path("."), ())
+
+
+def test_changed_files_reads_git(tmp_path: Path) -> None:
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert changed_files(tmp_path) == ("a.py",)
+
+
+def test_changed_files_survives_a_directory_that_is_no_repository(tmp_path: Path) -> None:
+    # Not a crash and not silence: an empty answer here would let the guard
+    # wave through a repair pass it could not see.
+    with pytest.raises(FlowExit) as raised:
+        changed_files(tmp_path / "nowhere")
+
+    assert raised.value.code == 4
+
+
+def test_changed_files_survives_a_directory_outside_any_repository(tmp_path: Path) -> None:
+    """The other unanswerable case: the directory is there, but git refuses it."""
+    outside = tmp_path / "plain"
+    outside.mkdir()
+
+    with pytest.raises(FlowExit) as raised:
+        changed_files(outside)
+
+    assert raised.value.code == 4

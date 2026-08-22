@@ -7,16 +7,22 @@ what lets the same flow run in a Python package and in a Godot game.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from ultraloom.checks import CheckResult, run_check
 from ultraloom.config import Config
 from ultraloom.graph import AgentNode
+from ultraloom.runner import FlowExit
 from ultraloom.state import Delta
 
 type CheckRunner = Callable[[str, Config], CheckResult]
+type Differ = Callable[[Path], tuple[str, ...]]
+
+_EXIT_TOUCHED_A_TEST = 4
 
 # Red checks the repairer is not allowed to close. Closing a coverage gap means
 # writing tests, and writing tests is exactly what the guard forbids -- so a
@@ -161,3 +167,85 @@ def make_repair(test_paths: tuple[str, ...]) -> AgentNode[VerifyState]:
         effort="high",
         max_visits=5,
     )
+
+
+def changed_files(root: Path) -> tuple[str, ...]:
+    """Every path git reports as changed, added or untracked below `root`.
+
+    `status` and not `diff`, because a repairer may add a file, and an
+    untracked file is invisible to `diff`. `-z` because a path holding
+    non-ASCII comes back quoted otherwise, and `-uall` because the default
+    collapses a whole untracked directory into one entry that is not a path to
+    any file.
+    """
+    try:
+        result = subprocess.run(
+            ("git", "status", "--porcelain", "-z", "-uall"),
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError as error:
+        # A directory that is not there never reaches a return code: the spawn
+        # itself fails. Same answer as a non-zero one -- see below.
+        raise FlowExit(
+            _EXIT_TOUCHED_A_TEST, f"cannot inspect the working tree in {root}: {error}"
+        ) from error
+    if result.returncode != 0:
+        # A guard that cannot see the working tree must stop the run. Reading
+        # an unanswerable question as "nothing changed" would disable exactly
+        # the rule this node exists for.
+        raise FlowExit(
+            _EXIT_TOUCHED_A_TEST,
+            f"cannot inspect the working tree in {root}: {result.stderr.strip()}",
+        )
+    # Each entry is "XY path"; a rename adds its original path as its own entry.
+    return tuple(entry[3:] for entry in result.stdout.split("\0") if len(entry) > 3)
+
+
+def _is_protected(path: str, test_paths: tuple[str, ...]) -> bool:
+    """Whether one reported path is the protected path itself or lies below it.
+
+    PurePosixPath and not Path: git reports forward slashes on every platform,
+    so the comparison is a POSIX one even where the flow runs on Windows.
+    Comparing whole segments is the point -- a plain prefix test would let
+    "tests/" catch "testsuite/thing.py".
+    """
+    candidate = PurePosixPath(path)
+    for protected in test_paths:
+        target = PurePosixPath(protected)
+        if candidate == target or target in candidate.parents:
+            return True
+    return False
+
+
+def make_guard(
+    root: Path, test_paths: tuple[str, ...], differ: Differ = changed_files
+) -> Callable[[VerifyState], Delta]:
+    """The `guard` node: what the repairer did, measured against what it may do.
+
+    In a node and not in the tool profile: a profile is a coarse permission and
+    knows no paths, and which paths hold tests is something only the project
+    knows. Reading the working tree afterwards also catches a change made by a
+    detour the profile never named.
+
+    Refuses an empty `test_paths` for the same reason `make_repair` does: a
+    guard that protects nothing is a guard that always says yes.
+    """
+    if not test_paths:
+        raise ValueError("guard needs test_paths to protect; configure [verify].tests")
+
+    def guard(_state: VerifyState) -> Delta:
+        touched = differ(root)
+        forbidden = tuple(path for path in touched if _is_protected(path, test_paths))
+        if forbidden:
+            raise FlowExit(
+                _EXIT_TOUCHED_A_TEST,
+                "the repairer changed protected files: " + ", ".join(forbidden),
+            )
+        return {"touched": touched}
+
+    return guard
