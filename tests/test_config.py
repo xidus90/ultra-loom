@@ -1,5 +1,6 @@
 """Tests for reading .ultraloom/config.toml."""
 
+import os
 import textwrap
 from pathlib import Path
 
@@ -391,3 +392,114 @@ def test_the_godot_import_precondition_is_on_unless_a_project_turns_it_off(
     write_config(tmp_path, "[verify]\ngodot_import = false\n")
 
     assert load_config(tmp_path).godot_import is False
+
+
+def test_max_parallel_defaults_to_the_available_cpus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asserting against os.process_cpu_count() would restate the implementation.
+
+    A fixed answer from the machine is what makes this test able to fail: a
+    default that ignored the affinity mask, or one that was hard-coded, would
+    not follow the patched count.
+    """
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 7)
+
+    assert load_config(tmp_path).max_parallel == 7
+
+
+def test_max_parallel_falls_back_to_one_when_the_cpus_are_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(os, "process_cpu_count", lambda: None)
+
+    assert load_config(tmp_path).max_parallel == 1
+
+
+def test_max_parallel_can_be_set(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify]\nmax_parallel = 2\n")
+
+    assert load_config(tmp_path).max_parallel == 2
+
+
+def test_max_parallel_must_be_an_integer(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify]\nmax_parallel = true\n")
+
+    with pytest.raises(ConfigError, match="must be an integer"):
+        load_config(tmp_path)
+
+
+def test_max_parallel_must_be_positive(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify]\nmax_parallel = 0\n")
+
+    with pytest.raises(ConfigError, match="greater than zero"):
+        load_config(tmp_path)
+
+
+def test_after_is_empty_without_a_config(tmp_path: Path) -> None:
+    assert load_config(tmp_path).after == {}
+
+
+def test_after_names_one_predecessor_per_kind(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.after]\ncoverage = "test"\n')
+
+    assert load_config(tmp_path).after == {"coverage": "test"}
+
+
+def test_after_refuses_a_predecessor_that_is_not_a_string(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify.after]\ncoverage = 3\n")
+
+    with pytest.raises(ConfigError, match="must be a string"):
+        load_config(tmp_path)
+
+
+def test_after_refuses_an_unknown_kind(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.after]\ncoverage = "typecheck"\n')
+
+    with pytest.raises(ConfigError, match="unknown check"):
+        load_config(tmp_path)
+
+
+def test_after_refuses_an_unknown_dependent(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.after]\ntypecheck = "test"\n')
+
+    with pytest.raises(ConfigError, match="unknown check"):
+        load_config(tmp_path)
+
+
+def test_after_allows_coverage_which_the_profile_kinds_do_not_cover(tmp_path: Path) -> None:
+    """`coverage` is a check kind, so it may stand on either side of an edge."""
+    write_config(tmp_path, '[verify.after]\ntest = "coverage"\n')
+
+    assert load_config(tmp_path).after == {"test": "coverage"}
+
+
+def test_after_refuses_a_cycle(tmp_path: Path) -> None:
+    """A cycle is caught when the file is read, never as a run that never ends."""
+    write_config(tmp_path, '[verify.after]\ncoverage = "test"\ntest = "coverage"\n')
+
+    with pytest.raises(ConfigError, match="cycle"):
+        load_config(tmp_path)
+
+
+def test_after_refuses_a_longer_cycle(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        '[verify.after]\ncoverage = "test"\ntest = "lint"\nlint = "coverage"\n',
+    )
+
+    with pytest.raises(ConfigError, match="cycle"):
+        load_config(tmp_path)
+
+
+def test_after_refuses_a_kind_that_waits_for_itself(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.after]\ntest = "test"\n')
+
+    with pytest.raises(ConfigError, match="cycle"):
+        load_config(tmp_path)
+
+
+def test_after_allows_a_chain_that_ends(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.after]\ncoverage = "test"\ntest = "lint"\n')
+
+    assert load_config(tmp_path).after == {"coverage": "test", "test": "lint"}

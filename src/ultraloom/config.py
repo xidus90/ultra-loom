@@ -7,6 +7,7 @@ boundary still profit from the language presets.
 
 from __future__ import annotations
 
+import os
 import shlex
 import tomllib
 from collections.abc import Mapping
@@ -33,6 +34,12 @@ _CHECK_KINDS = ("lint", "types", "test", "coverage")
 DEFAULT_TIMEOUT = 600
 
 
+def _default_parallelism() -> int:
+    # process_cpu_count honours a CPU affinity mask, which a build agent may
+    # well set; cpu_count would promise cores this process cannot use.
+    return os.process_cpu_count() or 1
+
+
 class ConfigError(ValueError):
     """Raised for a config file that cannot be read or means two things."""
 
@@ -51,6 +58,8 @@ class Config:
     test_paths: tuple[str, ...] = ()
     timeout: int = DEFAULT_TIMEOUT
     godot_import: bool = True
+    max_parallel: int = field(default_factory=_default_parallelism)
+    after: Mapping[str, str] = field(default_factory=dict)
     profiles: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -125,6 +134,15 @@ def load_config(root: Path) -> Config:
     if not isinstance(godot_import, bool):
         raise ConfigError(f"{path}: [verify].godot_import must be true or false")
 
+    max_parallel = verify.get("max_parallel", _default_parallelism())
+    # Booleans are ints in TOML, the same trap the timeout key has.
+    if not isinstance(max_parallel, int) or isinstance(max_parallel, bool):
+        raise ConfigError(f"{path}: [verify].max_parallel must be an integer")
+    if max_parallel <= 0:
+        raise ConfigError(f"{path}: [verify].max_parallel must be greater than zero")
+
+    after = _after_from(_table(verify, "after", path), path)
+
     profiles: dict[str, tuple[str, ...]] = {}
     for name, kinds in _table(verify, "profiles", path).items():
         if not isinstance(kinds, list) or not all(isinstance(kind, str) for kind in kinds):
@@ -165,8 +183,36 @@ def load_config(root: Path) -> Config:
         test_paths=tuple(raw_tests),
         timeout=timeout,
         godot_import=godot_import,
+        max_parallel=max_parallel,
+        after=after,
         profiles=profiles,
     )
+
+
+def _after_from(raw: Mapping[str, Any], path: Path) -> Mapping[str, str]:
+    """The dependency edges, validated so a bad one cannot become a run that hangs."""
+    edges: dict[str, str] = {}
+    for kind, predecessor in raw.items():
+        if not isinstance(predecessor, str):
+            raise ConfigError(f"{path}: [verify.after].{kind} must be a string")
+        for name in (kind, predecessor):
+            if name not in _CHECK_KINDS:
+                raise ConfigError(f"{path}: [verify.after] names unknown check {name!r}")
+        edges[kind] = predecessor
+
+    # Each kind names at most one predecessor, so following the chain from every
+    # kind is enough: a cycle is a walk that returns to something already seen.
+    # Refused here rather than in the scheduler, where it would be a run that
+    # waits for itself and never ends.
+    for kind in edges:
+        seen = {kind}
+        current = kind
+        while current in edges:
+            current = edges[current]
+            if current in seen:
+                raise ConfigError(f"{path}: [verify.after] has a cycle through {current!r}")
+            seen.add(current)
+    return edges
 
 
 def _commands_for(kind: str, value: object, path: Path) -> tuple[tuple[str, ...], bool]:
