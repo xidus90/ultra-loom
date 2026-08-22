@@ -195,10 +195,15 @@ def test_rejects_a_profile_naming_an_unknown_check(tmp_path: Path) -> None:
     ("body", "message"),
     [
         ("[verify]\ntests = 'tests/'\n", r"\[verify\].tests must be a list of strings"),
+        # The right half of each `or`: a list whose elements are not all
+        # strings. The `not isinstance(..., list)` case above short-circuits
+        # before `all(...)` ever sees an element.
+        ("[verify]\ntests = ['tests/', 1]\n", r"\[verify\].tests must be a list of strings"),
         ("[verify]\ntimeout = '90'\n", r"\[verify\].timeout must be an integer"),
         ("[verify]\ntimeout = 0\n", r"\[verify\].timeout must be greater than zero"),
         ("[verify]\ntimeout = true\n", r"\[verify\].timeout must be an integer"),
         ("[verify.profiles]\nedit = 'lint'\n", r"\[verify.profiles\].edit must be a list"),
+        ("[verify.profiles]\nedit = ['lint', 2]\n", r"\[verify.profiles\].edit must be a list"),
     ],
 )
 def test_refuses_a_malformed_value(tmp_path: Path, body: str, message: str) -> None:
