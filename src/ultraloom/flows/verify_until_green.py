@@ -12,10 +12,12 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import cast
 
-from ultraloom.checks import CheckResult, run_check
+from ultraloom.checks import KINDS, CheckResult, run_check
 from ultraloom.config import Config
-from ultraloom.graph import AgentNode
+from ultraloom.discovery import FlowContext, LoadedFlow
+from ultraloom.graph import END, AgentNode, CodeNode, Graph
 from ultraloom.runner import FlowExit
 from ultraloom.state import Delta
 
@@ -23,6 +25,7 @@ type CheckRunner = Callable[[str, Config], CheckResult]
 type Differ = Callable[[Path], tuple[str, ...]]
 
 _EXIT_TOUCHED_A_TEST = 4
+_EXIT_STILL_RED = 1
 
 # Red checks the repairer is not allowed to close. Closing a coverage gap means
 # writing tests, and writing tests is exactly what the guard forbids -- so a
@@ -46,6 +49,7 @@ class VerifyState:
     unfixable: tuple[str, ...] = ()
     touched: tuple[str, ...] = ()
     rounds: int = 0
+    previous_failing: tuple[str, ...] = ()
 
 
 def make_check(config: Config, runner: CheckRunner = run_check) -> Callable[[VerifyState], Delta]:
@@ -68,6 +72,10 @@ def make_check(config: Config, runner: CheckRunner = run_check) -> Callable[[Ver
             "unfixable": tuple(result.kind for result in red if _out_of_reach(result)),
             "report": _render(red),
             "rounds": state.rounds + 1,
+            # What the previous pass found, saved before `failing` is
+            # overwritten: an edge condition sees one state, so "the same
+            # checks failed again" is only answerable if the state carries it.
+            "previous_failing": state.failing,
         }
 
     return check
@@ -274,3 +282,103 @@ def make_guard(
         return {"touched": touched}
 
     return guard
+
+
+def _why_red(state: VerifyState, max_rounds: int) -> str:
+    """Why the run is ending red, in the order the reasons rule each other out."""
+    if state.unfixable:
+        return (
+            f"still red and out of reach: {', '.join(state.unfixable)}. "
+            f"Closing these means writing tests, which the repairer must not do."
+        )
+    if state.rounds > max_rounds:
+        return f"still red after {max_rounds} repair rounds: {', '.join(state.failing)}"
+    return (
+        f"stagnated: {', '.join(state.failing)} failed twice over and the last "
+        f"repair pass changed nothing"
+    )
+
+
+def _stagnated(state: VerifyState) -> bool:
+    """The same checks failed again and the repair pass in between changed no file."""
+    return bool(state.failing) and state.failing == state.previous_failing and not state.touched
+
+
+def assemble(
+    config: Config,
+    root: Path,
+    check_runner: CheckRunner = run_check,
+    differ: Differ = changed_files,
+    max_rounds: int = 5,
+) -> Graph[VerifyState]:
+    """The graph, with everything it talks to passed in.
+
+    Separate from `build` so the flow's tests can put a scripted checker and a
+    scripted working tree in front of a real Runner: a flow is worth testing as
+    a flow, not as four functions that were each fine on their own.
+    """
+
+    def report_red(state: VerifyState) -> Delta:
+        raise FlowExit(_EXIT_STILL_RED, _why_red(state, max_rounds))
+
+    def out_of_rounds(state: VerifyState) -> bool:
+        return state.rounds > max_rounds
+
+    graph: Graph[VerifyState] = Graph("verify-until-green", start="check")
+    # One more than repair: the last check grades the last repair pass.
+    graph.add(CodeNode("check", make_check(config, check_runner), max_visits=max_rounds + 1))
+    graph.add(make_repair(config.test_paths))
+    graph.add(CodeNode("guard", make_guard(root, config.test_paths, differ), max_visits=max_rounds))
+    graph.add(CodeNode("report_red", report_red))
+
+    # Order matters: next_name takes the first edge whose condition holds, and
+    # an edge without one always holds. The unconditional edge goes last.
+    graph.edge("check", END, when=lambda state: not state.failing)
+    graph.edge(
+        "check",
+        "report_red",
+        when=lambda state: bool(state.unfixable) or _stagnated(state) or out_of_rounds(state),
+    )
+    graph.edge("check", "repair")
+    graph.edge("repair", "guard")
+    graph.edge("guard", "check")
+    # Never taken -- report_red always raises. It is here because validate()
+    # refuses a node with no way out, and a dead end is not a way out.
+    graph.edge("report_red", END)
+    return graph
+
+
+def build(context: FlowContext) -> LoadedFlow:
+    """Assemble the flow for one project and one command line."""
+    config = context.config
+    if not config.test_paths:
+        raise ValueError(
+            "verify-until-green needs [verify].tests in .ultraloom/config.toml: "
+            "the paths the repairer must not touch. Without it there is nothing "
+            "stopping a failing test from being edited away."
+        )
+    kinds = _kinds_from(context.options.get("checks"), config)
+    max_rounds = int(context.options.get("max_rounds", 5))
+    graph = assemble(config, context.root, max_rounds=max_rounds)
+    # LoadedFlow holds any flow's graph and therefore types it over `object`,
+    # which Graph -- being mutable -- is invariant in. The cast is the erasure
+    # discovery performs on every flow it loads; every node in this graph still
+    # only ever sees a VerifyState.
+    return LoadedFlow(cast(Graph[object], graph), VerifyState(kinds=kinds))
+
+
+def _kinds_from(requested: str | None, config: Config) -> tuple[str, ...]:
+    """What `--checks` asked for: a profile name, a list, or everything."""
+    if requested is None:
+        return KINDS
+    if requested in config.profiles:
+        return config.profiles[requested]
+    kinds = tuple(part.strip() for part in requested.split(",") if part.strip())
+    unknown = [kind for kind in kinds if kind not in KINDS]
+    if unknown:
+        known = ", ".join(KINDS)
+        profiles = ", ".join(sorted(config.profiles)) or "none"
+        raise ValueError(
+            f"unknown check {unknown[0]!r}; known checks: {known}; profiles: {profiles}"
+        )
+    return kinds

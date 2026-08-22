@@ -1,23 +1,30 @@
 """Tests for the verify-until-green flow's state and its check, repair and guard nodes."""
 
 import subprocess
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-from ultraloom.checks import CheckResult
+from ultraloom.checks import KINDS, CheckResult
 from ultraloom.config import Config
+from ultraloom.discovery import FlowContext
 from ultraloom.flows.verify_until_green import (
     CheckRunner,
     RepairResult,
     VerifyState,
+    assemble,
+    build,
     changed_files,
     make_check,
     make_guard,
     make_repair,
 )
-from ultraloom.runner import FlowExit
+from ultraloom.journal import Journal
+from ultraloom.model.fake import FakeModel
+from ultraloom.model.port import Reply
+from ultraloom.runner import FlowExit, Result, Runner
 
 
 def _config() -> Config:
@@ -289,3 +296,243 @@ def test_an_untracked_directory_is_reported_file_by_file(tmp_path: Path) -> None
     (repo / "new" / "two.py").write_text("b = 2\n", encoding="utf-8")
 
     assert set(changed_files(repo)) == {"new/one.py", "new/two.py"}
+
+
+class _Passes:
+    """One outcome mapping per round, handed to every kind in that round.
+
+    The check node runs its kinds concurrently, so a plain iterator would give
+    the two kinds of one round two different rounds' answers.
+    """
+
+    def __init__(self, outcomes: list[Mapping[str, bool]]) -> None:
+        self._outcomes = outcomes
+        self._round = -1
+        self._seen: set[str] = set()
+        self._lock = threading.Lock()
+
+    def outcome(self, kind: str) -> bool:
+        with self._lock:
+            if kind in self._seen or self._round < 0:
+                self._round += 1
+                self._seen = set()
+            self._seen.add(kind)
+            current = self._outcomes[min(self._round, len(self._outcomes) - 1)]
+        return current.get(kind, True)
+
+
+def _run_flow(
+    tmp_path: Path,
+    outcomes: list[Mapping[str, bool]],
+    repairs: list[RepairResult] | None = None,
+    touched: list[tuple[str, ...]] | None = None,
+    kinds: tuple[str, ...] = ("lint",),
+    max_rounds: int = 5,
+    initial: VerifyState | None = None,
+    model: FakeModel | None = None,
+) -> Result[VerifyState]:
+    """Run the real graph against a scripted checker and a scripted working tree.
+
+    The whole flow, not one node: the edges are where this task's decisions
+    live, and a node-by-node test would not touch a single one of them.
+    """
+    passes = _Passes(outcomes)
+    diffs = iter(touched or [])
+
+    def runner(kind: str, _config: Config) -> CheckResult:
+        ok = passes.outcome(kind)
+        return CheckResult(kind, ok, "" if ok else f"{kind} is unhappy", "test")
+
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=runner,
+        differ=lambda _root: next(diffs, ()),
+        max_rounds=max_rounds,
+    )
+    if model is None:
+        model = FakeModel([Reply(repair, tokens=0) for repair in repairs or []])
+    state = initial if initial is not None else VerifyState(kinds=kinds)
+    return Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(state)
+
+
+def test_a_green_first_pass_ends_the_run(tmp_path: Path) -> None:
+    result = _run_flow(tmp_path, outcomes=[{"lint": True}])
+
+    assert result.status == "done"
+    assert result.state.data.rounds == 1
+
+
+def test_red_then_repaired_then_green(tmp_path: Path) -> None:
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False}, {"lint": True}],
+        repairs=[RepairResult("fixed the line", changed=True)],
+        touched=[("src/thing.py",)],
+    )
+
+    assert result.status == "done"
+    assert result.state.data.rounds == 2
+
+
+def test_a_repair_that_only_helps_on_the_second_try_still_ends_green(tmp_path: Path) -> None:
+    """Not every fixture may succeed on its first repair, or the loop goes untested."""
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False}, {"lint": False}, {"lint": True}],
+        repairs=[
+            RepairResult("moved the import", changed=True),
+            RepairResult("that was the real cause", changed=True),
+        ],
+        touched=[("src/thing.py",), ("src/other.py",)],
+    )
+
+    assert result.status == "done"
+    assert result.state.data.rounds == 3
+
+
+def test_one_kind_going_green_while_another_stays_red_keeps_repairing(tmp_path: Path) -> None:
+    result = _run_flow(
+        tmp_path,
+        outcomes=[
+            {"lint": False, "types": False},
+            {"lint": True, "types": False},
+            {"lint": True, "types": True},
+        ],
+        kinds=("lint", "types"),
+        repairs=[
+            RepairResult("lint first", changed=True),
+            RepairResult("types next", changed=True),
+        ],
+        touched=[("src/a.py",), ("src/b.py",)],
+    )
+
+    assert result.status == "done"
+    assert result.state.data.rounds == 3
+
+
+def test_two_identical_red_passes_without_a_change_stop_the_run(tmp_path: Path) -> None:
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False}, {"lint": False}],
+        repairs=[RepairResult("I could not fix it", changed=False)],
+        touched=[()],
+    )
+
+    assert result.status == "error"
+    assert result.exit_code == 1
+    assert "stagnated" in (result.detail or "")
+
+
+def test_only_coverage_red_never_calls_the_model(tmp_path: Path) -> None:
+    model = FakeModel([])
+    result = _run_flow(tmp_path, outcomes=[{"coverage": False}], kinds=("coverage",), model=model)
+
+    assert result.exit_code == 1
+    assert "coverage" in (result.detail or "")
+    assert model.seen == ()
+
+
+def test_a_touched_test_file_ends_the_run_with_four(tmp_path: Path) -> None:
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False}],
+        repairs=[RepairResult("rewrote the test", changed=True)],
+        touched=[("tests/test_thing.py",)],
+    )
+
+    assert result.exit_code == 4
+
+
+def test_the_round_ceiling_ends_the_run(tmp_path: Path) -> None:
+    # Five repairs that each change something and never help.
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False}] * 7,
+        repairs=[RepairResult(f"attempt {n}", changed=True) for n in range(6)],
+        touched=[(f"src/attempt_{n}.py",) for n in range(6)],
+        max_rounds=5,
+    )
+
+    assert result.exit_code == 1
+    assert result.state.data.rounds == 6  # five repairs, six checks
+    assert "5 repair rounds" in (result.detail or "")
+
+
+def test_a_state_that_starts_mid_run_is_not_a_special_case(tmp_path: Path) -> None:
+    # Deliberately not the shape every other fixture here has: the plan's own
+    # fixtures are suggestions, and a run that starts at rounds=2 is the case a
+    # resume produces.
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": True}],
+        initial=VerifyState(kinds=("lint",), rounds=2, previous_failing=("lint",)),
+    )
+
+    assert result.status == "done"
+    assert result.state.data.rounds == 3
+
+
+def test_a_resumed_state_that_is_still_red_repairs_rather_than_stagnating(tmp_path: Path) -> None:
+    """A remembered failure alone is not stagnation: the last pass did change something."""
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False}, {"lint": True}],
+        initial=VerifyState(
+            kinds=("lint",), rounds=3, previous_failing=("lint",), touched=("src/thing.py",)
+        ),
+        repairs=[RepairResult("second look", changed=True)],
+        touched=[("src/thing.py",)],
+    )
+
+    assert result.status == "done"
+    assert result.state.data.rounds == 5
+
+
+def test_a_missing_test_paths_setting_refuses_to_start(tmp_path: Path) -> None:
+    context = FlowContext(root=tmp_path, config=Config(root=tmp_path), options={})
+
+    with pytest.raises(ValueError, match=r"\[verify\].tests"):
+        build(context)
+
+
+def _built_kinds(context: FlowContext) -> tuple[str, ...]:
+    """The kinds `build` starts from, narrowed: a LoadedFlow types its state as `object`."""
+    initial = build(context).initial
+    assert isinstance(initial, VerifyState)
+    return initial.kinds
+
+
+def test_the_checks_option_may_name_a_profile(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, test_paths=("tests/",), profiles={"edit": ("lint", "types")})
+    context = FlowContext(root=tmp_path, config=config, options={"checks": "edit"})
+
+    assert _built_kinds(context) == ("lint", "types")
+
+
+def test_the_checks_option_may_be_a_list(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, test_paths=("tests/",))
+    context = FlowContext(root=tmp_path, config=config, options={"checks": "lint,types"})
+
+    assert _built_kinds(context) == ("lint", "types")
+
+
+def test_without_a_checks_option_every_known_kind_runs(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, test_paths=("tests/",))
+
+    assert _built_kinds(FlowContext(root=tmp_path, config=config)) == KINDS
+
+
+def test_an_unknown_check_name_is_refused_before_the_run(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, test_paths=("tests/",))
+    context = FlowContext(root=tmp_path, config=config, options={"checks": "spelling"})
+
+    with pytest.raises(ValueError, match="unknown check 'spelling'"):
+        build(context)
+
+
+def test_the_round_ceiling_may_be_raised_from_the_command_line(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, test_paths=("tests/",))
+    context = FlowContext(root=tmp_path, config=config, options={"max_rounds": "9"})
+
+    build(context).graph.validate()
