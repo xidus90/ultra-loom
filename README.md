@@ -91,12 +91,14 @@ one command, a list is several, and a table is the full form with `commands`
 under the same name is something TOML cannot express, so the parser refuses it
 before ultraloom sees it.
 
-`coverage` takes **none** of the three: it is configured through
-`[verify.coverage].report`, which already carries the command. A `coverage`
-key under `[verify]` is not read and, today, not refused either — it is
-silently ignored and the check falls back on a script or the preset. The table
-form at least says so: `[verify.coverage]` refuses `commands` and `threaded`
-by name and points at `report`.
+`coverage` takes **none** of the three, and says so in every shape: a string or
+a list under `[verify]` is refused with "[coverage] must be a table" (the
+message names the leaf, not the full heading),
+and a `[verify.coverage]` carrying `commands` or `threaded` is refused by name
+with a pointer at `report`. That is where the command belongs. What is *not*
+caught is a typo inside `[verify.coverage]` — a key that is neither `report`
+nor `threshold` is ignored without a word, so `reprot = "…"` leaves the check
+on its script or its preset.
 
 Every command of a kind runs, including the ones after the first red one: the
 repairer is owed the whole list of findings, and half a list costs another paid
@@ -122,19 +124,23 @@ them and maps a kind onto the single kind it reads from.
 | --- | --- | --- |
 | Python | lint, types, test | coverage |
 | Node | lint, types, test, coverage | — |
-| GDScript | lint, test | (empty) |
+| GDScript | lint, test | (none) |
 
 Node stays single-stage because `vitest run --coverage` measures and reports in
-one run.
+one run. The table shows what the *presets* answer for a run that asks for
+every kind; a project that configures a kind itself gets its own command, and a
+stage only exists for the kinds actually requested.
 
 The GDScript row is short because two presets are missing, and neither is an
 oversight in this table. There is no `types` preset — GDScript has no type
-checker to name, and `check types` in a Godot project is red with
-"GDScript has no types tool — a known limitation, not a passed check". And
+checker to name, so `check types` in a Godot project falls through to a red
+"GDScript has no types tool — a known limitation, not a passed check" — unless
+the project names a command of its own under `[verify].types` or puts a script
+at `.ultraloom/checks/types.*`, both of which are found first. And
 there is no `coverage` preset — the tools that measure GDScript coverage are an
 editor addon and a project-owned script, neither of which is a command another
-project could run. Stage 1 is therefore genuinely empty until the project fills
-it: a Godot project that measures coverage names its report command under
+project could run. There is therefore no second stage at all until the project
+makes one: a Godot project that measures coverage names its report command under
 `[verify.coverage].report` **and** its order under `[verify.after]` —
 `coverage = "test"` — itself. Both gaps are gaps in the presets, not in this
 page.

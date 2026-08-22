@@ -395,6 +395,18 @@ eine Reihenfolge ohne ein Kommando trägt, und damit eine neue Sorte
 Preset-Eintrag. Kosten: eine Wiederholung je Projekt und ein Godot-Projekt, das
 sie vergisst, liest einen Bericht aus dem vorigen Lauf.
 
+**Eine Fehlermeldung nennt ein Kapitel, das in keiner Datei steht.** `_table`
+hat den Parameter `label` genau dafür — die verschachtelte Tabelle wird unter
+ihrem vollen Kapitelnamen abgelehnt, nicht unter ihrem Blatt. Der Aufruf für
+`[verify.coverage]` gibt ihn nicht mit: `coverage = "x"` unter `[verify]`
+scheitert mit `[coverage] must be a table`, und `[coverage]` kommt in der Datei
+nirgends vor. Einzeilige Reparatur, aber sie ändert eine Meldung, an der Tests
+hängen können — deshalb hier und nicht nebenbei in einer Doku-Aufgabe.
+Verwandt und ausdrücklich *kein* Fehler: ein Tippfehler **innerhalb** von
+`[verify.coverage]` (`reprot` statt `report`) wird still geschluckt, weil eine
+unbekannte Schlüssel abzulehnen eine eigene Entscheidung über Vorwärts-
+kompatibilität wäre. Der README benennt beides.
+
 **Was der Umbau noch nicht gemessen hat.** Der `precommit`-Lauf in space ist
 seither nicht wiederholt worden. Er wäre die erste Messung von zwei Zahlen, die
 dieser Umfang behauptet: was `threaded = true` über zwei gleichrangige
