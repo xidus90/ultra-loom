@@ -175,3 +175,95 @@ und keine Kante darf fehlen, und die Zeichnung darf keinen Knoten führen, den
 der Graph nicht hat. Der Test gilt für jeden mitgelieferten Ablauf, nicht nur
 für diesen. Eine Dokumentationsseite, die niemand prüft, ist in sechs Monaten
 eine Lüge.
+
+## Was echte Läufe gezeigt haben
+
+Am 22.08.2026 hat ultraloom sich zum ersten Mal selbst geprüft — fünf Läufe auf
+diesem Repository, Windows 11, Python 3.13.14, mit einem echten Modell im
+`repair`-Knoten. Die Zahlen stehen hier, weil ein Ablauf, dessen erste echte
+Zahlen niemand aufgeschrieben hat, beim nächsten Mal wieder geraten wird.
+
+| Lauf | Aufruf | Exit | Runden | Token | Laufzeit |
+| --- | --- | --- | --- | --- | --- |
+| 0001 | `--checks edit`, sauberer Baum | 0 | 1 | 0 | 0,6 s |
+| 0002 | `--checks edit`, Fehler in `checks.py` | 0 | 2 | 977 | 24,1 s |
+| 0003 | `--checks precommit`, falscher Test | 1 | 1 | 0 | 10,1 s |
+| 0004 | `--checks lint,types,test`, falscher Test | 4 | 1 | 2254 | 49,5 s |
+| 0005 | `--checks precommit`, sauberer Baum | 0 | 1 | 0 | 9,2 s |
+
+Der Ablaufname auf der Kommandozeile ist `verify_until_green` mit Unterstrichen
+— ein Ablaufname ist ein Python-Identifier. `verify-until-green` wird mit
+„is not a valid flow name; a flow name is an identifier" und Exit 1 abgelehnt.
+Der Graph heißt intern weiter `verify-until-green`; nur der Aufruf nicht.
+
+### Der Reparaturlauf trägt
+
+Lauf 0002 bekam eine tote lokale Variable mit falscher Annotation
+(`fallback: int = "utf-8"`) in `_decode` vorgesetzt — rot bei ruff (F841) und
+bei mypy (`[assignment]`). Der Reparateur hat genau die eine Zeile gelöscht,
+nichts sonst angefasst und in der Zusammenfassung beide Befunde auf dieselbe
+Ursache zurückgeführt. 977 Token, 23,0 s im Modell, eine Runde. Der Prompt trägt
+also: die Regel „so wenig ändern wie möglich" wurde eingehalten, und die
+Zusammenfassung war ohne Nachfrage verständlich.
+
+Der `check`-Knoten steht im Journal von Lauf 0002 **zweimal mit zwei
+verschiedenen Einträgen** und zwei verschiedenen `input_hash`-Werten. Das ist der
+Beweis, dass ein wiederholt besuchter Knoten nicht mehr auf seinen ersten
+Eintrag zurückfällt.
+
+Die Token-Zahl des `repair`-Eintrags war in beiden Modell-Läufen größer als 0
+(977 und 2254). Der in der Spec als unbestätigt geführte Punkt — dass
+`usage["output_tokens"]` tatsächlich gefüllt ist — ist damit am lebenden Objekt
+bestätigt. Code-Knoten tragen erwartungsgemäß 0.
+
+### Coverage kürzt den Weg ab
+
+Lauf 0003 lief mit `precommit` und einem absichtlich falsch behaupteten Test.
+Der Reparateur wurde nie gerufen: `coverage` misst über `coverage run -m pytest`,
+und ein fehlschlagender Test macht diese Prüfung rot — rot und unreparierbar.
+Damit greift die Kante nach `report_red` schon in der ersten Runde.
+
+Das ist richtig so, hat aber eine unschöne Folge für die Meldung: sie lautet
+„still red and out of reach: coverage" und verschweigt, dass auch `test` rot
+war. Wer nur die Zeile liest, sucht den Fehler in der Coverage-Schwelle statt im
+Test. Ein Lauf, der die Reparatur wirklich erreichen soll, lässt `coverage`
+weg — `--checks lint,types,test`.
+
+### Die Wache greift, aber sie misst zu grob
+
+Lauf 0004 sollte prüfen, ob die Testsperre am lebenden Objekt hält, und endete
+mit Exit 4: „the repairer changed protected files: tests/test_checks.py".
+
+Das Journal erzählt etwas anderes. Der Reparateur hat den falschen Test korrekt
+als Befund über den Test erkannt, hat **nichts** geändert und das auch so
+zusammengefasst: die Behauptung `command.source == "config"` widerspreche dem
+Rest der Datei, in der ein blanker `pyproject.toml` als `"preset"` festgehalten
+ist. `git diff` bestätigt das — die einzige Änderung an
+`tests/test_checks.py` war die vorher von Hand eingebaute.
+
+`guard` liest `git status` über den ganzen Arbeitsbaum und hat keine Grundlinie
+vom Laufbeginn. Er kann deshalb nicht unterscheiden, was der Reparateur geändert
+hat und was schon vorher geändert war. Dasselbe zeigte sich harmloser in Lauf
+0002, wo `touched` die von Hand angelegte `.ultraloom/config.toml` enthielt.
+In der Praxis heißt das: **ein Lauf auf einem schmutzigen Arbeitsbaum, in dem
+ein geschützter Pfad geändert ist, endet immer mit Exit 4** — auch wenn der
+Reparateur sich vorbildlich verhalten hat. Die Sperre ist damit nach der
+sicheren Seite hin falsch, aber sie ist falsch. Wer sie schärfen will, nimmt
+`changed_files` vor dem ersten `repair` als Grundlinie auf und meldet nur, was
+danach dazugekommen ist.
+
+### Kleinkram
+
+- `pyproject.toml` steht in dieser Konfiguration neben `tests/` unter
+  `[verify].tests`. Der Prompt verbietet dem Reparateur zwar, Schwellen zu
+  senken, aber ein Verbot im Prompt ist eine Bitte; `guard` ist die Mechanik.
+- Der volle `precommit`-Lauf auf sauberem Baum braucht rund 9 s, fast alles
+  davon die zweimal laufende Testsuite (einmal unter `test`, einmal unter
+  `coverage`). Das ist der in Spec 9.4 bewusst bezahlte Preis.
+- Beim ersten Versuch, den Fehler für Lauf 0002 einzubauen (falsche
+  Rückgabeannotation `-> int` an `_decode`), stürzte mypy 2.3.1 reproduzierbar
+  mit „INTERNAL ERROR" ab und meldete die echten Fehler nur zum Teil. Das ist
+  ein Fehler von mypy, kein ultraloom-Befund — aber ein Hinweis darauf, dass ein
+  Prüfwerkzeug auch halbwegs kaputt antworten kann und der Bericht, der dann im
+  Prompt landet, entsprechend unbrauchbar wird. Der Lauf wurde mit einer
+  Fehlerform wiederholt, die mypy sauber meldet.

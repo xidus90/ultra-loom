@@ -8,5 +8,16 @@ lint  = "uv run ruff check ."
 types = "uv run mypy"
 test  = "uv run pytest"
 
+# Was der Reparateur nicht anfassen darf. `pyproject.toml` steht neben den
+# Tests, weil dort die Schwellen wohnen: eine gelockerte ruff-Regel oder ein
+# gesenktes `fail_under` ist derselbe Betrug wie ein abgeschwächter Test. Der
+# Prompt verbietet das zwar, aber ein Verbot im Prompt ist eine Bitte --
+# `guard` ist die Mechanik.
+tests = ["tests/", "pyproject.toml"]
+
 [verify.coverage]
 threshold = 100
+
+[verify.profiles]
+edit      = ["lint", "types"]
+precommit = ["lint", "types", "test", "coverage"]
