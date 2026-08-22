@@ -350,6 +350,9 @@ def _run_flow(
         check_runner=runner,
         differ=lambda _root: next(diffs, ()),
         max_rounds=max_rounds,
+        # Explicit, so the scripted tree does not lose its first answer to the
+        # baseline reading. What `assemble` does without one has its own test.
+        baseline=frozenset(),
     )
     if model is None:
         model = FakeModel([Reply(repair, tokens=0) for repair in repairs or []])
@@ -649,3 +652,135 @@ def test_a_single_round_allows_one_repair_and_then_ends_red(tmp_path: Path) -> N
     assert result.exit_code == _EXIT_STILL_RED
     assert result.state.data.rounds == 2  # one repair, two checks
     assert "1 repair rounds" in (result.detail or "")
+
+
+def test_a_path_dirty_before_the_run_is_not_the_repairers_doing() -> None:
+    """The whole point of the baseline: exit 4 must accuse only the repairer."""
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root: ("tests/test_cli.py",),
+        baseline=frozenset({"tests/test_cli.py"}),
+    )
+
+    assert guard(VerifyState())["touched"] == ()
+
+
+def test_a_protected_path_outside_the_baseline_still_stops_the_run() -> None:
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root: ("tests/test_cli.py", "tests/test_new.py"),
+        baseline=frozenset({"tests/test_cli.py"}),
+    )
+
+    with pytest.raises(FlowExit) as raised:
+        guard(VerifyState())
+
+    assert raised.value.code == 4
+    assert "tests/test_new.py" in str(raised.value)
+    # Only the new one: naming the pre-existing change would be the accusation
+    # the baseline exists to prevent.
+    assert "tests/test_cli.py" not in str(raised.value)
+
+
+def test_a_source_file_dirty_before_the_run_does_not_count_as_touched() -> None:
+    """`touched` feeds the stagnation check, so the baseline must leave it out."""
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root: ("src/a.py", "src/b.py"),
+        baseline=frozenset({"src/a.py"}),
+    )
+
+    assert guard(VerifyState())["touched"] == ("src/b.py",)
+
+
+def test_assemble_takes_the_baseline_once_when_it_builds_the_graph(tmp_path: Path) -> None:
+    """Once, at build time: asked again per round it would absolve the repairer."""
+    calls: list[int] = []
+
+    def differ(_root: Path) -> tuple[str, ...]:
+        calls.append(1)
+        return ("tests/test_cli.py",)
+
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=_runner({"lint": False}),
+        differ=differ,
+    )
+    model = FakeModel([Reply(RepairResult("looked around", changed=False), tokens=0)])
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
+        VerifyState(kinds=("lint",))
+    )
+
+    # The dirty test file was there before the run, so the guard lets it pass
+    # and the run ends on stagnation rather than on a false accusation.
+    assert result.exit_code == 1
+    assert "stagnated" in (result.detail or "")
+    assert len(calls) == 2  # once for the baseline, once in the guard
+
+
+def test_a_repairable_red_next_to_an_unrepairable_one_is_still_repaired(tmp_path: Path) -> None:
+    """A failing test makes coverage red too; ending there would never repair it."""
+    model = FakeModel([Reply(RepairResult("fixed the source", changed=True), tokens=7)])
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"test": False, "coverage": False}, {"test": True, "coverage": True}],
+        kinds=("test", "coverage"),
+        touched=[("src/thing.py",)],
+        model=model,
+    )
+
+    assert result.status == "done"
+    assert result.state.data.rounds == 2
+    assert len(model.seen) == 1
+
+
+def test_only_unrepairable_red_left_ends_the_run(tmp_path: Path) -> None:
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"test": False, "coverage": False}, {"test": True, "coverage": False}],
+        repairs=[RepairResult("fixed the source", changed=True)],
+        kinds=("test", "coverage"),
+        touched=[("src/thing.py",)],
+    )
+
+    assert result.exit_code == 1
+    assert "out of reach: coverage" in (result.detail or "")
+
+
+def test_a_red_exit_names_every_failing_check_not_only_the_unreachable_ones(
+    tmp_path: Path,
+) -> None:
+    """The finding from the first real run: naming only `coverage` sent the
+    reader to the threshold instead of to the test that was actually broken."""
+    result = _run_flow(
+        tmp_path,
+        outcomes=[{"lint": False, "coverage": False}] * 2,
+        repairs=[RepairResult("I could not fix it", changed=False)],
+        kinds=("lint", "coverage"),
+        touched=[()],
+    )
+
+    assert result.exit_code == 1
+    detail = result.detail or ""
+    assert "lint" in detail
+    assert "out of reach: coverage" in detail
+
+
+def test_a_tree_that_is_no_repository_does_not_stop_the_graph_from_being_built(
+    tmp_path: Path,
+) -> None:
+    """The green case never reaches the guard, so it must not die of its baseline."""
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=_runner({"lint": True}),
+    )
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=FakeModel([])).run(
+        VerifyState(kinds=("lint",))
+    )
+
+    assert result.status == "done"

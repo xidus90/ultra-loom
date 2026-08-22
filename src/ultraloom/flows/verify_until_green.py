@@ -269,7 +269,10 @@ def _is_protected(path: str, test_paths: tuple[str, ...]) -> bool:
 
 
 def make_guard(
-    root: Path, test_paths: tuple[str, ...], differ: Differ = changed_files
+    root: Path,
+    test_paths: tuple[str, ...],
+    differ: Differ = changed_files,
+    baseline: frozenset[str] = frozenset(),
 ) -> Callable[[VerifyState], Delta]:
     """The `guard` node: what the repairer did, measured against what it may do.
 
@@ -278,6 +281,19 @@ def make_guard(
     knows. Reading the working tree afterwards also catches a change made by a
     detour the profile never named.
 
+    `baseline` is what the working tree already looked like when the run
+    started. Everything in it is subtracted before a path is judged, because
+    this node answers "what did the repair agent do", not "what is dirty in
+    this tree" -- and without the baseline it answers the second question and
+    hands that answer over as if it were the first. The first real run ended on
+    exactly that: exit 4 naming a test file the agent had never opened.
+
+    The price runs the other way: a file that was already dirty and that the
+    agent then edits as well stays invisible here. That is the right way round.
+    A missed catch costs one repair the guard did not stop; a false accusation
+    costs every run on a working tree that is not pristine, which is most of
+    them.
+
     Refuses an empty `test_paths` for the same reason `make_repair` does: a
     guard that protects nothing is a guard that always says yes.
     """
@@ -285,7 +301,9 @@ def make_guard(
         raise ValueError("guard needs test_paths to protect; configure [verify].tests")
 
     def guard(_state: VerifyState) -> Delta:
-        touched = differ(root)
+        # Subtracted before anything else, so `touched` -- which feeds the
+        # stagnation check -- also counts only what this run produced.
+        touched = tuple(path for path in differ(root) if path not in baseline)
         forbidden = tuple(path for path in touched if _is_protected(path, test_paths))
         if forbidden:
             raise FlowExit(
@@ -297,18 +315,38 @@ def make_guard(
     return guard
 
 
+def _out_of_reach_only(state: VerifyState) -> bool:
+    """Whether nothing repairable is left -- the one case that ends the run early.
+
+    A subset test and not `bool(state.unfixable)`: one unrepairable check
+    standing beside repairable ones used to end the whole run, so a project
+    whose coverage check measures by running the tests never reached a repair
+    pass at all once a single test was red.
+    """
+    return bool(state.failing) and set(state.failing) <= set(state.unfixable)
+
+
 def _why_red(state: VerifyState, max_rounds: int) -> str:
     """Why the run is ending red, in the order the reasons rule each other out."""
-    if state.unfixable:
+    failing = ", ".join(state.failing)
+    if _out_of_reach_only(state):
         return (
-            f"still red and out of reach: {', '.join(state.unfixable)}. "
+            f"still red and out of reach: {failing}. "
             f"Closing these means writing tests, which the repairer must not do."
         )
-    if state.rounds > max_rounds:
-        return f"still red after {max_rounds} repair rounds: {', '.join(state.failing)}"
+    reason = (
+        f"still red after {max_rounds} repair rounds: {failing}"
+        if state.rounds > max_rounds
+        else f"stagnated: {failing} failed twice over and the last repair pass changed nothing"
+    )
+    if not state.unfixable:
+        return reason
+    # Named separately rather than left out: a reader who sees only the
+    # unrepairable half goes looking at the coverage threshold instead of at
+    # the test that is actually broken.
     return (
-        f"stagnated: {', '.join(state.failing)} failed twice over and the last "
-        f"repair pass changed nothing"
+        f"{reason}. Of these, out of reach: {', '.join(state.unfixable)} -- "
+        f"closing them means writing tests, which the repairer must not do"
     )
 
 
@@ -323,13 +361,30 @@ def assemble(
     check_runner: CheckRunner = run_check,
     differ: Differ = changed_files,
     max_rounds: int = 5,
+    baseline: frozenset[str] | None = None,
 ) -> Graph[VerifyState]:
     """The graph, with everything it talks to passed in.
 
     Separate from `build` so the flow's tests can put a scripted checker and a
     scripted working tree in front of a real Runner: a flow is worth testing as
     a flow, not as four functions that were each fine on their own.
+
+    The working tree is read once here, before the first node runs, and that
+    reading is what `guard` measures against. Taking it per round instead would
+    make every round its own baseline and absolve the repairer of what it had
+    just done. `baseline` is a parameter only so a test can put a known tree in
+    front of the graph without a scripted differ losing its first answer to it.
     """
+    if baseline is None:
+        try:
+            baseline = frozenset(differ(root))
+        except FlowExit:
+            # A tree that cannot be read is the guard's finding to report, at
+            # its own turn and with its own message. Dying of it here would
+            # also kill the green case, which never reaches the guard at all --
+            # and refusing to check a project because it is not under version
+            # control is not this flow's call to make.
+            baseline = frozenset()
 
     def report_red(state: VerifyState) -> Delta:
         raise FlowExit(_EXIT_STILL_RED, _why_red(state, max_rounds))
@@ -349,7 +404,11 @@ def assemble(
     # is red.
     graph.add(dataclasses.replace(make_repair(config.test_paths), max_visits=max_rounds + 1))
     graph.add(
-        CodeNode("guard", make_guard(root, config.test_paths, differ), max_visits=max_rounds + 1)
+        CodeNode(
+            "guard",
+            make_guard(root, config.test_paths, differ, baseline),
+            max_visits=max_rounds + 1,
+        )
     )
     graph.add(CodeNode("report_red", report_red))
 
@@ -359,7 +418,7 @@ def assemble(
     graph.edge(
         "check",
         "report_red",
-        when=lambda state: bool(state.unfixable) or _stagnated(state) or out_of_rounds(state),
+        when=lambda state: _out_of_reach_only(state) or _stagnated(state) or out_of_rounds(state),
     )
     graph.edge("check", "repair")
     graph.edge("repair", "guard")
