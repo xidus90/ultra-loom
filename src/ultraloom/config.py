@@ -18,6 +18,16 @@ CONFIG_NAME = ".ultraloom/config.toml"
 
 _KINDS = ("lint", "types", "test")
 
+# The check kinds a profile may name. Deliberately a copy of checks.KINDS and
+# not an import: config sits below checks, and test_module_boundary keeps it
+# there. test_config asserts the two lists stay equal.
+_CHECK_KINDS = ("lint", "types", "test", "coverage")
+
+# Seconds per check command. The order of magnitude space's headless Godot
+# suite needs; a project that runs longer says so rather than inheriting a
+# limit that was chosen for somebody else's tools.
+DEFAULT_TIMEOUT = 600
+
 
 class ConfigError(ValueError):
     """Raised for a config file that cannot be read or means two things."""
@@ -33,6 +43,9 @@ class Config:
     coverage_report: str | None = None
     coverage_threshold: int = 100
     mcp_servers: tuple[str, ...] = ()
+    test_paths: tuple[str, ...] = ()
+    timeout: int = DEFAULT_TIMEOUT
+    profiles: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def load_config(root: Path) -> Config:
@@ -63,6 +76,29 @@ def load_config(root: Path) -> Config:
             raise ConfigError(f"{path}: [verify].{kind} must be a string")
         commands[kind] = value
 
+    raw_tests = verify.get("tests", [])
+    if not isinstance(raw_tests, list) or not all(isinstance(item, str) for item in raw_tests):
+        raise ConfigError(f"{path}: [verify].tests must be a list of strings")
+
+    timeout = verify.get("timeout", DEFAULT_TIMEOUT)
+    # TOML's booleans are Python ints, and `timeout = true` is nobody's intent.
+    if not isinstance(timeout, int) or isinstance(timeout, bool):
+        raise ConfigError(f"{path}: [verify].timeout must be an integer")
+    if timeout <= 0:
+        raise ConfigError(f"{path}: [verify].timeout must be greater than zero")
+
+    profiles: dict[str, tuple[str, ...]] = {}
+    for name, kinds in _table(verify, "profiles", path).items():
+        if not isinstance(kinds, list) or not all(isinstance(kind, str) for kind in kinds):
+            raise ConfigError(f"{path}: [verify.profiles].{name} must be a list of strings")
+        for kind in kinds:
+            # Caught here rather than at run time: a profile is read once, at
+            # the start of a run, and a typo that only surfaces as a red check
+            # halfway through looks like a finding rather than a mistake.
+            if kind not in _CHECK_KINDS:
+                raise ConfigError(f"{path}: [verify.profiles].{name} names unknown check {kind!r}")
+        profiles[name] = tuple(kinds)
+
     threshold = coverage.get("threshold", 100)
     # TOML's booleans are Python ints, and a threshold of one percent is nobody's intent.
     if not isinstance(threshold, int) or isinstance(threshold, bool):
@@ -87,6 +123,9 @@ def load_config(root: Path) -> Config:
         coverage_report=report,
         coverage_threshold=threshold,
         mcp_servers=tuple(servers),
+        test_paths=tuple(raw_tests),
+        timeout=timeout,
+        profiles=profiles,
     )
 
 

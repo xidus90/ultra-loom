@@ -1,5 +1,6 @@
 """Tests for reading .ultraloom/config.toml."""
 
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from ultraloom.config import CONFIG_NAME, Config, ConfigError, load_config
 def write_config(root: Path, body: str) -> None:
     target = root / ".ultraloom" / "config.toml"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(body, encoding="utf-8")
+    target.write_text(textwrap.dedent(body), encoding="utf-8")
 
 
 def test_a_project_without_a_config_gets_empty_defaults(tmp_path: Path) -> None:
@@ -149,3 +150,70 @@ def test_a_config_path_that_is_a_directory_is_not_a_config(tmp_path: Path) -> No
     (tmp_path / CONFIG_NAME).mkdir(parents=True)
 
     assert load_config(tmp_path) == Config(tmp_path)
+
+
+def test_reads_test_paths_timeout_and_profiles(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        """
+        [verify]
+        tests = ["tests/", "conftest.py"]
+        timeout = 90
+
+        [verify.profiles]
+        edit = ["lint", "types"]
+        precommit = ["lint", "types", "test", "coverage"]
+        """,
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.test_paths == ("tests/", "conftest.py")
+    assert config.timeout == 90
+    assert config.profiles["edit"] == ("lint", "types")
+    assert config.profiles["precommit"] == ("lint", "types", "test", "coverage")
+
+
+def test_defaults_when_the_keys_are_absent(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify]\nlint = 'uvx ruff check .'\n")
+
+    config = load_config(tmp_path)
+
+    assert config.test_paths == ()
+    assert config.timeout == 600
+    assert config.profiles == {}
+
+
+def test_rejects_a_profile_naming_an_unknown_check(tmp_path: Path) -> None:
+    write_config(tmp_path, "[verify.profiles]\nedit = ['lint', 'spelling']\n")
+
+    with pytest.raises(ConfigError, match="unknown check 'spelling'"):
+        load_config(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("[verify]\ntests = 'tests/'\n", r"\[verify\].tests must be a list of strings"),
+        ("[verify]\ntimeout = '90'\n", r"\[verify\].timeout must be an integer"),
+        ("[verify]\ntimeout = 0\n", r"\[verify\].timeout must be greater than zero"),
+        ("[verify]\ntimeout = true\n", r"\[verify\].timeout must be an integer"),
+        ("[verify.profiles]\nedit = 'lint'\n", r"\[verify.profiles\].edit must be a list"),
+    ],
+)
+def test_refuses_a_malformed_value(tmp_path: Path, body: str, message: str) -> None:
+    write_config(tmp_path, body)
+
+    with pytest.raises(ConfigError, match=message):
+        load_config(tmp_path)
+
+
+def test_the_profile_kinds_match_the_check_kinds() -> None:
+    # The copy in config._CHECK_KINDS exists to keep the dependency direction;
+    # this is what stops it from drifting away from the original. The import is
+    # local because a module-level import of checks would put the check side
+    # into this module's import graph ahead of the boundary it guards.
+    import ultraloom.config as config_module
+    from ultraloom.checks import KINDS
+
+    assert config_module._CHECK_KINDS == KINDS
