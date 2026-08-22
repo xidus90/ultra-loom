@@ -17,6 +17,7 @@ from ultraloom.config import Config
 from ultraloom.graph import Graph
 
 FLOW_DIR = ".ultraloom/flows"
+BUNDLED_PACKAGE = "ultraloom.flows"
 
 # A module may legitimately bind `flow = None`; `None` is therefore not the
 # same answer as "the module never bound it".
@@ -54,20 +55,58 @@ class FlowLoadError(RuntimeError):
     """Raised when a flow module cannot be imported or holds no graph."""
 
 
-def list_flows(root: Path) -> tuple[str, ...]:
-    """The names of the project's flows, sorted."""
-    directory = root / FLOW_DIR
+@dataclass(frozen=True, slots=True)
+class FlowEntry:
+    """A flow the project could run, or a file that wanted to be one.
+
+    A file with a `problem` is listed rather than hidden: silence about
+    `my-flow.py` sends its author looking for a typo in the command line.
+    """
+
+    name: str
+    origin: str
+    problem: str | None = None
+
+
+def _bundled_dir() -> Path:
+    # importlib.resources would be the portable answer for a zipped install;
+    # ultraloom is installed from source and `find_flow` needs a real path to
+    # hand to spec_from_file_location either way.
+    return Path(__file__).resolve().parent / BUNDLED_PACKAGE.rsplit(".", 1)[-1]
+
+
+def _entries_in(directory: Path, origin: str) -> list[FlowEntry]:
     if not directory.is_dir():
-        return ()
-    # Filtered the way find_flow filters: a name that is not an identifier
-    # cannot be loaded, so listing it would advertise a flow that is refused
-    # the moment anyone asks for it.
-    names = (
-        path.stem
-        for path in directory.glob("*.py")
-        if path.stem != "__init__" and path.stem.isidentifier()
-    )
-    return tuple(sorted(names))
+        return []
+    entries = []
+    for path in sorted(directory.glob("*.py")):
+        if path.stem == "__init__":
+            continue
+        problem = (
+            None
+            if path.stem.isidentifier()
+            else f"{path.name} cannot be loaded: a flow name must be a Python identifier"
+        )
+        entries.append(FlowEntry(path.stem, origin, problem))
+    return entries
+
+
+def list_flows(root: Path) -> tuple[FlowEntry, ...]:
+    """Every flow this project could run, project ones first, sorted by name."""
+    project = _entries_in(root / FLOW_DIR, "project")
+    taken = {entry.name for entry in project}
+    # A project may replace a bundled flow by name. That is the whole mechanism
+    # for "ultraloom's version is nearly right"; there is no override syntax.
+    bundled = [entry for entry in _entries_in(_bundled_dir(), "bundled") if entry.name not in taken]
+    return tuple(sorted(project + bundled, key=lambda entry: entry.name))
+
+
+def _path_of(name: str, root: Path) -> Path | None:
+    for directory in (root / FLOW_DIR, _bundled_dir()):
+        candidate = directory / f"{name}.py"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def find_flow(name: str, root: Path, context: FlowContext | None = None) -> LoadedFlow:
@@ -79,10 +118,12 @@ def find_flow(name: str, root: Path, context: FlowContext | None = None) -> Load
     if not name.isidentifier():
         raise FlowNotFoundError(f"{name!r} is not a valid flow name; a flow name is an identifier")
 
-    path = root / FLOW_DIR / f"{name}.py"
-    if not path.is_file():
-        available = ", ".join(list_flows(root)) or "none"
-        raise FlowNotFoundError(f"no flow {name!r} in {root / FLOW_DIR}; available: {available}")
+    path = _path_of(name, root)
+    if path is None:
+        available = (
+            ", ".join(f"{entry.name} ({entry.origin})" for entry in list_flows(root)) or "none"
+        )
+        raise FlowNotFoundError(f"no flow {name!r}; available: {available}")
 
     # The module name carries a digest of the project path so two projects can
     # each have a flow called "verify" without one shadowing the other. The

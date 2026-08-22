@@ -7,7 +7,9 @@ import pytest
 
 from ultraloom.config import Config
 from ultraloom.discovery import (
+    FLOW_DIR,
     FlowContext,
+    FlowEntry,
     FlowLoadError,
     FlowNotFoundError,
     find_flow,
@@ -51,18 +53,18 @@ def test_flows_are_listed_alphabetically(tmp_path: Path) -> None:
     write_flow(tmp_path, "second")
     write_flow(tmp_path, "first")
 
-    assert list_flows(tmp_path) == ("first", "second")
+    assert [entry.name for entry in list_flows(tmp_path)] == ["first", "second"]
 
 
 def test_a_package_marker_is_not_a_flow(tmp_path: Path) -> None:
     write_flow(tmp_path, "smoke")
     write_flow(tmp_path, "__init__", "")
 
-    assert list_flows(tmp_path) == ("smoke",)
+    assert [entry.name for entry in list_flows(tmp_path)] == ["smoke"]
 
 
 def test_a_project_without_a_flow_directory_lists_nothing(tmp_path: Path) -> None:
-    assert list_flows(tmp_path) == ()
+    assert [entry for entry in list_flows(tmp_path) if entry.origin == "project"] == []
 
 
 def test_an_absent_flow_names_what_is_available(tmp_path: Path) -> None:
@@ -161,13 +163,16 @@ def test_an_initial_state_bound_to_none_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_listing_does_not_advertise_a_name_find_flow_refuses(tmp_path: Path) -> None:
-    """`my-flow.py` would appear in an `available:` line and then be refused."""
+    """`my-flow.py` is listed, but with the reason it cannot be loaded."""
     directory = tmp_path / ".ultraloom" / "flows"
     directory.mkdir(parents=True)
     (directory / "good.py").write_text("", encoding="utf-8")
     (directory / "my-flow.py").write_text("", encoding="utf-8")
 
-    assert list_flows(tmp_path) == ("good",)
+    entries = {entry.name: entry for entry in list_flows(tmp_path)}
+
+    assert entries["good"].problem is None
+    assert entries["my-flow"].problem is not None
 
 
 PARAMETERISED_FLOW = """
@@ -247,3 +252,40 @@ def test_a_plain_flow_module_still_loads_without_a_context(tmp_path: Path) -> No
 
 def test_a_context_defaults_to_empty_options(tmp_path: Path) -> None:
     assert FlowContext(root=tmp_path, config=Config(root=tmp_path)).options == {}
+
+
+@pytest.mark.xfail(reason="verify_until_green arrives in task 10", strict=True)
+def test_a_bundled_flow_is_found_without_a_project_directory(tmp_path: Path) -> None:
+    names = [entry.name for entry in list_flows(tmp_path)]
+
+    assert "verify_until_green" in names
+
+
+def test_a_project_flow_shadows_a_bundled_one_of_the_same_name(tmp_path: Path) -> None:
+    write_flow(tmp_path, "verify_until_green")
+
+    entries = {entry.name: entry for entry in list_flows(tmp_path)}
+
+    assert entries["verify_until_green"].origin == "project"
+    assert find_flow("verify_until_green", tmp_path).graph.name == "smoke"
+
+
+def test_a_file_that_cannot_be_a_flow_is_listed_with_its_reason(tmp_path: Path) -> None:
+    directory = tmp_path / FLOW_DIR
+    directory.mkdir(parents=True)
+    (directory / "my-flow.py").write_text("", encoding="utf-8")
+
+    entry = next(entry for entry in list_flows(tmp_path) if entry.name == "my-flow")
+
+    assert entry.problem is not None
+    assert "identifier" in entry.problem
+
+
+@pytest.mark.xfail(reason="verify_until_green arrives in task 10", strict=True)
+def test_the_available_list_in_a_not_found_error_names_the_origins(tmp_path: Path) -> None:
+    with pytest.raises(FlowNotFoundError, match=r"verify_until_green \(bundled\)"):
+        find_flow("absent", tmp_path)
+
+
+def test_an_entry_carries_no_problem_by_default() -> None:
+    assert FlowEntry("smoke", "project").problem is None
