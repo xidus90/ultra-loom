@@ -79,8 +79,18 @@ def test_an_absent_flow_names_what_is_available(tmp_path: Path) -> None:
         find_flow("nonexistent", tmp_path)
 
 
-def test_an_empty_project_offers_no_alternative(tmp_path: Path) -> None:
-    with pytest.raises(FlowNotFoundError, match="none"):
+def test_an_empty_project_offers_no_alternative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The list is patched empty: ultraloom ships flows, so nothing else empties it.
+
+    Anchored on the end of the message, because an unanchored "none" is found
+    inside the flow name "nonexistent" and would pass without the branch ever
+    being taken.
+    """
+    monkeypatch.setattr(discovery, "list_flows", lambda _root: ())
+
+    with pytest.raises(FlowNotFoundError, match=r"available: none$"):
         find_flow("nonexistent", tmp_path)
 
 

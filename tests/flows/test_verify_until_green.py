@@ -61,7 +61,7 @@ def test_a_check_that_never_resolved_is_out_of_reach_too() -> None:
     assert delta["unfixable"] == ("types",)
 
 
-def test_the_kinds_are_run_in_the_order_the_state_names() -> None:
+def test_every_kind_the_state_names_is_run() -> None:
     seen: list[str] = []
 
     def runner(kind: str, _config: Config) -> CheckResult:
@@ -71,6 +71,13 @@ def test_the_kinds_are_run_in_the_order_the_state_names() -> None:
     make_check(_config(), runner)(VerifyState(kinds=("types", "lint")))
 
     assert sorted(seen) == ["lint", "types"]  # concurrent, so only the set is fixed
+
+
+def test_the_failing_kinds_keep_the_order_the_state_named() -> None:
+    """Not the order the checks finished in — a prompt is built from this list."""
+    step = make_check(_config(), _runner({"types": False, "lint": False}))
+
+    assert step(VerifyState(kinds=("types", "lint")))["failing"] == ("types", "lint")
 
 
 def test_rounds_counts_up_from_where_the_state_stood() -> None:
