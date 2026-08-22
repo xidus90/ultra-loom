@@ -43,7 +43,7 @@ import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, cast
+from typing import IO, TypeGuard, cast
 
 # The whole budget for everything that happens after the command's own time is
 # up: killing the tree, reaping the child, and letting the readers finish. One
@@ -373,15 +373,21 @@ def _kill_job_then_strays(
     A job kill that reports failure falls back to the direct child, which is
     reachable without any of this.
     """
-    strays = _sweep_or_nothing(sweep)
+    strays: list[int] = []
     try:
-        if not job_kill():
-            direct_kill()
-        for stray in strays:
-            stray_kill(stray)
+        strays = _sweep_or_nothing(sweep)
     finally:
-        for stray in strays:
-            release(stray)
+        # A `finally`, because `_sweep_or_nothing` only swallows Exception. A
+        # KeyboardInterrupt travels on -- it is allowed to end the run -- but it
+        # may not take the kill with it and leave the tree standing.
+        try:
+            if not job_kill():
+                direct_kill()
+            for stray in strays:
+                stray_kill(stray)
+        finally:
+            for stray in strays:
+                release(stray)
 
 
 def _sweep_or_nothing(sweep: Callable[[], list[int]]) -> list[int]:
@@ -391,6 +397,10 @@ def _sweep_or_nothing(sweep: Callable[[], list[int]]) -> list[int]:
     candidate, and every one of those can fail. None of it may prevent the kill
     it is a supplement to: no strays is a partial kill, no kill at all is the
     bug this module was written against.
+
+    Exception, not BaseException: a KeyboardInterrupt is meant to end the run,
+    and swallowing it here would only delay that. The kill happens anyway --
+    `_kill_job_then_strays` puts it in a `finally` for exactly this case.
     """
     try:
         return sweep()
@@ -398,7 +408,7 @@ def _sweep_or_nothing(sweep: Callable[[], list[int]]) -> list[int]:
         return []
 
 
-def _usable_handle(value: int | None) -> bool:
+def _usable_handle(value: int | None) -> TypeGuard[int]:
     """Whether a Win32 call handed back a handle or a way of saying "no".
 
     Two ways of saying no, which is the point of having this in one place:
@@ -446,34 +456,73 @@ def _terminate_job_and_strays(  # pragma: no cover  # Windows-only syscalls
     )
 
 
-def _open_strays(process: subprocess.Popen[bytes]) -> list[int]:  # pragma: no cover  # Windows-only
-    """Handles to the descendants, opened before anything is killed.
+def _collect_strays(
+    *,
+    pids: Iterable[int],
+    root_started: int | None,
+    open_process: Callable[[int], int | None],
+    started_at: Callable[[int], int | None],
+    close: Callable[[int], None],
+) -> list[int]:
+    """Which candidates get a handle held on them, with the syscalls handed in.
 
     Handles rather than pids: a held handle keeps the pid reserved, so the pid
-    cannot be recycled between this walk and the kill that follows it. Which
-    candidates survive the walk is decided by `_usable_handle` and
-    `_could_be_a_descendant`; this function only makes the calls.
+    cannot be recycled between this walk and the kill that follows it. Which is
+    also why every handle taken has to be given back on the way out -- an
+    exception here would otherwise leak one per candidate, and each leaked
+    handle pins a pid nobody is watching any more.
     """
-    kernel32 = _kernel32()
-    root_started = _started_at(_process_handle(process))
     handles: list[int] = []
     try:
-        for pid in _descendants(process.pid, _process_parents()):
-            handle = kernel32.OpenProcess(
-                _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-            )
+        for pid in pids:
+            handle = open_process(pid)
             if not _usable_handle(handle):
                 # Unreachable is not a reason to leave the reachable ones alive.
                 continue
-            if not _could_be_a_descendant(root_started, _started_at(handle)):
-                kernel32.CloseHandle(handle)
+            if not _could_be_a_descendant(root_started, started_at(handle)):
+                close(handle)
                 continue
             handles.append(handle)
     except BaseException:
         for handle in handles:
-            kernel32.CloseHandle(handle)
+            close(handle)
         raise
     return handles
+
+
+def _threads_of(pid: int, owners: Iterable[tuple[int, int]]) -> list[int]:
+    """The thread ids belonging to one process, out of (thread id, owner) pairs."""
+    return [thread for thread, owner in owners if owner == pid]
+
+
+def _walk_snapshot[T](
+    *, begin: Callable[[], bool], advance: Callable[[], bool], read: Callable[[], T]
+) -> list[T]:
+    """The toolhelp iteration shape: First, then Next until it says no.
+
+    Windows fills the same struct over and over, so `read` is called between the
+    steps rather than the entries being collected and read afterwards.
+    """
+    entries: list[T] = []
+    more = begin()
+    while more:
+        entries.append(read())
+        more = advance()
+    return entries
+
+
+def _open_strays(process: subprocess.Popen[bytes]) -> list[int]:  # pragma: no cover  # Windows-only
+    """Hand the Win32 calls to `_collect_strays`."""
+    kernel32 = _kernel32()
+    return _collect_strays(
+        pids=_descendants(process.pid, _process_parents()),
+        root_started=_started_at(_process_handle(process)),
+        open_process=lambda pid: kernel32.OpenProcess(
+            _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        ),
+        started_at=_started_at,
+        close=lambda handle: kernel32.CloseHandle(handle),
+    )
 
 
 def _process_parents() -> list[tuple[int, int]]:  # pragma: no cover  # Windows-only syscalls
@@ -484,15 +533,14 @@ def _process_parents() -> list[tuple[int, int]]:  # pragma: no cover  # Windows-
         raise ctypes.WinError(ctypes.get_last_error())
     entry = _ProcessEntry32()
     entry.dwSize = ctypes.sizeof(_ProcessEntry32)
-    pairs: list[tuple[int, int]] = []
     try:
-        more = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
-        while more:
-            pairs.append((int(entry.th32ProcessID), int(entry.th32ParentProcessID)))
-            more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+        return _walk_snapshot(
+            begin=lambda: bool(kernel32.Process32FirstW(snapshot, ctypes.byref(entry))),
+            advance=lambda: bool(kernel32.Process32NextW(snapshot, ctypes.byref(entry))),
+            read=lambda: (int(entry.th32ProcessID), int(entry.th32ParentProcessID)),
+        )
     finally:
         kernel32.CloseHandle(snapshot)
-    return pairs
 
 
 def _thread_ids(pid: int) -> list[int]:  # pragma: no cover  # Windows-only syscalls
@@ -503,16 +551,15 @@ def _thread_ids(pid: int) -> list[int]:  # pragma: no cover  # Windows-only sysc
         raise ctypes.WinError(ctypes.get_last_error())
     entry = _ThreadEntry32()
     entry.dwSize = ctypes.sizeof(_ThreadEntry32)
-    found: list[int] = []
     try:
-        more = kernel32.Thread32First(snapshot, ctypes.byref(entry))
-        while more:
-            if entry.th32OwnerProcessID == pid:
-                found.append(int(entry.th32ThreadID))
-            more = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+        owners = _walk_snapshot(
+            begin=lambda: bool(kernel32.Thread32First(snapshot, ctypes.byref(entry))),
+            advance=lambda: bool(kernel32.Thread32Next(snapshot, ctypes.byref(entry))),
+            read=lambda: (int(entry.th32ThreadID), int(entry.th32OwnerProcessID)),
+        )
     finally:
         kernel32.CloseHandle(snapshot)
-    return found
+    return _threads_of(pid, owners)
 
 
 def _started_at(handle: int) -> int | None:  # pragma: no cover  # Windows-only syscall

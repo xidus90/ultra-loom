@@ -16,6 +16,7 @@ from ultraloom import process as process_module
 from ultraloom.process import (
     NO_EXIT_CODE,
     Completed,
+    _collect_strays,
     _could_be_a_descendant,
     _descendants,
     _drain,
@@ -25,7 +26,9 @@ from ultraloom.process import (
     _sweep_or_nothing,
     _terminate_posix,
     _terminate_windows,
+    _threads_of,
     _usable_handle,
+    _walk_snapshot,
     run,
     spawn_kwargs,
     terminator,
@@ -305,7 +308,10 @@ def test_a_kill_that_does_not_take_is_reported_rather_than_waited_out(
 
         assert completed.timed_out
         assert completed.returncode == NO_EXIT_CODE
-        assert elapsed < 20, f"run() waited {elapsed:.1f}s on a kill that never took"
+        # The budget is timeout + DRAIN_GRACE, so 1.5s. Three times that is
+        # room for a loaded machine; twenty would let a regression of more
+        # than an order of magnitude through unnoticed.
+        assert elapsed < 4.5, f"run() waited {elapsed:.1f}s on a budget of 1.5s"
     finally:
         # The terminator was a no-op, so nobody else is going to do this.
         _reap(spawned)
@@ -570,3 +576,112 @@ def test_an_unreadable_root_time_drops_the_filter_and_not_the_sweep() -> None:
     """The tree is being killed either way; no filter beats no sweep."""
     assert _could_be_a_descendant(None, 999)
     assert _could_be_a_descendant(None, None)
+
+
+def test_a_stray_that_cannot_be_opened_is_skipped_and_the_rest_still_collected() -> None:
+    closed: list[int] = []
+
+    handles = _collect_strays(
+        pids=[1, 2, 3],
+        root_started=100,
+        open_process=lambda pid: None if pid == 2 else pid + 500,
+        started_at=lambda handle: 200,
+        close=closed.append,
+    )
+
+    assert handles == [501, 503]
+    assert closed == []
+
+
+def test_a_stray_that_started_too_early_is_closed_again() -> None:
+    """The handle was taken to decide; it has to be given back on the way out."""
+    closed: list[int] = []
+
+    handles = _collect_strays(
+        pids=[1, 2],
+        root_started=100,
+        open_process=lambda pid: pid + 500,
+        started_at=lambda handle: 50 if handle == 501 else 200,
+        close=closed.append,
+    )
+
+    assert handles == [502]
+    assert closed == [501]
+
+
+def test_a_failure_mid_walk_gives_back_the_handles_already_taken() -> None:
+    """Each leaked handle pins a pid nobody is watching any more."""
+    closed: list[int] = []
+
+    def started_at(handle: int) -> int:
+        if handle == 503:
+            raise OSError("the process went away")
+        return 200
+
+    with pytest.raises(OSError, match="went away"):
+        _collect_strays(
+            pids=[1, 2, 3],
+            root_started=100,
+            open_process=lambda pid: pid + 500,
+            started_at=started_at,
+            close=closed.append,
+        )
+
+    assert closed == [501, 502]
+
+
+def test_an_interrupted_sweep_still_kills_the_job() -> None:
+    """_sweep_or_nothing swallows Exception; a KeyboardInterrupt travels on.
+
+    It is allowed to end the run -- it may not leave the tree standing.
+    """
+    recorder = _Recorder()
+
+    def interrupted() -> list[int]:
+        raise KeyboardInterrupt
+
+    def job_kill() -> bool:
+        recorder.note("job")
+        return True
+
+    with pytest.raises(KeyboardInterrupt):
+        _kill_job_then_strays(
+            sweep=interrupted,
+            job_kill=job_kill,
+            direct_kill=lambda: recorder.note("direct"),
+            stray_kill=lambda stray: recorder.note(f"stray {stray}"),
+            release=lambda stray: recorder.note(f"release {stray}"),
+        )
+
+    assert recorder.events == ["job"]
+
+
+def test_the_threads_of_one_process_are_picked_out_of_the_snapshot() -> None:
+    assert _threads_of(7, [(100, 7), (101, 8), (102, 7)]) == [100, 102]
+
+
+def test_a_process_with_no_threads_in_the_snapshot_gets_an_empty_list() -> None:
+    assert _threads_of(7, [(100, 8)]) == []
+
+
+def test_the_snapshot_walk_reads_between_the_steps() -> None:
+    """Windows refills the same struct, so reading after the walk would read one row."""
+    rows = iter([("a",), ("b",), ("c",)])
+    current: list[tuple[str, ...]] = []
+
+    def advance() -> bool:
+        row = next(rows, None)
+        if row is None:
+            return False
+        current[:] = [row]
+        return True
+
+    assert _walk_snapshot(begin=advance, advance=advance, read=lambda: current[0][0]) == [
+        "a",
+        "b",
+        "c",
+    ]
+
+
+def test_a_snapshot_whose_first_step_says_no_is_empty() -> None:
+    assert _walk_snapshot(begin=lambda: False, advance=lambda: True, read=lambda: "never") == []
