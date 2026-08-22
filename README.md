@@ -39,6 +39,17 @@ A check is resolved in this order, and ultraloom never guesses beyond it:
 
 A check that cannot be resolved is reported as a failure, never skipped.
 
+The presets ask their tools for their terse modes, because a check report is
+read by a repairing agent that pays for every token of it on every round. One
+consequence is worth knowing in advance: `mypy --no-error-summary` drops the
+"Success: no issues found" line too, so a green `types` check writes nothing at
+all. The verdict rides on the exit code, as it always has — but an empty report
+is not a check that did not run. GDScript has no coverage preset for the same
+family of reasons: the tools that measure it are an editor addon and a
+project-owned script, neither of which is a command another project could run,
+and inventing one would look like a check without being one. Such a project
+names its own under `[verify.coverage]`.
+
 ## Configuration
 
 `.ultraloom/config.toml`, all of it optional:

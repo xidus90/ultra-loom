@@ -6,6 +6,11 @@ Dieses Dokument ist der Vertrag für den Umfang, der zwischen Teilprojekt 2 und
 Teilprojekt 3 steht. Taucht beim Bauen eine Streitfrage auf, gilt, was hier
 steht — nicht die Erinnerung und nicht die Auslegung durch ein Modell.
 
+> **Nachtrag (Task 7).** Die Abschnitte 8 und 9 sind in der Ausführung von
+> diesem Vertrag abgewichen: Godot hat kein `coverage`-Preset bekommen, und die
+> Tabelle der knappen Modi nennt eine Flagge nicht, die im Code steht. Beide
+> Stellen sind unten markiert.
+
 ---
 
 ## 1. Warum dieser Umfang, und warum jetzt
@@ -359,6 +364,25 @@ Sie bleibt eine Warnung und wird nie zur roten Prüfung. Ob der Bericht alt ist,
 weiß ultraloom nicht — space beantwortet das mit einem eigenen Zeitstempel, und
 ein Rateversuch hier wäre schlechter als der Satz.
 
+*Abgewichen (Task 7): „der Godot-Fall" entsteht aus keinem Preset mehr.* Der
+`coverage`-Eintrag für `project.godot` ist entfallen, weil es kein allgemein
+aufrufbares GDScript-Coverage-Kommando gibt: in space schreibt die Nano-
+Coverage-Editorerweiterung `lcov.info` als Nebenprodukt des Suite-Laufs, und
+die Schwelle erzwingt ein projekteigenes Skript. Ein erfundenes Kommando im
+Preset hätte nach einer Prüfung ausgesehen, die es nicht gibt.
+
+Die Konstellation „`after` gesetzt, kein `measure`" ist damit nur noch von Hand
+erreichbar — über `[verify.coverage].report` zusammen mit `[verify.after]`. Die
+Warnung ist **nicht** tot und das Preset **nicht** versehentlich verloren; wer
+Task 8 oder 9 baut, findet den Fall nur nicht mehr in der Tabelle.
+
+Der Preis steht ausdrücklich hier: die Aussage „ein Godot-Coverage-Bericht folgt
+immer auf die Suite" ist allgemein wahr und war im Preset einmal darstellbar.
+Jedes Godot-Projekt muß sie jetzt einzeln in `[verify.after]` wiederholen. Das
+ist vertretbar — eine allgemein wahre Reihenfolge ohne allgemein aufrufbares
+Kommando kann ultraloom nicht ausführen —, aber es ist eine Wiederholung, die
+ein Preset erspart hätte.
+
 ---
 
 ## 9. Die Menge der Ausgabe
@@ -371,12 +395,25 @@ eigener Parser, der beim nächsten Werkzeug-Update bricht.
 
 | Werkzeug | Modus |
 |---|---|
-| coverage | `report --skip-covered --skip-empty` — nur die Dateien unter 100 % |
+| coverage | `report --skip-covered --skip-empty -m` — nur die Dateien unter 100 %, mit den fehlenden Zeilen |
 | ruff | `check . --output-format=concise` |
 | mypy | `--no-error-summary --no-pretty` |
 | pytest | `-q --tb=short --no-header` |
 | vitest | unverändert |
 | gdlint | ist schon knapp |
+
+*Abgewichen (Task 7): `-m` stand nicht in dieser Tabelle und ist beim Bauen
+hinzugekommen.* Es ist die einzige Stelle, an der die knappen Modi verbergen,
+was der Reparateur braucht: `--skip-covered` läßt genau die Dateien stehen, die
+unter 100 % liegen, und ohne `-m` nennt der Bericht die Datei, aber nicht die
+fehlende Zeile. `show_missing` ist per Voreinstellung aus, und daß ultraloom es
+in der eigenen `pyproject.toml` setzt, sagt nichts über ein fremdes Projekt.
+
+Ebenfalls gemessen und hier festgehalten: `coverage report` bestimmt seinen
+Rückgabewert allein über `fail_under`. Ohne diesen Schlüssel in der
+Projektkonfiguration ist der Lauf bei 83 % **grün** — keine Wirkung der knappen
+Flaggen, sondern die Eigenschaft, die §7 des Kern-Designs meint, wenn es sagt,
+daß ultraloom die Schwelle nicht selbst erzwingt.
 
 **Eine Obergrenze für die Ausgabe Richtung Modell**, mit Kopf und Fuß erhalten
 und einer Zeile dazwischen, die sagt, wie viel fehlt. Der Fuß wiegt schwerer als

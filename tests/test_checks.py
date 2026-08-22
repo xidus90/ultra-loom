@@ -915,6 +915,30 @@ def test_the_presets_ask_their_tools_to_be_terse() -> None:
     assert "--no-error-summary" in PRESETS["pyproject.toml"]["types"].argv
 
 
+def test_the_coverage_preset_still_names_the_missing_lines() -> None:
+    """The one place where terseness would hide what the repairer needs.
+
+    `--skip-covered` drops the files at 100%; without `-m` what is left names
+    the file at 83% and not the line that is missing, and looking it up costs a
+    whole round. `show_missing` is off by default, so the project cannot be
+    assumed to have set it.
+    """
+    assert "-m" in PRESETS["pyproject.toml"]["coverage"].argv
+
+
+def test_both_pytest_modes_are_asked_for_the_same_terseness() -> None:
+    """`test` and test-under-measurement must report in the same shape.
+
+    A flag that reached only one of them would make the two modes incomparable,
+    which is the whole reason the scheduler may swap one for the other.
+    """
+    presets = PRESETS["pyproject.toml"]
+    terse = ("-q", "--tb=short", "--no-header")
+    assert presets["test"].argv[-len(terse) :] == terse
+    assert presets["test"].measuring[-len(terse) :] == terse
+    assert presets["coverage"].measure[-len(terse) :] == terse
+
+
 def test_a_preset_resolves_to_one_command(tmp_path: Path) -> None:
     python_project(tmp_path)
 

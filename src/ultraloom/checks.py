@@ -47,8 +47,13 @@ class Preset:
 # read by a repairer that pays for every token of it, on every round. Each of
 # these flags was run against a failing project first -- one that turned a red
 # check green would be worse than any amount of noise.
-_PYTEST = ("uv", "run", "pytest", "-q", "--tb=short", "--no-header")
-_COVERAGE_RUN = ("uv", "run", "coverage", "run", "-m", "pytest", "-q", "--tb=short", "--no-header")
+# Shared rather than spelled out twice: `test` and test-under-measurement run
+# the same suite, and a flag that reached only one of them would make the two
+# modes report in different shapes -- the one property that makes them
+# incomparable.
+_TERSE_PYTEST = ("-q", "--tb=short", "--no-header")
+_PYTEST = ("uv", "run", "pytest", *_TERSE_PYTEST)
+_COVERAGE_RUN = ("uv", "run", "coverage", "run", "-m", "pytest", *_TERSE_PYTEST)
 
 # marker file -> check kind -> the preset for it
 PRESETS: Mapping[str, Mapping[str, Preset]] = {
@@ -61,9 +66,14 @@ PRESETS: Mapping[str, Mapping[str, Preset]] = {
         "test": Preset(_PYTEST, measuring=_COVERAGE_RUN),
         # `--skip-covered --skip-empty`: the files at 100% are the ones nobody
         # needs to read, and in a project that holds the line they are almost
-        # all of them.
+        # all of them. `-m` pulls the other way and is worth it: without it the
+        # report names the file that is at 83% but not the line that is
+        # missing, and the repairer spends a whole round only looking it up.
+        # Not left to the project's own config -- `show_missing` is off by
+        # default, and ultraloom setting it in its own pyproject.toml says
+        # nothing about anybody else's.
         "coverage": Preset(
-            ("uv", "run", "coverage", "report", "--skip-covered", "--skip-empty"),
+            ("uv", "run", "coverage", "report", "--skip-covered", "--skip-empty", "-m"),
             measure=_COVERAGE_RUN,
             after="test",
         ),
@@ -210,7 +220,7 @@ def resolve_check(kind: str, config: Config) -> Command:
         kind,
         (config.exec_prefix + entry.argv,),
         "preset",
-        measure=config.exec_prefix + entry.measure if entry.measure else (),
+        measure=(config.exec_prefix + entry.measure) if entry.measure else (),
     )
 
 
