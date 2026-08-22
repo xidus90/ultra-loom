@@ -58,6 +58,11 @@ class Config:
     test_paths: tuple[str, ...] = ()
     timeout: int = DEFAULT_TIMEOUT
     godot_import: bool = True
+    # The cap on processes running at once. Today it reaches one check kind
+    # at a time: run_all starts the four kinds in a pool of its own and each
+    # of them hands out this budget again, so four kinds of two commands can
+    # be eight processes under max_parallel = 2. It becomes a cap on the whole
+    # run when run_kinds builds one and passes it down (Task 9).
     max_parallel: int = field(default_factory=_default_parallelism)
     after: Mapping[str, str] = field(default_factory=dict)
     profiles: Mapping[str, tuple[str, ...]] = field(default_factory=dict)

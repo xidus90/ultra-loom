@@ -5,6 +5,7 @@ import shlex
 import sys
 import time
 from pathlib import Path
+from threading import Semaphore
 
 import pytest
 
@@ -795,3 +796,80 @@ def test_a_warning_rides_in_front_of_the_report_without_being_a_verdict(tmp_path
 
     assert result.ok
     assert result.output == "stale data\nclean\n"
+
+
+class _CountingGate(Semaphore):
+    """A cap that records how often it was taken."""
+
+    def __init__(self) -> None:
+        super().__init__(4)
+        self.acquired = 0
+
+    def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool:
+        self.acquired += 1
+        return super().acquire(blocking, timeout)
+
+    # Semaphore binds __enter__ to acquire at class creation, so an override of
+    # acquire alone is never seen by a `with` statement.
+    def __enter__(self, blocking: bool = True, timeout: float | None = None) -> bool:
+        return self.acquire(blocking, timeout)
+
+
+def test_a_cap_handed_in_is_the_one_that_is_used(tmp_path: Path) -> None:
+    """Task 9 hands one cap down through stages and kinds; a call that quietly
+    made its own would let every level spend the whole budget again."""
+    python_project(tmp_path)
+    command = Command("lint", (_argv(py("print('a')")), _argv(py("print('b')"))), "config")
+    gate = _CountingGate()
+
+    _run_command(command, Config(root=tmp_path), gate)
+
+    assert gate.acquired == 2
+
+
+def test_a_red_command_names_itself_in_the_heading(tmp_path: Path) -> None:
+    """A command that fails without a word would otherwise leave a red check
+    whose report holds nothing but the green command's findings."""
+    python_project(tmp_path)
+    config = Config(
+        root=tmp_path,
+        commands={"lint": (py("print('a')"), py("import sys; sys.exit(1)"))},
+    )
+
+    result = run_check("lint", config)
+
+    assert not result.ok
+    assert "(failed)" in result.output
+
+
+def test_a_check_with_no_command_at_all_is_refused(tmp_path: Path) -> None:
+    """all(()) is True: nothing run would otherwise be a passed check."""
+    with pytest.raises(CheckUnavailableError, match="no command"):
+        Command("lint", (), "config")
+
+
+def test_the_warning_survives_a_failing_measure_step(tmp_path: Path) -> None:
+    """The path where the output needs the explanation most is the one that
+    used to drop it."""
+    python_project(tmp_path)
+    command = Command(
+        "coverage",
+        (_argv(py("print('report')")),),
+        "preset",
+        measure=_argv(py("import sys; print('measure broke'); sys.exit(1)")),
+        warning="stale data",
+    )
+
+    result = _run_command(command, Config(root=tmp_path))
+
+    assert not result.ok
+    assert result.output.startswith("stale data\n")
+    assert "measure broke" in result.output
+
+
+def test_the_merged_report_ends_in_a_newline_like_a_single_one(tmp_path: Path) -> None:
+    """Two shapes of report would make every reader downstream handle both."""
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (py("print('a')"), py("print('b')"))})
+
+    assert run_check("lint", config).output.endswith("\n")

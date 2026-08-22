@@ -11,7 +11,7 @@ import shlex
 import sys
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import BoundedSemaphore, Semaphore
 
@@ -105,6 +105,18 @@ class Command:
     # Prepended to the output when this check reads something no command in
     # this run produced. A warning and never a verdict -- see spec 8.
     warning: str = ""
+
+    def __post_init__(self) -> None:
+        """A check must name at least one command.
+
+        `all(())` is True, so a Command with no argvs would merge into a green
+        result over an empty report -- a passed check that ran nothing, which
+        is the one failure Grundsatz 4 rules out. `resolve_check` cannot build
+        one today, but a Command is also built by hand, and the guard belongs
+        where the invariant is, not where one caller happens to hold it.
+        """
+        if not self.argvs:
+            raise CheckUnavailableError(f"check {self.kind!r} resolved to no command at all")
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,18 +254,34 @@ def _preset_godot_binary(config: Config) -> str | None:
 def _run_command(command: Command, config: Config, gate: Semaphore | None = None) -> CheckResult:
     """Every command of one kind, and one verdict out of them.
 
-    The cap is passed in rather than made here so that later callers -- stages
-    and kinds above this one -- can share a single one. A cap created per call
-    would let each level spend the whole budget again.
+    `gate` is the cap on running *processes*. It is passed in rather than made
+    here so that the levels above -- stages, and the kinds within a stage --
+    can share one instead of each handing out the whole budget again.
+
+    The contract that comes with it: the cap is acquired at the process and
+    nowhere else. Whoever passes this cap on does not acquire it -- the levels
+    above are thread pools, and a pool that held a permit while waiting for the
+    work below it to take one would deadlock. Held that way the semaphore never
+    has to be reentrant, and the deadlock is ruled out structurally instead of
+    by counting.
     """
-    gate = gate or BoundedSemaphore(config.max_parallel)
+    if gate is None:
+        # `is None` and not `or`: a Semaphore is always truthy, so `or` would
+        # work by an accident of a class this module does not own.
+        gate = BoundedSemaphore(config.max_parallel)
     if command.measure:
         measured = _run(command.measure, command.kind, config, command.source, gate)
         if not measured.ok:
-            return measured
+            # Through _warned rather than returned bare: this is the path where
+            # the output most needs the warning that explains it.
+            return _warned(command, measured)
 
     if command.threaded and len(command.argvs) > 1:
-        with ThreadPoolExecutor(max_workers=len(command.argvs)) as pool:
+        # Capped too: threads past the cap would only queue at the gate, so a
+        # kind with ten commands under max_parallel = 2 would spend eight
+        # threads on waiting.
+        workers = min(len(command.argvs), config.max_parallel)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             results = tuple(
                 pool.map(
                     lambda argv: _run(argv, command.kind, config, command.source, gate),
@@ -278,18 +306,39 @@ def _merged(command: Command, results: tuple[CheckResult, ...]) -> CheckResult:
     if len(results) == 1:
         output = results[0].output
     else:
-        output = "\n\n".join(
-            f"$ {shlex.join(argv)}\n{result.output.rstrip()}"
+        # The verdict rides on the heading because a command can fail without
+        # writing a word. Without it such a run shows the *other* command's
+        # findings and nothing else, and the report of a red check would name
+        # no reason for being red.
+        headed = (
+            f"$ {shlex.join(argv)}{'' if result.ok else ' (failed)'}\n{result.output.rstrip()}"
             for argv, result in zip(command.argvs, results, strict=True)
         )
-    if command.warning:
-        output = f"{command.warning}\n{output}"
-    return CheckResult(
-        command.kind,
-        all(result.ok for result in results),
-        output,
-        command.source,
+        # The trailing newline is what a single command's report ends in, from
+        # the tool's own output. Without it here there would be two shapes of
+        # report, and every reader downstream would have to know both.
+        output = "\n\n".join(headed) + "\n"
+    return _warned(
+        command,
+        CheckResult(
+            command.kind,
+            all(result.ok for result in results),
+            output,
+            command.source,
+        ),
     )
+
+
+def _warned(command: Command, result: CheckResult) -> CheckResult:
+    """The result with the check's warning in front of it, if it has one.
+
+    A line above the report and never a change to `ok`: a warning says the
+    numbers may be reading something this run did not produce, which is worth
+    knowing and is not a finding.
+    """
+    if not command.warning:
+        return result
+    return replace(result, output=f"{command.warning}\n{result.output}")
 
 
 def _run(
