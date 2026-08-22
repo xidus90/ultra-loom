@@ -63,9 +63,16 @@ def clip(output: str, *, limit: int = MODEL_OUTPUT_LINES) -> str:
         return output
 
     tail = limit * 2 // 3
-    head = limit - tail
-    dropped = len(lines) - limit
-    return "\n".join([*lines[:head], f"    [... {dropped} Zeilen ausgelassen ...]", *lines[-tail:]])
+    # The marker counts against the budget: `limit` is an upper bound on what
+    # the repairer is handed, not on what survived the cut.
+    head = limit - tail - 1
+    dropped = len(lines) - head - tail
+    clipped = "\n".join(
+        [*lines[:head], f"    [... {dropped} Zeilen ausgelassen ...]", *lines[-tail:]]
+    )
+    # splitlines() drops a trailing newline; the short path above keeps one, so
+    # this path keeps one too rather than making the two ends differ.
+    return clipped + "\n" if output.endswith("\n") else clipped
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +81,11 @@ class VerifyState:
 
     kinds: tuple[str, ...] = ()
     report: str = ""
+    # The same report clipped to what a repair round is worth paying for.
+    # Carried beside `report` rather than in place of it: the delta is what the
+    # runner journalises, and the full output exists nowhere else once
+    # `make_check` has returned its counts.
+    brief: str = ""
     failing: tuple[str, ...] = ()
     unfixable: tuple[str, ...] = ()
     # Which of `failing` never ran because a predecessor was red. A field of its
@@ -138,6 +150,7 @@ def make_check(config: Config, runner: CheckRunner | None = None) -> Callable[[V
             "unfixable": tuple(result.kind for result in red if _out_of_reach(result)),
             "blocked": tuple(result.kind for result in red if result.source == BLOCKED),
             "report": _render(red),
+            "brief": _render(red, limit=MODEL_OUTPUT_LINES),
             "rounds": state.rounds + 1,
             # What the previous pass found, saved before `failing` is
             # overwritten: an edge condition sees one state, so "the same
@@ -167,7 +180,7 @@ def _out_of_reach(result: CheckResult) -> bool:
     return result.kind in UNFIXABLE or result.source in (UNAVAILABLE, UNREADY)
 
 
-def _render(red: tuple[CheckResult, ...]) -> str:
+def _render(red: tuple[CheckResult, ...], *, limit: int | None = None) -> str:
     """The failing checks, for a human and for a model.
 
     Only the failing ones: a green check's output is noise in a terminal and
@@ -179,15 +192,21 @@ def _render(red: tuple[CheckResult, ...]) -> str:
     green lint, a green types and a red test does not read as though coverage
     had been checked.
 
-    Each finding's output is clipped, the blocked line never is: it is one line
+    `limit` clips each finding's output; without one nothing is cut. The
+    default is the uncut report on purpose: this is what the journal records,
+    and the CheckResults are gone the moment `make_check` returns, so a report
+    shortened here is a run nobody can read afterwards. Only the copy meant for
+    the repairer passes a limit.
+
+    A blocked check's line is never clipped in either case: it is one line
     naming what did not run, and it is the whole reason the report is honest.
-    `CheckResult.output` stays untouched -- the journal keeps the full report,
-    or a run stops being auditable afterwards.
     """
     blocked = tuple(result.kind for result in red if result.source == BLOCKED)
     findings = tuple(result for result in red if result.source != BLOCKED)
     rendered = "\n\n".join(
-        f"## {result.kind} ({result.source})\n{clip(result.output)}" for result in findings
+        f"## {result.kind} ({result.source})\n"
+        f"{result.output if limit is None else clip(result.output, limit=limit)}"
+        for result in findings
     )
     if not blocked:
         return rendered
@@ -271,11 +290,14 @@ def make_repair(test_paths: tuple[str, ...]) -> AgentNode[VerifyState]:
         # `failing` and `unfixable` still hold the old round's values while
         # `report` already holds the summary -- and the guard is the node that
         # sees it that way.
-        return {"report": reply.summary}
+        # Both fields, because the next `check` pass overwrites both: leaving
+        # `brief` on the old round's findings would hand a stale report to the
+        # next prompt if that pass ever fails to run.
+        return {"report": reply.summary, "brief": reply.summary}
 
     return AgentNode(
         "repair",
-        prompt=lambda state: REPAIR_PROMPT.format(report=state.report, forbidden=forbidden),
+        prompt=lambda state: REPAIR_PROMPT.format(report=state.brief, forbidden=forbidden),
         schema=RepairResult,
         apply=apply,
         tools="edit",

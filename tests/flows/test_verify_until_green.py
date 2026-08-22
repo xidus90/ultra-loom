@@ -15,7 +15,6 @@ from ultraloom.checks import (
     CheckRunner,
     CheckUnavailableError,
     run_check,
-    run_kinds,
 )
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext
@@ -126,13 +125,20 @@ def test_rounds_counts_up_from_where_the_state_stood() -> None:
     assert step(VerifyState(kinds=("lint",), rounds=2))["rounds"] == 3
 
 
-def test_the_prompt_carries_the_report_and_the_forbidden_paths() -> None:
+def test_the_prompt_carries_the_brief_and_the_forbidden_paths() -> None:
+    """The brief and not the report: the long one is what the journal keeps."""
     node = make_repair(test_paths=("tests/", "conftest.py"))
-    state = VerifyState(kinds=("lint",), failing=("lint",), report="## lint\nE501 too long")
+    state = VerifyState(
+        kinds=("lint",),
+        failing=("lint",),
+        report="## lint\nE501 too long\nand a thousand more lines",
+        brief="## lint\nE501 too long",
+    )
 
     prompt = node.prompt(state)
 
     assert "E501 too long" in prompt
+    assert "a thousand more lines" not in prompt
     assert "tests/" in prompt
     assert "conftest.py" in prompt
 
@@ -164,7 +170,7 @@ def test_the_reply_becomes_the_summary_of_the_pass() -> None:
 
     delta = node.apply(VerifyState(), RepairResult(summary="shortened the line", changed=True))
 
-    assert delta == {"report": "shortened the line"}
+    assert delta == {"report": "shortened the line", "brief": "shortened the line"}
 
 
 def test_a_reply_of_the_wrong_type_is_refused() -> None:
@@ -1071,7 +1077,7 @@ def test_long_output_keeps_both_ends() -> None:
 
     assert clipped.splitlines()[0] == "0"
     assert clipped.splitlines()[-1] == "999"
-    assert len(clipped.splitlines()) < MODEL_OUTPUT_LINES + 5
+    assert len(clipped.splitlines()) == MODEL_OUTPUT_LINES  # marker included
 
 
 def test_the_clip_says_how_much_it_dropped() -> None:
@@ -1084,8 +1090,8 @@ def test_the_gap_is_named_with_the_exact_number_of_dropped_lines() -> None:
     """A literal budget, so the arithmetic is checked and not merely restated."""
     clipped = clip("\n".join(str(number) for number in range(90)), limit=30)
 
-    assert "60 Zeilen ausgelassen" in clipped
-    assert len(clipped.splitlines()) == 31
+    assert "61 Zeilen ausgelassen" in clipped
+    assert len(clipped.splitlines()) == 30  # the marker is paid for out of the budget
 
 
 def test_two_thirds_of_the_budget_go_to_the_tail() -> None:
@@ -1094,15 +1100,30 @@ def test_two_thirds_of_the_budget_go_to_the_tail() -> None:
     body = clipped.splitlines()
     marker = next(index for index, line in enumerate(body) if "ausgelassen" in line)
 
-    assert marker == 10  # ten lines of head, twenty of tail
-    assert body[:marker] == [str(number) for number in range(10)]
+    assert marker == 9  # nine lines of head, twenty of tail
+    assert body[:marker] == [str(number) for number in range(9)]
     assert body[marker + 1 :] == [str(number) for number in range(70, 90)]
+
+
+def test_a_clipped_output_keeps_a_trailing_newline_like_an_unclipped_one() -> None:
+    clipped = clip("\n".join(str(number) for number in range(90)) + "\n", limit=30)
+
+    assert clipped.endswith("89\n")
 
 
 def test_a_report_exactly_at_the_budget_is_not_clipped() -> None:
     lines = "\n".join(str(number) for number in range(30))
 
     assert clip(lines, limit=30) == lines
+
+
+def test_the_render_leaves_everything_alone_without_a_limit() -> None:
+    """The default is the uncut report: this is the copy the journal keeps."""
+    long_output = "\n".join(str(number) for number in range(1000))
+
+    rendered = _render((CheckResult("test", False, long_output, "pytest"),))
+
+    assert rendered == f"## test (pytest)\n{long_output}"
 
 
 def test_the_render_clips_each_check_but_not_the_blocked_line() -> None:
@@ -1112,22 +1133,62 @@ def test_the_render_clips_each_check_but_not_the_blocked_line() -> None:
         (
             CheckResult("test", False, long_output, "pytest"),
             CheckResult("coverage", False, "did not run", BLOCKED),
-        )
+        ),
+        limit=MODEL_OUTPUT_LINES,
     )
 
     assert "Zeilen ausgelassen" in rendered
     assert rendered.endswith("Nicht gelaufen, weil ein Vorgänger rot war: coverage")
-    assert len(rendered.splitlines()) < MODEL_OUTPUT_LINES + 10
+    assert "500" not in rendered
 
 
-def test_the_check_result_itself_keeps_everything(tmp_path: Path) -> None:
-    """Clipped towards the model, complete in the journal -- or a run stops being auditable."""
-    long_output = "\n".join(str(number) for number in range(1000))
+def test_the_journal_keeps_the_full_output_while_the_repairer_sees_the_clip(
+    tmp_path: Path,
+) -> None:
+    """Clipped towards the model, complete in the journal -- or a run stops being auditable.
+
+    The whole flow with a real Runner and a real Journal, because that is where
+    the property lives: `make_check` throws the CheckResults away, so whatever
+    the delta does not carry is gone for good.
+    """
+    long_output = "\n".join(f"line {number}" for number in range(1000))
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
 
     def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
-        return CheckResult(kind, False, long_output, "fake")
+        return CheckResult(kind, False, long_output, "pytest")
 
-    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
-    results = run_kinds(("lint",), Config(root=tmp_path, test_paths=("tests/",)), runner)
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=runner,
+        differ=lambda _root: (),
+        baseline=frozenset(),
+        max_rounds=1,
+    )
+    journal = Journal(tmp_path / "run.jsonl")
+    model = FakeModel([Reply(RepairResult("gave up", changed=False), tokens=0)])
+    Runner(graph, journal, model=model).run(VerifyState(kinds=("test",)))
 
-    assert results[0].output == long_output
+    checks = [entry for entry in journal.entries() if entry.node == "check"]
+    assert checks
+    assert checks[0].delta["report"] == f"## test (pytest)\n{long_output}"
+    assert "ausgelassen" in str(checks[0].delta["brief"])
+    prompt = model.seen[0].prompt
+    assert "ausgelassen" in prompt  # the repairer got the short one
+    assert "line 500" not in prompt
+
+
+def test_the_repairers_prompt_never_carries_the_full_report(tmp_path: Path) -> None:
+    """The one thing the clip is for: the long report must not reach the model."""
+    long_output = "\n".join(f"line {number}" for number in range(1000))
+    step = make_check(
+        Config(root=tmp_path, test_paths=("tests/",)),
+        lambda kind, _config, _alongside: CheckResult(kind, False, long_output, "pytest"),
+    )
+
+    delta = step(VerifyState(kinds=("test",)))
+    state = VerifyState(report=str(delta["report"]), brief=str(delta["brief"]))
+    prompt = make_repair(("tests/",)).prompt(state)
+
+    assert len(prompt.splitlines()) < 250
+    assert "ausgelassen" in prompt
