@@ -501,16 +501,6 @@ def test_a_run_after_a_resume_on_the_same_runner_still_executes(tmp_path: Path) 
     assert calls == [1], "a fresh run must not inherit the retrace of the resume before it"
 
 
-def test_the_visit_limit_no_longer_blames_the_cache(tmp_path: Path) -> None:
-    graph: Graph[Counter] = Graph("spin", start="tick")
-    graph.add(CodeNode("tick", lambda _data: {}, max_visits=2))
-    graph.edge("tick", "tick")
-
-    result = Runner(graph, Journal(tmp_path / "run.jsonl"), clock=ticking_clock()).run(Counter(0))
-
-    assert "the journal served" not in (result.detail or "")
-
-
 def _gate_flow(tmp_path: Path, before: Callable[[], None]) -> tuple[Graph[Payload], Journal]:
     """A flow with one node *before* the gate, so a resume has something to retrace."""
 

@@ -808,22 +808,6 @@ def test_build_without_a_recorded_baseline_reads_the_tree(tmp_path: Path) -> Non
     assert _guard_of(build(context).graph)(VerifyState())["touched"] == ()
 
 
-def test_a_recorded_baseline_of_nothing_protects_nothing(tmp_path: Path) -> None:
-    """An empty line is not a path: splitting "" must not yield one."""
-    config = Config(root=tmp_path, test_paths=("tests/",))
-    context = FlowContext(
-        root=tmp_path, config=config, options={"checks": "lint"}, baseline=frozenset()
-    )
-    guard = _guard_of(build(context).graph)
-
-    with pytest.raises(FlowExit) as raised:
-        # Not a git repository at all, so the guard's own differ fails -- this
-        # asks the decoder, and an empty baseline lets the read happen at all.
-        guard(VerifyState())
-
-    assert raised.value.code == 4
-
-
 def test_an_unavailable_check_beside_a_repairable_one_still_gets_its_rounds(
     tmp_path: Path,
 ) -> None:

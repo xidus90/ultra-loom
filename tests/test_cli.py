@@ -8,7 +8,14 @@ from types import ModuleType
 
 import pytest
 
-from ultraloom.cli import MarkerError, _recorded_run, _remember_run, main, next_run_id
+from ultraloom.cli import (
+    MarkerError,
+    _decode_baseline,
+    _recorded_run,
+    _remember_run,
+    main,
+    next_run_id,
+)
 from ultraloom.model.port import Reply
 
 A_FLOW = '''
@@ -804,3 +811,13 @@ def test_resume_of_a_run_that_is_not_waiting_is_refused(
     assert "replay" in captured.err
     assert "done" not in captured.out
 
+
+def test_an_empty_recorded_baseline_holds_no_path(tmp_path: Path) -> None:
+    """An empty line is not a path: splitting "" must not yield one.
+
+    A "" in the baseline would be a recorded path that matches nothing, which
+    is harmless -- but "the tree was clean" and "the tree held one nameless
+    file" are different answers, and only one of them is true.
+    """
+    assert _decode_baseline("") == frozenset()
+    assert _decode_baseline("a.py\n\ntests/b.py") == frozenset({"a.py", "tests/b.py"})
