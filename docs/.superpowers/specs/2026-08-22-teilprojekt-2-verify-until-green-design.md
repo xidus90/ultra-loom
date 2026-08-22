@@ -7,6 +7,11 @@ nicht im Code weggeraten.
 Vorgänger: `2026-08-21-ultraloom-kern-design.md` (Abschnitt 16, Zeile
 „Teilprojekt 2") und `2026-08-21-teilprojekt-2-backlog.md`.
 
+> **Nachtrag.** Die Abschnitte 4, 5, 7.1, 7.3 und 8 sind in der Ausführung von
+> diesem Vertrag abgewichen — an mehreren Stellen beschreiben sie den Code
+> strenger, als er ist. Was daraus geworden ist, steht in Abschnitt 11; der
+> geprüfte aktuelle Stand steht auf `docs/abläufe/verify-until-green.md`.
+
 ---
 
 ## 1. Was bewiesen werden soll
@@ -127,6 +132,9 @@ Graph nichts mehr zu tun hat.
 
 ## 4. Der Graph
 
+*Abgewichen: Zustand, Knoten und Kanten haben sich in der Ausführung
+verschoben — siehe Abschnitt 11.*
+
 ### 4.1 Zustand
 
 ```python
@@ -176,6 +184,9 @@ der letzten Reparatur bewertet.
 ---
 
 ## 5. Die Testsperre
+
+*Unvollständig: die Grundlinie, die entscheidet, wem eine Änderung angelastet
+wird, fehlt diesem Abschnitt ganz — siehe Abschnitt 11.*
 
 **Der Reparatur-Agent darf Quellcode ändern, Tests nicht.** Ein Agent, der einen
 fehlschlagenden Test „repariert", indem er ihn abschwächt oder überspringt,

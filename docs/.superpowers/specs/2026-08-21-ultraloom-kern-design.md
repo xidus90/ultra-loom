@@ -230,6 +230,11 @@ coverage = { report = "coverage-report/lcov.info", threshold = 100 }
 Damit läuft `ultraloom run verify-until-green` in mehreren Projekten, ohne dass
 eines davon eine Zeile Ablaufcode besitzt.
 
+*Nachtrag: auf der Kommandozeile heißt der Ablauf `verify_until_green` — ein
+Ablaufname ist für die CLI ein Python-Identifier, die hyphenierte Schreibweise
+wird abgelehnt. Die aufrufbare Oberfläche steht auf
+`docs/abläufe/verify-until-green.md`.*
+
 Erweist sich ein projektspezifischer Ablauf beim dritten Projekt als doch
 allgemein, wandert er nach `flows/` und lässt eine Konfigurationszeile zurück.
 Das ist Beförderung, kein Umbau.
