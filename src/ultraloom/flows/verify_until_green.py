@@ -8,7 +8,6 @@ what lets the same flow run in a Python package and in a Godot game.
 from __future__ import annotations
 
 import dataclasses
-import subprocess
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ from ultraloom.discovery import FlowContext, LoadedFlow
 from ultraloom.graph import END, AgentNode, CodeNode, Graph
 from ultraloom.runner import FlowExit
 from ultraloom.state import Delta
+from ultraloom.worktree import WorktreeError, changed_files
 
 type CheckRunner = Callable[[str, Config], CheckResult]
 type Differ = Callable[[Path], tuple[str, ...]]
@@ -190,64 +190,6 @@ def make_repair(test_paths: tuple[str, ...]) -> AgentNode[VerifyState]:
     )
 
 
-def changed_files(root: Path) -> tuple[str, ...]:
-    """Every path git reports as changed, added or untracked below `root`.
-
-    `status` and not `diff`, because a repairer may add a file, and an
-    untracked file is invisible to `diff`. `-z` because a path holding
-    non-ASCII comes back quoted otherwise, and `-uall` because the default
-    collapses a whole untracked directory into one entry that is not a path to
-    any file.
-    """
-    try:
-        result = subprocess.run(
-            ("git", "status", "--porcelain", "-z", "-uall"),
-            cwd=root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    except OSError as error:
-        # A directory that is not there never reaches a return code: the spawn
-        # itself fails. Same answer as a non-zero one -- see below.
-        raise FlowExit(
-            _EXIT_TOUCHED_A_TEST, f"cannot inspect the working tree in {root}: {error}"
-        ) from error
-    if result.returncode != 0:
-        # A guard that cannot see the working tree must stop the run. Reading
-        # an unanswerable question as "nothing changed" would disable exactly
-        # the rule this node exists for.
-        raise FlowExit(
-            _EXIT_TOUCHED_A_TEST,
-            f"cannot inspect the working tree in {root}: {result.stderr.strip()}",
-        )
-    return _parse_status(result.stdout)
-
-
-def _parse_status(output: str) -> tuple[str, ...]:
-    """The paths out of a `--porcelain -z` answer, read field by field.
-
-    Most fields are "XY path". A rename or a copy is the exception: git emits
-    *two* fields for it, and only the first carries the three-character prefix
-    -- the second is the original path, bare. Cutting three characters off that
-    one too would turn "tests/test_cli.py" into "s/test_cli.py", and a test
-    renamed out of the way would walk straight past the guard.
-    """
-    fields = [field for field in output.split("\0") if field]
-    paths: list[str] = []
-    index = 0
-    while index < len(fields):
-        field = fields[index]
-        paths.append(field[3:])
-        index += 1
-        if field[:1] in ("R", "C") and index < len(fields):
-            paths.append(fields[index])
-            index += 1
-    return tuple(paths)
-
-
 def _is_protected(path: str, test_paths: tuple[str, ...]) -> bool:
     """Whether one reported path is the protected path itself or lies below it.
 
@@ -301,9 +243,14 @@ def make_guard(
         raise ValueError("guard needs test_paths to protect; configure [verify].tests")
 
     def guard(_state: VerifyState) -> Delta:
+        try:
+            reported = differ(root)
+        except WorktreeError as error:
+            # A guard that cannot see the working tree must stop the run.
+            raise FlowExit(_EXIT_TOUCHED_A_TEST, str(error)) from error
         # Subtracted before anything else, so `touched` -- which feeds the
         # stagnation check -- also counts only what this run produced.
-        touched = tuple(path for path in differ(root) if path not in baseline)
+        touched = tuple(path for path in reported if path not in baseline)
         forbidden = tuple(path for path in touched if _is_protected(path, test_paths))
         if forbidden:
             raise FlowExit(
@@ -322,6 +269,15 @@ def _out_of_reach_only(state: VerifyState) -> bool:
     standing beside repairable ones used to end the whole run, so a project
     whose coverage check measures by running the tests never reached a repair
     pass at all once a single test was red.
+
+    An *unavailable* check -- one that could not be resolved to a tool at all --
+    is unrepairable for the same purposes and now takes the same road: it no
+    longer ends the run on the spot, so the repairable checks beside it get
+    their rounds and the model is asked up to `max_rounds` times where a single
+    exit 1 used to come back immediately. That is the intended trade and it is
+    the normal case, not the exception, in a project that permanently lacks a
+    tool -- space has no GDScript typechecker, so `types` is unavailable there
+    on every single run.
     """
     return bool(state.failing) and set(state.failing) <= set(state.unfixable)
 
@@ -369,21 +325,28 @@ def assemble(
     scripted working tree in front of a real Runner: a flow is worth testing as
     a flow, not as four functions that were each fine on their own.
 
-    The working tree is read once here, before the first node runs, and that
-    reading is what `guard` measures against. Taking it per round instead would
-    make every round its own baseline and absolve the repairer of what it had
-    just done. `baseline` is a parameter only so a test can put a known tree in
-    front of the graph without a scripted differ losing its first answer to it.
+    `baseline` is what the working tree looked like when the *run* started, and
+    it is what `guard` measures against. It is passed in rather than taken here
+    whenever the caller knows it: `build` reads it out of the run's recorded
+    options, so a resumed run keeps the baseline of its first start. Taking a
+    fresh one on resume would hand the repairer an alibi -- everything it had
+    already changed before the pause would be in the new baseline, including a
+    test file.
+
+    Reading it here is the fallback for a caller that has none, which is
+    `assemble` used directly and `build` on a run that recorded nothing.
     """
     if baseline is None:
         try:
             baseline = frozenset(differ(root))
-        except FlowExit:
-            # A tree that cannot be read is the guard's finding to report, at
-            # its own turn and with its own message. Dying of it here would
-            # also kill the green case, which never reaches the guard at all --
-            # and refusing to check a project because it is not under version
-            # control is not this flow's call to make.
+        except WorktreeError:
+            # Only this error, not every FlowExit an injected differ might
+            # raise: an unreadable tree is the guard's finding to report, at its
+            # own turn and with its own message, while anything else a differ
+            # raises is a real failure and must not be swallowed here. Dying of
+            # it here would also kill the green case, which never reaches the
+            # guard at all -- and refusing to check a project because it is not
+            # under version control is not this flow's call to make.
             baseline = frozenset()
 
     def report_red(state: VerifyState) -> Delta:
@@ -440,7 +403,12 @@ def build(context: FlowContext) -> LoadedFlow:
         )
     kinds = _kinds_from(context.options.get("checks"), config)
     max_rounds = _max_rounds_from(context.options.get("max_rounds"))
-    graph = assemble(config, context.root, max_rounds=max_rounds)
+    graph = assemble(
+        config,
+        context.root,
+        max_rounds=max_rounds,
+        baseline=context.baseline,
+    )
     # LoadedFlow holds any flow's graph and therefore types it over `object`,
     # which Graph -- being mutable -- is invariant in. The cast is the erasure
     # discovery performs on every flow it loads; every node in this graph still

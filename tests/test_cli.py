@@ -1,5 +1,6 @@
 """Tests for the command line."""
 
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -7,7 +8,7 @@ from types import ModuleType
 
 import pytest
 
-from ultraloom.cli import main, next_run_id
+from ultraloom.cli import MarkerError, _recorded_run, _remember_run, main, next_run_id
 from ultraloom.model.port import Reply
 
 A_FLOW = '''
@@ -681,3 +682,101 @@ def test_a_run_started_without_options_is_continued_without_them(tmp_path: Path)
     code = main(["resume", "0001", "--answer", "yes", "--root", str(tmp_path)])
 
     assert code == 0
+
+
+def _marker(root: Path, run_id: str = "0001") -> Path:
+    return root / ".ultraloom" / "runs" / f"{run_id}.flow"
+
+
+def test_a_run_records_what_was_already_dirty(tmp_path: Path) -> None:
+    """The baseline belongs to the run, so it has to survive the process."""
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    (tmp_path / "dirty.py").write_text("x = 1\n", encoding="utf-8")
+    write_flow(tmp_path, "plain", A_FLOW)
+
+    main(["run", "plain", "--root", str(tmp_path), "--no-model"])
+
+    recorded = _recorded_run(tmp_path, "0001")
+    assert recorded is not None
+    _, options, baseline = recorded
+    assert baseline is not None and "dirty.py" in baseline
+    # And not among the options: a flow validates those, and this is not one.
+    assert "baseline" not in options
+
+
+def test_a_resumed_run_keeps_the_baseline_of_its_first_start(tmp_path: Path) -> None:
+    """Read back, never taken again -- the whole point of recording it."""
+    _remember_run(tmp_path, "0001", "plain", {"checks": "edit"}, frozenset({"tests/a.py"}))
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    # Something the repairer could have done after the pause. Taking a fresh
+    # baseline here would swallow it; reading the recorded one must not.
+    (tmp_path / "later.py").write_text("y = 2\n", encoding="utf-8")
+
+    recorded = _recorded_run(tmp_path, "0001")
+
+    assert recorded == ("plain", {"checks": "edit"}, frozenset({"tests/a.py"}))
+
+
+def test_a_baseline_of_many_paths_stays_one_marker_line(tmp_path: Path) -> None:
+    """A value holding newlines is exactly why the values are encoded."""
+    paths = frozenset({"a.py", "b/c.py", "tests/d.py"})
+    _remember_run(tmp_path, "0001", "plain", {}, paths)
+
+    assert len(_marker(tmp_path).read_text(encoding="utf-8").splitlines()) == 2
+    recorded = _recorded_run(tmp_path, "0001")
+    assert recorded is not None and recorded[2] == paths
+
+
+def test_a_clean_tree_is_recorded_as_an_empty_baseline_not_as_none(tmp_path: Path) -> None:
+    """ "Nothing was dirty" and "the run recorded nothing" are different answers."""
+    _remember_run(tmp_path, "0001", "plain", {}, frozenset())
+
+    recorded = _recorded_run(tmp_path, "0001")
+
+    assert recorded is not None and recorded[2] == frozenset()
+
+
+def test_a_marker_from_before_the_baseline_existed_still_reads(tmp_path: Path) -> None:
+    """Bare values and no baseline line: a run already on disk stays resumable."""
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("plain\nchecks=edit\nmax_rounds=3\n", encoding="utf-8")
+
+    assert _recorded_run(tmp_path, "0001") == (
+        "plain",
+        {"checks": "edit", "max_rounds": "3"},
+        None,
+    )
+
+
+def test_a_marker_line_without_a_separator_is_named_not_traced(tmp_path: Path) -> None:
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("plain\nthis line lost its equals sign\n", encoding="utf-8")
+
+    with pytest.raises(MarkerError) as raised:
+        _recorded_run(tmp_path, "0001")
+
+    assert "0001.flow" in str(raised.value)
+    assert "this line lost its equals sign" in str(raised.value)
+
+
+def test_resume_says_which_marker_it_could_not_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A sentence on stderr and exit 1, not a traceback out of `dict()`."""
+    write_flow(tmp_path, "plain", A_FLOW)
+    main(["run", "plain", "--root", str(tmp_path), "--no-model"])
+    _marker(tmp_path).write_text("plain\nbroken line\n", encoding="utf-8")
+
+    assert main(["resume", "0001", "--root", str(tmp_path)]) == 1
+    assert "broken line" in capsys.readouterr().err
+
+
+def test_a_blank_line_in_a_marker_is_not_a_broken_option(tmp_path: Path) -> None:
+    """A trailing newline, an editor's blank line: neither says anything is wrong."""
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('plain\n\nchecks="edit"\n\n', encoding="utf-8")
+
+    assert _recorded_run(tmp_path, "0001") == ("plain", {"checks": "edit"}, None)

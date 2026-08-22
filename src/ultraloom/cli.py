@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from ultraloom.checks import CheckResult, CheckUnavailableError, run_all, run_check
 from ultraloom.config import Config, ConfigError, load_config
+from ultraloom.worktree import WorktreeError, changed_files
 
 if TYPE_CHECKING:
     # Type-only, so the check side still imports nothing from the harness at
@@ -199,18 +201,24 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
 
     if args.command == "run":
         run_id, flow_name = next_run_id(root), args.flow
-        options = _flow_options(args)
+        options: dict[str, str] = _flow_options(args)
+        taken = _baseline(root)
+        baseline: frozenset[str] | None = taken
     else:
         run_id = args.run_id
         journal_path = root / RUN_DIR / f"{run_id}.jsonl"
         if not journal_path.exists():
             print(f"no run {run_id!r} under {root / RUN_DIR}", file=sys.stderr)
             return _EXIT_FAIL
-        recorded = _recorded_run(root, run_id)
+        try:
+            recorded = _recorded_run(root, run_id)
+        except MarkerError as error:
+            print(str(error), file=sys.stderr)
+            return _EXIT_FAIL
         if recorded is None:
             print(f"run {run_id!r} does not say which flow it belongs to", file=sys.stderr)
             return _EXIT_FAIL
-        flow_name, options = recorded
+        flow_name, options, baseline = recorded
         if args.command == "replay":
             gate = pending_gate(Journal(journal_path))
             if gate is not None:
@@ -224,7 +232,7 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
                 )
                 return _EXIT_FAIL
 
-    context = FlowContext(root=root, config=config, options=options)
+    context = FlowContext(root=root, config=config, options=options, baseline=baseline)
     try:
         loaded = find_flow(flow_name, root, context)
     except (FlowNotFoundError, FlowLoadError) as error:
@@ -232,7 +240,7 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
         return _EXIT_FAIL
 
     if args.command == "run":
-        _remember_run(root, run_id, flow_name, options)
+        _remember_run(root, run_id, flow_name, options, taken)
     runner: Runner[object] = Runner(
         loaded.graph,
         Journal(root / RUN_DIR / f"{run_id}.jsonl"),
@@ -275,7 +283,18 @@ def _show(root: Path, run_id: str) -> int:
     return _EXIT_OK
 
 
-def _recorded_run(root: Path, run_id: str) -> tuple[str, dict[str, str]] | None:
+class MarkerError(ValueError):
+    """Raised for a run marker that cannot be read."""
+
+
+# The marker key the baseline travels under. Reserved: it is popped back out
+# before the options reach a flow, so a flow never sees it among its own.
+_BASELINE = "baseline"
+
+
+def _recorded_run(
+    root: Path, run_id: str
+) -> tuple[str, dict[str, str], frozenset[str] | None] | None:
     """Which flow a run belongs to, and which options it was started with.
 
     The journal records what each node did, not which graph the nodes came
@@ -288,16 +307,85 @@ def _recorded_run(root: Path, run_id: str) -> tuple[str, dict[str, str]] | None:
     if not marker.exists():
         return None
     flow_name, *rest = marker.read_text(encoding="utf-8").splitlines()
-    return flow_name.strip(), dict(line.split("=", 1) for line in rest if line)
+    options: dict[str, str] = {}
+    for line in rest:
+        if not line:
+            continue
+        name, separator, raw = line.partition("=")
+        if not separator:
+            # Said out loud rather than left to `dict()`, which answers a line
+            # without a separator with a ValueError naming neither the file nor
+            # the line -- a traceback where a sentence belongs.
+            raise MarkerError(f"{marker}: option line without '=': {line!r}")
+        options[name] = _decode_option(raw)
+    recorded = options.pop(_BASELINE, None)
+    baseline = None if recorded is None else _decode_baseline(recorded)
+    return flow_name.strip(), options, baseline
 
 
-def _remember_run(root: Path, run_id: str, flow_name: str, options: dict[str, str]) -> None:
+def _decode_option(raw: str) -> str:
+    """One option value, as JSON when it is JSON.
+
+    Values are written with `json.dumps` so that one holding a newline stays on
+    one line -- a run's baseline is a list of paths, so that is the normal case
+    and not an exotic one. Read tolerantly, because markers written before this
+    encoding existed carry the value bare, and a run of ultraloom that is
+    already on disk should not stop being resumable.
+    """
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    # Only a string is this encoding's own work; `checks=123` from an older
+    # marker parses as JSON too and means the text "123".
+    return value if isinstance(value, str) else raw
+
+
+def _remember_run(
+    root: Path,
+    run_id: str,
+    flow_name: str,
+    options: dict[str, str],
+    baseline: frozenset[str],
+) -> None:
     marker = root / RUN_DIR / f"{run_id}.flow"
     marker.parent.mkdir(parents=True, exist_ok=True)
-    # One line each, not JSON: the file is read by eye as often as by code, and
-    # the first line means what it always meant.
-    lines = [flow_name, *(f"{name}={value}" for name, value in options.items())]
+    options = options | {_BASELINE: "\n".join(sorted(baseline))}
+    # One line each, not one JSON document: the file is read by eye as often as
+    # by code, and the first line means what it always meant. Only the values
+    # are JSON, which is what keeps a multi-line one on its own single line.
+    lines = [flow_name, *(f"{name}={json.dumps(value)}" for name, value in options.items())]
     marker.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _decode_baseline(recorded: str) -> frozenset[str]:
+    """The recorded baseline, one path per line.
+
+    A path holding a literal newline -- git allows it -- is split into pieces
+    here and then matches nothing, so a guard reading this treats it as the
+    repairer's doing. That is the safe direction: a false accusation about a
+    pathological path, never a blind spot.
+    """
+    return frozenset(line for line in recorded.split("\n") if line)
+
+
+def _baseline(root: Path) -> frozenset[str]:
+    """What is already dirty in the working tree when a run starts.
+
+    Taken once, at the start, and carried in the run marker from there on. The
+    question "what was dirty before this run began" has exactly one right
+    answer and it comes into being at the start; asking git again on `resume`
+    would answer it with the tree the repairer has meanwhile edited, and every
+    file it had already touched -- a test file included -- would be excused.
+
+    An unreadable tree is recorded as an empty baseline rather than refused: a
+    flow that cares reports it at the point where it actually looks, and one
+    that does not care never needed git at all.
+    """
+    try:
+        return frozenset(changed_files(root))
+    except WorktreeError:
+        return frozenset()
 
 
 def _model(root: Path) -> Model:

@@ -88,6 +88,14 @@ Ein rotes Ergebnis gilt als außer Reichweite, wenn
   gibt es keinen Typechecker, und einen Agenten zu bitten, ein nicht
   installiertes Werkzeug zu reparieren, heißt ihn zu bitten, es zu erfinden.
 
+Beides beendet den Lauf **nur dann sofort**, wenn nichts Reparierbares daneben
+steht. Für ein Projekt, dem ein Werkzeug dauerhaft fehlt, ist das der Normalfall
+und keine Ausnahme: in space ist `types` bei jedem einzelnen Lauf unverfügbar.
+Vorher endete dort jeder Lauf sofort mit Exit 1; jetzt bekommen die übrigen
+Prüfungen ihre Runden, und der Ablauf ruft bis zu `max_rounds` mal das Modell,
+wo vorher gar keiner kam. Das ist der gewollte Tausch — wer ihn nicht will,
+lässt die unverfügbare Art über `--checks` weg.
+
 ## Der Agent
 
 Werkzeugprofil `edit`, Effort `high`, Schema `RepairResult` mit den Feldern
@@ -129,8 +137,8 @@ lesen, hebelte genau die Regel aus, für die dieser Knoten da ist.
 
 ### Die Grundlinie
 
-`assemble` liest den Arbeitsbaum **einmal**, bevor der erste Knoten läuft, und
-gibt das Ergebnis als `baseline` an `guard`. Der Knoten zieht sie ab, bevor er
+Die Grundlinie wird **einmal pro Lauf** aufgenommen, beim Start, und als
+`baseline` an `guard` durchgereicht. Der Knoten zieht sie ab, bevor er
 irgendeinen Pfad bewertet.
 
 Der Grund: `guard` beantwortet die Frage „was hat der Reparatur-Agent getan",
@@ -148,10 +156,36 @@ und das sind die meisten.
 
 Die Grundlinie speist auch `touched` und damit die Stagnationserkennung: was
 schon vorher schmutzig war, zählt nicht als Änderung dieses Laufs. Ist der Baum
-beim Bauen des Graphen gar nicht lesbar, bleibt die Grundlinie leer statt den
-Lauf zu beenden — ein grüner Lauf erreicht die Wache nie, und ein Projekt
-abzulehnen, weil es nicht unter Versionskontrolle steht, ist nicht die
-Entscheidung dieses Ablaufs.
+gar nicht lesbar, bleibt die Grundlinie leer statt den Lauf zu beenden — ein
+grüner Lauf erreicht die Wache nie, und ein Projekt abzulehnen, weil es nicht
+unter Versionskontrolle steht, ist nicht die Entscheidung dieses Ablaufs. Die
+Wache selbst meldet den unlesbaren Baum an ihrer eigenen Stelle, mit Exit 4.
+
+### Die Grundlinie gehört zum Lauf, nicht zum Prozess
+
+Sie steht deshalb im `.flow`-Marker des Laufs, neben `checks` und `max_rounds`:
+`ultraloom run` nimmt sie auf und schreibt sie, `ultraloom resume` und
+`ultraloom replay` lesen sie von dort und nehmen **keine neue**.
+
+Ohne das wäre die Sperre bei jedem fortgesetzten Lauf offen. `resume` baut den
+Ablauf über denselben Weg wie `run`; würde dabei der Arbeitsbaum erneut gelesen,
+stünde alles, was der Reparateur vor der Pause schon geändert hat — eine
+angefasste Testdatei eingeschlossen —, in der neuen Grundlinie und wäre für die
+Wache unsichtbar. Die Frage „was war schon schmutzig, bevor *dieser Lauf*
+begann" hat genau eine richtige Antwort, und die entsteht einmal, beim Start.
+
+Ein Marker aus der Zeit vor der Grundlinie trägt keine; ein solcher Lauf liest
+sich als „nichts aufgezeichnet" und nimmt beim Fortsetzen eine frische. Das ist
+etwas anderes als eine aufgezeichnete leere Grundlinie, die „der Baum war
+sauber" bedeutet.
+
+Der Marker trägt seine Werte deshalb JSON-kodiert: eine Grundlinie ist eine
+Liste von Pfaden, also ein Wert mit Zeilenumbrüchen, und der muss auf seiner
+einen Zeile bleiben. Eine Zeile ohne `=` erzeugt eine Meldung, die Datei und
+Zeile nennt, statt eines Tracebacks aus `dict()`.
+
+Gelesen wird nachsichtig: ältere Marker tragen ihre Werte blank, und ein Lauf,
+der schon auf der Platte liegt, soll nicht aufhören, fortsetzbar zu sein.
 
 ## Konfiguration
 

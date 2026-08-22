@@ -33,11 +33,18 @@ class FlowContext:
     runs in: which tools check it, where its tests are, what the caller asked
     for on the command line. All three arrive here rather than through import
     time magic, so a flow stays a function of its inputs.
+
+    `baseline` is the fourth: what was already changed in the working tree when
+    this *run* started. Beside `options` rather than inside it, because it is
+    not something a caller asked for and a flow that validates its options
+    should not have to know about it. `None` means the run recorded none --
+    older runs did not -- which is a different answer from "the tree was clean".
     """
 
     root: Path
     config: Config
     options: Mapping[str, str] = field(default_factory=dict)
+    baseline: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
