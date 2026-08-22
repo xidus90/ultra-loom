@@ -338,7 +338,6 @@ def assemble(
         return state.rounds > max_rounds
 
     graph: Graph[VerifyState] = Graph("verify-until-green", start="check")
-    # One more than repair: the last check grades the last repair pass.
     graph.add(CodeNode("check", make_check(config, check_runner), max_visits=max_rounds + 1))
     # Every ceiling is max_rounds + 1, check's included. A visit limit is the
     # runner's last resort against a runaway loop; the round counter is the gate
