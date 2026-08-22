@@ -208,3 +208,30 @@ def test_an_island_is_reported_as_unreachable_not_as_a_missing_edge() -> None:
 
     with pytest.raises(GraphError, match="unreachable node"):
         graph.validate()
+
+
+def test_node_names_lists_the_nodes_in_the_order_they_were_added() -> None:
+    graph: Graph[Data] = Graph("ordered", start="a")
+    graph.add(code("a"))
+    graph.add(code("b"))
+
+    assert graph.node_names() == ("a", "b")
+
+
+def test_edges_lists_every_edge_as_a_pair() -> None:
+    """The documentation check compares a drawing with this, so END shows up too."""
+    graph: Graph[Data] = Graph("pairs", start="a")
+    graph.add(code("a", max_visits=2))
+    graph.add(code("b", max_visits=2))
+    graph.edge("a", "b", when=lambda d: d.green)
+    graph.edge("a", END)
+    graph.edge("b", "a")
+
+    assert graph.edges() == (("a", "b"), ("a", END), ("b", "a"))
+
+
+def test_edges_of_a_graph_without_edges_is_empty() -> None:
+    graph: Graph[Data] = Graph("bare", start="a")
+    graph.add(code("a"))
+
+    assert graph.edges() == ()

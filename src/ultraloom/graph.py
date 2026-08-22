@@ -127,6 +127,19 @@ class Graph[T]:
             )
         self._edges.setdefault(src, []).append(_Edge(dst, when, on_error))
 
+    def node_names(self) -> tuple[str, ...]:
+        """Every node's name, in the order they were added."""
+        return tuple(self._nodes)
+
+    def edges(self) -> tuple[tuple[str, str], ...]:
+        """Every edge as (source, target), in the order they were added.
+
+        Published for the documentation check: a diagram that has drifted from
+        the graph is worse than no diagram, and comparing the two needs a way
+        in that is not `_edges`.
+        """
+        return tuple((source, edge.dst) for source, edges in self._edges.items() for edge in edges)
+
     def node(self, name: str) -> Node[T]:
         """Look a node up by name."""
         try:
