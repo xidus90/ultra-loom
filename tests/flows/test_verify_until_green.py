@@ -876,3 +876,24 @@ def test_an_unresolvable_check_is_red_and_out_of_reach_not_an_exception() -> Non
     assert delta["failing"] == ("coverage",)
     assert delta["unfixable"] == ("coverage",)
     assert "unavailable" in str(delta["report"])
+
+
+def test_the_guard_holds_when_the_project_root_is_below_the_repository_root(
+    tmp_path: Path,
+) -> None:
+    """A monorepo: `[verify].tests` says "tests/", git says "package/tests/...".
+
+    The real `changed_files`, not a scripted differ -- the mismatch this test
+    is about lives in the answer git gives, so a scripted one cannot show it.
+    """
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    package = tmp_path / "package"
+    (package / "tests").mkdir(parents=True)
+    (package / "tests" / "test_x.py").write_text("x = 1\n", encoding="utf-8")
+    guard = make_guard(package, ("tests/",), baseline=frozenset())
+
+    with pytest.raises(FlowExit) as raised:
+        guard(VerifyState())
+
+    assert raised.value.code == 4
+    assert "tests/test_x.py" in str(raised.value)

@@ -81,3 +81,35 @@ def test_an_untracked_directory_is_reported_file_by_file(tmp_path: Path) -> None
     (repo / "new" / "two.py").write_text("b = 2\n", encoding="utf-8")
 
     assert set(changed_files(repo)) == {"new/one.py", "new/two.py"}
+
+
+def test_paths_are_reported_relative_to_the_given_root(tmp_path: Path) -> None:
+    """git answers relative to the repository root; the caller asked about `root`.
+
+    A monorepo whose ultraloom project sits in a subdirectory is the case: git
+    says "package/tests/test_x.py" where the project's own `[verify].tests`
+    says "tests/". Left uncorrected, no configured path ever matches and the
+    guard that protects the tests is silently off.
+    """
+    repo = _repo(tmp_path)
+    package = repo / "package"
+    (package / "tests").mkdir(parents=True)
+    (package / "tests" / "test_x.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert changed_files(package) == ("tests/test_x.py",)
+
+
+def test_a_change_outside_the_root_is_not_reported(tmp_path: Path) -> None:
+    """ "Below root" means below root: a sibling's change is not this project's."""
+    repo = _repo(tmp_path)
+    package = repo / "package"
+    package.mkdir()
+    (package / "own.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "sibling.py").write_text("y = 2\n", encoding="utf-8")
+
+    assert changed_files(package) == ("own.py",)
+
+
+def test_a_clean_repository_answers_with_nothing(tmp_path: Path) -> None:
+    """And without asking git a second question: there is no path to relocate."""
+    assert changed_files(_repo(tmp_path)) == ()

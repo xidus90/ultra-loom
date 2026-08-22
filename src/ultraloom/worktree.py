@@ -28,10 +28,33 @@ def changed_files(root: Path) -> tuple[str, ...]:
     non-ASCII comes back quoted otherwise, and `-uall` because the default
     collapses a whole untracked directory into one entry that is not a path to
     any file.
+
+    Paths come back relative to `root`, which is not what git says: porcelain
+    output is relative to the *repository* root whatever the working directory
+    is, and there is no porcelain option that changes it. Where the two are the
+    same directory the difference is invisible, which is why it went unnoticed
+    -- but in a monorepo run with `--root package`, git answers
+    "package/tests/test_x.py" while the project's own `[verify].tests` says
+    "tests/", nothing a caller configured ever matches, and a guard built on
+    this answer is silently off. Anything outside `root` is dropped for the
+    same reason: it is not this project's change.
     """
+    output = _status(root)
+    paths = _parse_status(output)
+    if not paths:
+        # Nothing to relocate, so the second git call is not worth its process.
+        return paths
+    prefix = _prefix(root)
+    if not prefix:
+        return paths
+    return tuple(path[len(prefix) :] for path in paths if path.startswith(prefix))
+
+
+def _git(root: Path, *arguments: str) -> str:
+    """One git call below `root`, with both ways of having no answer refused."""
     try:
         result = subprocess.run(
-            ("git", "status", "--porcelain", "-z", "-uall"),
+            ("git", *arguments),
             cwd=root,
             capture_output=True,
             text=True,
@@ -48,7 +71,21 @@ def changed_files(root: Path) -> tuple[str, ...]:
         # had seen an empty one. Reading an unanswerable question as "nothing
         # changed" would disable exactly the rules this answer feeds.
         raise WorktreeError(f"cannot inspect the working tree in {root}: {result.stderr.strip()}")
-    return _parse_status(result.stdout)
+    return result.stdout
+
+
+def _status(root: Path) -> str:
+    return _git(root, "status", "--porcelain", "-z", "-uall")
+
+
+def _prefix(root: Path) -> str:
+    """How deep `root` sits below the repository root, as git spells it.
+
+    Empty when the two are the same directory, and always slash-terminated
+    otherwise -- so it is exactly the string to cut off the front of a
+    repository-relative path.
+    """
+    return _git(root, "rev-parse", "--show-prefix").strip()
 
 
 def _parse_status(output: str) -> tuple[str, ...]:
