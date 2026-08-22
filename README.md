@@ -89,8 +89,14 @@ mcp_servers = ["wiki"]
 one command, a list is several, and a table is the full form with `commands`
 (required, not empty) and `threaded` (default `false`). A string and a table
 under the same name is something TOML cannot express, so the parser refuses it
-before ultraloom sees it. `coverage` does **not** take the table form — it
-already has `[verify.coverage]` with `report` and `threshold`.
+before ultraloom sees it.
+
+`coverage` takes **none** of the three: it is configured through
+`[verify.coverage].report`, which already carries the command. A `coverage`
+key under `[verify]` is not read and, today, not refused either — it is
+silently ignored and the check falls back on a script or the preset. The table
+form at least says so: `[verify.coverage]` refuses `commands` and `threaded`
+by name and points at `report`.
 
 Every command of a kind runs, including the ones after the first red one: the
 repairer is owed the whole list of findings, and half a list costs another paid
@@ -116,12 +122,22 @@ them and maps a kind onto the single kind it reads from.
 | --- | --- | --- |
 | Python | lint, types, test | coverage |
 | Node | lint, types, test, coverage | — |
-| GDScript | lint, types, test | — (see below) |
+| GDScript | lint, test | (empty) |
 
 Node stays single-stage because `vitest run --coverage` measures and reports in
-one run. GDScript has no coverage preset at all, so a Godot project names both
-its report command under `[verify.coverage]` and its order under
-`[verify.after]` — `coverage = "test"` — itself.
+one run.
+
+The GDScript row is short because two presets are missing, and neither is an
+oversight in this table. There is no `types` preset — GDScript has no type
+checker to name, and `check types` in a Godot project is red with
+"GDScript has no types tool — a known limitation, not a passed check". And
+there is no `coverage` preset — the tools that measure GDScript coverage are an
+editor addon and a project-owned script, neither of which is a command another
+project could run. Stage 1 is therefore genuinely empty until the project fills
+it: a Godot project that measures coverage names its report command under
+`[verify.coverage].report` **and** its order under `[verify.after]` —
+`coverage = "test"` — itself. Both gaps are gaps in the presets, not in this
+page.
 
 A kind that was not requested drops out of the stages without holding the rest
 up: `check coverage` on its own runs immediately rather than after an empty
@@ -157,7 +173,7 @@ reach either: it closes itself the moment its predecessor is green. It is
 therefore not something a repairer should touch, and `verify-until-green`
 leaves it out of the decision to give up.
 
-### Two things worth knowing before you configure a check
+### Before you configure a check
 
 **A check command that comes from a hook script has to be looked at.** ultraloom
 reads the exit code and nothing else. Hook scripts routinely report their

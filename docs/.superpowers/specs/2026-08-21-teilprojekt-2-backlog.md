@@ -58,7 +58,15 @@ Vier Punkte, die während der Ausführung von Teilprojekt 2 gesehen und verschob
 wurden und bis zum Abschlussreview nur im Ausführungsledger standen — der ist
 git-ignoriert und stirbt mit dem Arbeitsbereich.
 
-**ERLEDIGT** — umgesetzt in [2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md) §7. `checks._run` ruft jetzt `process.run`: `Popen` in einer eigenen Gruppe (POSIX) beziehungsweise einem Job-Objekt (Windows, über `ctypes`), zwei Lesefäden je Prozess statt `communicate()`, Baumtötung bei Fristablauf und ein zweites, kurzes Fenster für das Einsammeln. Kommt ein Lesefaden nicht zurück, wird er aufgegeben und das Ergebnis sagt, dass die Ausgabe unvollständig ist. Der Befund von damals steht unverändert darunter, weil er der Grund für den Umbau ist.
+**ERLEDIGT** (zum Punkt darunter) — umgesetzt in
+[2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md)
+§7. `checks._run` ruft jetzt `process.run`: `Popen` in einer eigenen Gruppe
+(POSIX) beziehungsweise einem Job-Objekt (Windows, über `ctypes`), zwei
+Lesefäden je Prozess statt `communicate()`, Baumtötung bei Fristablauf und ein
+zweites, kurzes Fenster für das Einsammeln. Kommt ein Lesefaden nicht zurück,
+wird er aufgegeben und das Ergebnis sagt, dass die Ausgabe unvollständig ist.
+Der Befund von damals steht unverändert darunter, weil er der Grund für den
+Umbau ist.
 
 **Die Zeitgrenze tötet nur das Kind, nicht die Enkel.** `checks._run` ruft
 `subprocess.run(..., timeout=…)` — die Grenze aus §8 der Spec, Vorgabe 600
@@ -197,7 +205,9 @@ und nichts darüber, was ohnehin schon da ist.
 
 ## Was die Prüfkette über Werkzeuge annimmt
 
-**ERLEDIGT, soweit er zu erledigen war** — die Mechanik bleibt bewusst, wie sie war (Ausgabe deuten hieße raten); was fehlte, war die Warnung, und die steht jetzt im README unter *Two things worth knowing before you configure a check*.
+**ERLEDIGT, soweit er zu erledigen war** (zum Punkt darunter) — die Mechanik
+bleibt bewusst, wie sie war (Ausgabe deuten hieße raten); was fehlte, war die
+Warnung, und die steht jetzt im README unter *Before you configure a check*.
 
 **Ein Exit-Code ist das ganze Urteil — und manche Prüfwerkzeuge kennen ihn
 nicht.** `checks._run` liest `returncode`, sonst nichts. Die Prüfungen von space
@@ -215,7 +225,14 @@ Prüfkommando, das aus einem Hook-Skript kommt, ist daraufhin anzusehen, ob es
 seinen Befund im Exit-Code trägt.** Kosten: ein Projekt, das das übersieht,
 bekommt eine grüne Prüfung, die nie etwas geprüft hat.
 
-**ERLEDIGT** — umgesetzt in [2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md) §5 und §6. `lint`, `types` und `test` nehmen drei Gestalten: Zeichenkette, Liste, Tabelle mit `commands` und `threaded`. Die damaligen Folgefragen sind beantwortet: **alle** Kommandos laufen, auch nach dem ersten roten (der Reparateur braucht die vollständige Mängelliste), der Bericht bekommt je Kommando eine `$`-Überschrift und bleibt bei genau einem Kommando Zeichen für Zeichen der alte, und `threaded` ist damit ein reiner Geschwindigkeitsschalter.
+**ERLEDIGT** (zum Punkt darunter) — umgesetzt in
+[2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md)
+§5 und §6. `lint`, `types` und `test` nehmen drei Gestalten: Zeichenkette,
+Liste, Tabelle mit `commands` und `threaded`. Die damaligen Folgefragen sind
+beantwortet: **alle** Kommandos laufen, auch nach dem ersten roten (der
+Reparateur braucht die vollständige Mängelliste), der Bericht bekommt je
+Kommando eine `$`-Überschrift und bleibt bei genau einem Kommando Zeichen für
+Zeichen der alte, und `threaded` ist damit ein reiner Geschwindigkeitsschalter.
 
 **Eine Prüfart, ein Kommando.** `config._KINDS` erlaubt je Art genau eine
 Zeichenkette. space lintet mit zweien: `gdlint` und `gdformat --check` laufen
@@ -229,7 +246,14 @@ noch das zweite? Wie sieht der Bericht aus, den der Reparateur bekommt? Die
 Presets tragen die Antwort in Ansätzen (`measure` plus `argv`), aber für
 mehrere gleichrangige Kommandos ist sie nicht gebaut.
 
-**ERLEDIGT** — umgesetzt in [2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md) §3, §4 und §8. Prüfungen laufen in Stufen, nebenläufig nur innerhalb einer Stufe; die Kanten kommen aus dem Preset und werden von `[verify.after]` überschrieben. Die zweite Frage — was mit einer Prüfung geschieht, deren Vorgänger rot ist — ist mit der neuen Quelle `blocked` beantwortet: rot, nicht übersprungen, aber nicht außer Reichweite. Und die Doppelmessung ist weg: `test` misst mit, wenn `coverage` im selben Lauf angefordert ist.
+**ERLEDIGT** (zum Punkt darunter) — umgesetzt in
+[2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md)
+§3, §4 und §8. Prüfungen laufen in Stufen, nebenläufig nur innerhalb einer
+Stufe; die Kanten kommen aus dem Preset und werden von `[verify.after]`
+überschrieben. Die zweite Frage — was mit einer Prüfung geschieht, deren
+Vorgänger rot ist — ist mit der neuen Quelle `blocked` beantwortet: rot, nicht
+übersprungen, aber nicht außer Reichweite. Und die Doppelmessung ist weg:
+`test` misst mit, wenn `coverage` im selben Lauf angefordert ist.
 
 **Zwischen Prüfungen gibt es keine Reihenfolge.** Spec 9.4 nimmt an, Prüfungen
 seien unabhängig, und lässt sie deshalb nebenläufig laufen. In space ist der
