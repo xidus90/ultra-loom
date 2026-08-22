@@ -114,8 +114,9 @@ liefern `test` und `coverage` ein rotes Ergebnis mit der Quelle `"unready"` —
 **bevor** eine Engine startet. Die Meldung nennt den Griff:
 
 ```
-this Godot project has never been imported, so no test result would mean anything
+this Godot project has never been imported, so nothing measured here would mean anything
 run: godot --headless --path . --import
+a project whose own check command runs the import sets [verify].godot_import = false
 ```
 
 `lint` ist bewusst nicht betroffen: `gdlint` liest Quelltext und braucht kein
@@ -127,6 +128,22 @@ mehr.
 deshalb seinen eigenen Zustand und diese Stufe von vorn — nicht nur ein neues
 Projekt.
 
+### Das Ventil
+
+Ein Projekt, dessen eigenes Prüfkommando den Import selbst fährt — oder das gar
+nicht über eine Engine testet —, setzt `[verify].godot_import = false`. Dann
+greift das Tor nicht.
+
+Der Schlüssel ist nötig, weil das Tor sich sonst nicht abschalten ließe: ein
+solches Projekt wäre auf jedem Lauf rot und obendrein außer Reichweite des
+Reparateurs — es könnte sich nie selbst heilen. Bewusst ein Schlüssel und keine
+Ableitung aus der Herkunft des Kommandos: das Projekt, aus dem diese
+Vorbedingung stammt, konfiguriert sein Test-Kommando selbst, und eine Ableitung
+hätte den Schutz genau dort abgeschaltet, wo er gemessen nötig war.
+
+Die Meldung nennt den Schlüssel deshalb selbst. Wer blockiert ist, soll den Weg
+hinaus lesen können, statt ihn schon zu kennen.
+
 ### Die zweite Falle, die ultraloom nicht prüfen kann
 
 Ein Editor- oder Import-Lauf kann `project.godot` umschreiben, und manche
@@ -137,10 +154,11 @@ liefen. Das Coverage-Tor liest die leeren Datensätze als nicht erreichte Zeilen
 und meldet eine Lücke, die es nicht gibt.
 
 ultraloom kann das nicht erkennen, weil es keine Addon-Namen kennt — was ein
-Sitzungs-Hook ist und welcher davon zu viel ist, steht in keinem Wissen, das die
-Prüfkette hat. Ein Projekt fängt es selbst ab, indem sein Prüf-Tor
-`project.godot` liest, bevor es Motoren startet. Der Griff ist, die Datei zu
-verwerfen.
+Sitzungs-Hook ist und welcher davon einer zu viel ist, steht in keinem Wissen,
+das die Prüfkette hat. Abfangen kann das nur das Projekt selbst, in seinem
+eigenen Vor-Tor: es weiß, welche Hooks in seine `project.godot` gehören, und
+kann die Datei prüfen, bevor irgendetwas startet. Der Griff ist, die geänderte
+Datei zu verwerfen.
 
 ## Der Agent
 
@@ -252,6 +270,7 @@ Aus `.ultraloom/config.toml`:
 | `[verify].tests` | Die Pfade, die der Reparateur nicht anfassen darf. **Pflicht** — ohne sie startet der Ablauf nicht. |
 | `[verify].lint`, `.types`, `.test` | Die Kommandos der jeweiligen Prüfung. Fehlen sie, greifen die Sprachpresets. |
 | `[verify].timeout` | Sekunden pro Prüfkommando. |
+| `[verify].godot_import` | Standard `true`. Auf `false` gesetzt, entfällt die Import-Vorbedingung für `test` und `coverage` — für ein Godot-Projekt, dessen eigenes Prüfkommando den Import fährt oder das nicht über eine Engine testet. Siehe *Was ein Godot-Projekt vorher braucht*. |
 | `[verify.profiles].<name>` | Benannte Listen von Prüfarten, die `--checks <name>` auswählen kann. |
 | `[verify.coverage].report` | Das Kommando der Coverage-Prüfung. Es geht **jedem** anderen Weg vor: gesetzt, gewinnt es auch gegen ein `coverage`-Kommando aus `.ultraloom/checks/` und gegen das Sprachpreset — ohne Warnung. |
 | `[verify.coverage].threshold` | Wird gelesen und weitergereicht, aber **von ultraloom nicht durchgesetzt**: kein Prüfkommando bekommt die Zahl. Durchgesetzt wird, was das Coverage-Werkzeug selbst eingestellt hat. `ultraloom check coverage` sagt das in einer eigenen Zeile dazu. |

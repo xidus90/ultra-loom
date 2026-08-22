@@ -45,6 +45,7 @@ class Config:
     mcp_servers: tuple[str, ...] = ()
     test_paths: tuple[str, ...] = ()
     timeout: int = DEFAULT_TIMEOUT
+    godot_import: bool = True
     profiles: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
@@ -87,6 +88,14 @@ def load_config(root: Path) -> Config:
     if timeout <= 0:
         raise ConfigError(f"{path}: [verify].timeout must be greater than zero")
 
+    godot_import = verify.get("godot_import", True)
+    # A valve, not a switch anybody has to find: the import precondition holds
+    # for every Godot project, and only a project whose own test command runs
+    # the import turns it off. Booleans are ints in TOML, so `1` is refused
+    # rather than silently read as "on".
+    if not isinstance(godot_import, bool):
+        raise ConfigError(f"{path}: [verify].godot_import must be true or false")
+
     profiles: dict[str, tuple[str, ...]] = {}
     for name, kinds in _table(verify, "profiles", path).items():
         if not isinstance(kinds, list) or not all(isinstance(kind, str) for kind in kinds):
@@ -125,6 +134,7 @@ def load_config(root: Path) -> Config:
         mcp_servers=tuple(servers),
         test_paths=tuple(raw_tests),
         timeout=timeout,
+        godot_import=godot_import,
         profiles=profiles,
     )
 

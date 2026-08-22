@@ -185,6 +185,15 @@ def _unready(command: Command, config: Config) -> CheckResult | None:
     """
     if command.kind not in _NEEDS_GODOT_IMPORT:
         return None
+    if not config.godot_import:
+        # The project says it prepares its own suite. Without this valve a
+        # project whose test command runs the import itself would be red on
+        # every run and out of the repairer's reach besides -- it could never
+        # heal itself. A key and not a guess from the command's source: the
+        # project this precondition came from configures its own test command,
+        # so deriving the answer would switch the gate off exactly where it was
+        # measured to be needed.
+        return None
     if _marker(config.root) != "project.godot":
         return None
     if (config.root / _GODOT_IMPORT_MARKER).exists():
@@ -193,11 +202,14 @@ def _unready(command: Command, config: Config) -> CheckResult | None:
 
 
 def _import_message(config: Config) -> str:
-    """Why the check is red, and the one command that fixes it.
+    """Why the check is red, and both ways out of it.
 
     The engine is named only where the preset would have run it. A project that
     configured `test` itself runs some other binary, and naming a path that may
     not exist is worse than saying less.
+
+    The valve is named too: whoever is blocked by this gate should not have to
+    already know the key that opens it.
     """
     engine = _preset_godot_binary(config)
     handle = "--headless --path . --import"
@@ -206,8 +218,10 @@ def _import_message(config: Config) -> str:
     )
     return (
         "this Godot project has never been imported, "
-        "so no test result would mean anything\n"
-        f"run: {run}"
+        "so nothing measured here would mean anything\n"
+        f"run: {run}\n"
+        "a project whose own check command runs the import "
+        "sets [verify].godot_import = false"
     )
 
 

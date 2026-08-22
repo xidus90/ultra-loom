@@ -257,7 +257,19 @@ Liste** — er ist der Grund, warum in space kein grüner `precommit`-Lauf steht
   Quelle `"unready"`, bevor eine Engine startet. Offen bleibt die allgemeine
   Form — jede andere Sprache mit Build-Cache bringt ihre eigene Markerdatei mit,
   und die Vorbedingung steht heute als Sonderfall im Code statt als Feld neben
-  dem Preset.
+  dem Preset. Das Ventil ist `[verify].godot_import = false`, für ein Projekt,
+  das den Import selbst fährt oder gar nicht über eine Engine testet; ein
+  weiterer Sonderfall, den die allgemeine Form mit auflösen müsste.
+- **`_marker` ist first-hit über `PRESETS`.** *Gesehen:* ein Godot-Projekt, das
+  zusätzlich eine `pyproject.toml` trägt — für seine Werkzeugkette, für Skripte
+  —, wird als Python-Projekt erkannt; die Godot-Presets greifen nicht, und die
+  neue Import-Vorbedingung greift ebenfalls nie. *Warum verschoben:*
+  vorbestehendes Verhalten der Erkennung, aber die Vorbedingung erbt es still,
+  und das ist neu. Eine Reparatur heißt zu entscheiden, was bei mehreren Markern
+  gilt — Reihenfolge, Nachfrage, ein expliziter Schlüssel —, und das ist eine
+  Entwurfsfrage über die ganze Prüfkette, nicht über diese eine Vorbedingung.
+  *Was es kostet:* diese Entscheidung, plus einen Weg, wie ein Projekt seine Art
+  selbst benennt.
 - **Die Sitzungs-Hook-Falle kann ultraloom nicht prüfen.** *Gesehen:* ein
   Editor- oder Import-Lauf schreibt `project.godot` um, ein Coverage-Addon
   trägt dabei einen zweiten Sitzungs-Hook ein; beide instrumentieren, beide

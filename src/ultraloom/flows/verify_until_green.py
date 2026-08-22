@@ -39,10 +39,6 @@ UNFIXABLE: tuple[str, ...] = ("coverage",)
 # is not installed is asking it to invent one.
 UNAVAILABLE = "unavailable"
 
-# A check that a project's own precondition made red (checks._unready): a Godot
-# project that has never been imported. Unrepairable for the same reason, and a
-# stricter one -- the handle is an editor run, and an agent must not start one.
-
 
 @dataclass(frozen=True, slots=True)
 class VerifyState:
@@ -115,7 +111,12 @@ def _result_for(kind: str, config: Config, runner: CheckRunner) -> CheckResult:
 
 
 def _out_of_reach(result: CheckResult) -> bool:
-    """Whether a red check is one no repair pass could close."""
+    """Whether a red check is one no repair pass could close.
+
+    UNREADY (checks._unready) joins UNAVAILABLE here: a Godot project that was
+    never imported is red for a reason no edit to the source removes, and the
+    handle is an editor run -- which an agent must not start.
+    """
     return result.kind in UNFIXABLE or result.source in (UNAVAILABLE, UNREADY)
 
 

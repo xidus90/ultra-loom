@@ -594,3 +594,69 @@ def test_an_unimported_godot_project_reports_unready_from_run_all(tmp_path: Path
 
     assert results["test"].source == "unready"
     assert results["lint"].ok
+
+
+def test_a_project_that_prepares_its_own_suite_can_turn_the_precondition_off(
+    tmp_path: Path,
+) -> None:
+    """The valve: a Godot project whose own test command runs the import.
+
+    Without it such a project is red on every run and out of the repairer's
+    reach as well -- it could never heal itself.
+    """
+    godot_project(tmp_path)
+    write_config(
+        tmp_path,
+        "[verify]\ngodot_import = false\ntest = " + json.dumps(py("print('ran')")) + "\n",
+    )
+
+    result = run_check("test", load_config(tmp_path))
+
+    assert result.ok
+    assert result.source == "config"
+
+
+def test_the_precondition_names_the_key_that_turns_it_off(tmp_path: Path) -> None:
+    """Whoever is blocked reads how to unblock themselves."""
+    godot_project(tmp_path)
+
+    output = run_check("test", load_config(tmp_path)).output
+
+    assert "godot_import = false" in output
+
+
+def test_the_coverage_message_does_not_speak_only_of_tests(tmp_path: Path) -> None:
+    godot_project(tmp_path)
+    config = Config(root=tmp_path, coverage_report=py("print('measured')"))
+
+    assert "no test result" not in run_check("coverage", config).output
+
+
+def check_script(root: Path, kind: str, code: str) -> None:
+    """A check script at the conventional path, in this very interpreter."""
+    directory = root / ".ultraloom" / "checks"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{kind}.py").write_text(code, encoding="utf-8")
+
+
+def test_the_precondition_holds_for_a_project_that_tests_through_a_script(
+    tmp_path: Path,
+) -> None:
+    """The third resolution path, exercised rather than merely covered."""
+    godot_project(tmp_path)
+    check_script(tmp_path, "test", "print('ran')")
+
+    result = run_check("test", load_config(tmp_path))
+
+    assert not result.ok
+    assert result.source == "unready"
+
+
+def test_a_script_project_gets_no_invented_binary_either(tmp_path: Path) -> None:
+    godot_project(tmp_path)
+    check_script(tmp_path, "test", "print('ran')")
+
+    output = run_check("test", load_config(tmp_path)).output
+
+    assert "godot --headless" not in output
+    assert "--headless --path . --import" in output

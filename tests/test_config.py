@@ -202,6 +202,8 @@ def test_rejects_a_profile_naming_an_unknown_check(tmp_path: Path) -> None:
         ("[verify]\ntimeout = '90'\n", r"\[verify\].timeout must be an integer"),
         ("[verify]\ntimeout = 0\n", r"\[verify\].timeout must be greater than zero"),
         ("[verify]\ntimeout = true\n", r"\[verify\].timeout must be an integer"),
+        ("[verify]\ngodot_import = 'yes'\n", r"\[verify\].godot_import must be true or false"),
+        ("[verify]\ngodot_import = 1\n", r"\[verify\].godot_import must be true or false"),
         ("[verify.profiles]\nedit = 'lint'\n", r"\[verify.profiles\].edit must be a list"),
         ("[verify.profiles]\nedit = ['lint', 2]\n", r"\[verify.profiles\].edit must be a list"),
     ],
@@ -222,3 +224,14 @@ def test_the_profile_kinds_match_the_check_kinds() -> None:
     from ultraloom.checks import KINDS
 
     assert config_module._CHECK_KINDS == KINDS
+
+
+def test_the_godot_import_precondition_is_on_unless_a_project_turns_it_off(
+    tmp_path: Path,
+) -> None:
+    """A project that prepares its own suite says so; nobody else has to."""
+    assert load_config(tmp_path).godot_import is True
+
+    write_config(tmp_path, "[verify]\ngodot_import = false\n")
+
+    assert load_config(tmp_path).godot_import is False
