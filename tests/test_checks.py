@@ -9,8 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.checks import KINDS, CheckUnavailableError, resolve_check, run_all, run_check
-from ultraloom.config import load_config
+from ultraloom.checks import (
+    KINDS,
+    CheckUnavailableError,
+    Command,
+    _decode,
+    _run_command,
+    resolve_check,
+    run_all,
+    run_check,
+)
+from ultraloom.config import Config, load_config
 
 # The interpreter path goes into a TOML string that is later split with shlex
 # in POSIX mode, where a Windows backslash is an escape character. Forward
@@ -410,3 +419,58 @@ def test_a_bare_command_that_is_not_installed_does_not_get_the_relative_path_hin
 
     assert not result.ok
     assert "relative path" not in result.output
+
+
+def _sleep_command(seconds: float) -> str:
+    """A command line that does nothing for `seconds`, in this interpreter.
+
+    Built from sys.executable rather than a shell's `sleep`, which Windows
+    does not have.
+    """
+    return py(f"import time; time.sleep({seconds})")
+
+
+def _argv(command: str) -> tuple[str, ...]:
+    return tuple(shlex.split(command))
+
+
+def test_a_command_that_overruns_is_a_red_result(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, commands={"lint": _sleep_command(5)}, timeout=1)
+
+    result = run_check("lint", config)
+
+    assert not result.ok
+    assert "timed out after 1s" in result.output
+    assert result.kind == "lint"
+
+
+def test_a_command_within_the_limit_is_untouched(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, commands={"lint": _sleep_command(0)}, timeout=30)
+
+    assert run_check("lint", config).ok
+
+
+def test_the_measuring_step_gets_the_limit_too(tmp_path: Path) -> None:
+    # The measure step is a second process, so a shared budget would make its
+    # limit depend on how long the first one took.
+    command = Command(
+        "coverage", _argv(_sleep_command(0)), "test", measure=_argv(_sleep_command(5))
+    )
+    config = Config(root=tmp_path, timeout=1)
+
+    result = _run_command(command, config)
+
+    assert not result.ok
+    assert "timed out after 1s" in result.output
+
+
+def test_partial_output_survives_every_shape_the_exception_can_carry() -> None:
+    """text=True makes it str in practice, but the exception promises less.
+
+    A wrong assumption here would turn a timeout report into a TypeError, so
+    the two shapes the type allows but this call never produces are covered
+    directly rather than through a process that cannot produce them.
+    """
+    assert _decode(None) == ""
+    assert _decode(b"half a line\xff") == "half a line\ufffd"
+    assert _decode("half a line") == "half a line"

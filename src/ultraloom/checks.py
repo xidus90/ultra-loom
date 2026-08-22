@@ -140,12 +140,15 @@ def run_check(kind: str, config: Config) -> CheckResult:
     or over data left behind by an earlier run -- would be green for reasons
     that have nothing to do with this one.
     """
-    command = resolve_check(kind, config)
+    return _run_command(resolve_check(kind, config), config)
+
+
+def _run_command(command: Command, config: Config) -> CheckResult:
     if command.measure:
-        measured = _run(command.measure, kind, config, command.source)
+        measured = _run(command.measure, command.kind, config, command.source)
         if not measured.ok:
             return measured
-    return _run(command.argv, kind, config, command.source)
+    return _run(command.argv, command.kind, config, command.source)
 
 
 def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> CheckResult:
@@ -156,7 +159,15 @@ def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> Check
             capture_output=True,
             text=True,
             check=False,
+            timeout=config.timeout,
         )
+    except subprocess.TimeoutExpired as expired:
+        # A red result and not an exception: a check that never finished is a
+        # check that failed, and giving it its own exception would buy the flow
+        # a special path that ends in exactly the same place.
+        partial = _decode(expired.stdout) + _decode(expired.stderr)
+        detail = f"{shlex.join(argv)!r} timed out after {config.timeout}s"
+        return CheckResult(kind, False, f"{detail}\n{partial}".rstrip(), source)
     except OSError as error:
         # A tool that is not installed must read as a failed check, not as a
         # traceback that takes the whole chain down with it.
@@ -176,6 +187,19 @@ def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> Check
         return CheckResult(kind, False, detail, source)
     output = completed.stdout + completed.stderr
     return CheckResult(kind, completed.returncode == 0, output, source)
+
+
+def _decode(captured: bytes | str | None) -> str:
+    """What a timed-out process managed to write before it was killed.
+
+    TimeoutExpired types its capture as bytes|str|None regardless of text=True,
+    and the partial output is the only clue to *where* the tool hung.
+    """
+    if captured is None:
+        return ""
+    if isinstance(captured, bytes):
+        return captured.decode("utf-8", errors="replace")
+    return captured
 
 
 def run_all(config: Config) -> tuple[CheckResult, ...]:
