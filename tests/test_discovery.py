@@ -246,7 +246,6 @@ def test_a_context_defaults_to_empty_options(tmp_path: Path) -> None:
     assert FlowContext(root=tmp_path, config=Config(root=tmp_path)).options == {}
 
 
-@pytest.mark.xfail(reason="verify_until_green arrives in task 10", strict=True)
 def test_a_bundled_flow_is_found_without_a_project_directory(tmp_path: Path) -> None:
     names = [entry.name for entry in list_flows(tmp_path)]
 
@@ -287,7 +286,6 @@ def test_a_file_that_cannot_be_a_flow_is_listed_with_its_reason(tmp_path: Path) 
     assert "identifier" in entries["my-flow"].problem
 
 
-@pytest.mark.xfail(reason="verify_until_green arrives in task 10", strict=True)
 def test_the_available_list_in_a_not_found_error_names_the_origins(tmp_path: Path) -> None:
     with pytest.raises(FlowNotFoundError, match=r"verify_until_green \(bundled\)"):
         find_flow("absent", tmp_path)
