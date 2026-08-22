@@ -64,7 +64,7 @@ def test_config_beats_everything(tmp_path: Path) -> None:
 
     command = resolve_check("lint", load_config(tmp_path))
 
-    assert command.argv == ("my-own-linter", "--strict")
+    assert command.argvs[0] == ("my-own-linter", "--strict")
     assert command.source == "config"
 
 
@@ -77,8 +77,8 @@ def test_a_convention_script_beats_the_preset(tmp_path: Path) -> None:
     command = resolve_check("lint", load_config(tmp_path))
 
     assert command.source == "script"
-    assert str(script) in " ".join(command.argv)
-    assert command.argv[0] == sys.executable
+    assert str(script) in " ".join(command.argvs[0])
+    assert command.argvs[0][0] == sys.executable
 
 
 def test_a_script_in_another_language_is_run_directly(tmp_path: Path) -> None:
@@ -88,7 +88,7 @@ def test_a_script_in_another_language_is_run_directly(tmp_path: Path) -> None:
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text("#!/bin/sh\n", encoding="utf-8")
 
-    assert resolve_check("lint", load_config(tmp_path)).argv == (str(script),)
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == (str(script),)
 
 
 def test_an_empty_checks_directory_falls_through_to_the_preset(tmp_path: Path) -> None:
@@ -104,20 +104,20 @@ def test_the_python_preset_is_found_from_pyproject(tmp_path: Path) -> None:
     command = resolve_check("types", load_config(tmp_path))
 
     assert command.source == "preset"
-    assert command.argv[:2] == ("uvx", "mypy")
+    assert command.argvs[0][:2] == ("uvx", "mypy")
 
 
 def test_the_node_preset_is_found_from_package_json(tmp_path: Path) -> None:
     node_project(tmp_path)
 
-    assert resolve_check("types", load_config(tmp_path)).argv == ("tsc", "--noEmit")
-    assert resolve_check("lint", load_config(tmp_path)).argv == ("eslint", ".")
+    assert resolve_check("types", load_config(tmp_path)).argvs[0] == ("tsc", "--noEmit")
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == ("eslint", ".")
 
 
 def test_the_godot_preset_is_found_from_project_godot(tmp_path: Path) -> None:
     godot_project(tmp_path)
 
-    assert resolve_check("lint", load_config(tmp_path)).argv == ("uvx", "gdlint", ".")
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == ("uvx", "gdlint", ".")
 
 
 def test_gdscript_has_no_typechecker_and_says_so(tmp_path: Path) -> None:
@@ -146,7 +146,7 @@ def test_the_exec_prefix_is_put_in_front_of_a_preset(tmp_path: Path) -> None:
 
     command = resolve_check("lint", load_config(tmp_path))
 
-    assert command.argv == ("docker", "compose", "exec", "-T", "frontend", "eslint", ".")
+    assert command.argvs[0] == ("docker", "compose", "exec", "-T", "frontend", "eslint", ".")
 
 
 def test_the_exec_prefix_is_put_in_front_of_a_configured_command(tmp_path: Path) -> None:
@@ -156,7 +156,7 @@ def test_the_exec_prefix_is_put_in_front_of_a_configured_command(tmp_path: Path)
         '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = "biome check"\n',
     )
 
-    assert resolve_check("lint", load_config(tmp_path)).argv == (
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == (
         "docker",
         "compose",
         "exec",
@@ -311,7 +311,7 @@ def test_the_python_coverage_preset_measures_before_it_reports(tmp_path: Path) -
     command = resolve_check("coverage", load_config(tmp_path))
 
     assert command.measure == ("uv", "run", "coverage", "run", "-m", "pytest")
-    assert command.argv == ("uv", "run", "coverage", "report")
+    assert command.argvs[0] == ("uv", "run", "coverage", "report")
 
 
 def test_the_exec_prefix_is_put_in_front_of_the_measuring_step_too(tmp_path: Path) -> None:
@@ -322,7 +322,7 @@ def test_the_exec_prefix_is_put_in_front_of_the_measuring_step_too(tmp_path: Pat
     command = resolve_check("coverage", load_config(tmp_path))
 
     assert command.measure[:5] == ("docker", "compose", "exec", "-T", "app")
-    assert command.argv[:5] == ("docker", "compose", "exec", "-T", "app")
+    assert command.argvs[0][:5] == ("docker", "compose", "exec", "-T", "app")
 
 
 def test_a_measuring_step_runs_before_the_check_itself(
@@ -434,7 +434,7 @@ def test_the_measuring_step_gets_the_limit_too(tmp_path: Path) -> None:
     # The measure step is a second process, so a shared budget would make its
     # limit depend on how long the first one took.
     command = Command(
-        "coverage", _argv(_sleep_command(0)), "test", measure=_argv(_sleep_command(5))
+        "coverage", (_argv(_sleep_command(0)),), "test", measure=_argv(_sleep_command(5))
     )
     config = Config(root=tmp_path, timeout=1)
 
@@ -477,7 +477,7 @@ def test_a_configured_coverage_report_is_the_coverage_command(tmp_path: Path) ->
 
     command = resolve_check("coverage", config)
 
-    assert command.argv == ("uv", "run", "--script", "gate.py")
+    assert command.argvs[0] == ("uv", "run", "--script", "gate.py")
     assert command.source == "config"
     assert command.measure == ()
 
@@ -686,3 +686,112 @@ def test_a_timed_out_check_names_its_partial_output(tmp_path: Path) -> None:
     assert "timed out after 1s" in result.output
     assert "half done" in result.output
     assert elapsed < 12, "the run waited for the grandchild instead of for its own limit"
+
+
+def test_a_configured_kind_resolves_all_its_commands(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, commands={"lint": ("first .", "second .")})
+    command = resolve_check("lint", config)
+    assert command.argvs == (("first", "."), ("second", "."))
+
+
+def test_every_command_gets_the_exec_prefix(tmp_path: Path) -> None:
+    config = Config(
+        root=tmp_path,
+        commands={"lint": ("first", "second")},
+        exec_prefix=("docker", "compose", "exec", "-T", "app"),
+    )
+    command = resolve_check("lint", config)
+    assert all(argv[:5] == ("docker", "compose", "exec", "-T", "app") for argv in command.argvs)
+
+
+def test_the_threaded_switch_reaches_the_command(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, commands={"lint": ("a", "b")}, threaded=frozenset({"lint"}))
+    assert resolve_check("lint", config).threaded
+
+
+def test_every_command_runs_even_after_a_red_one(tmp_path: Path) -> None:
+    """A half list of findings costs the repairer a whole extra round."""
+    python_project(tmp_path)
+    config = Config(
+        root=tmp_path,
+        commands={
+            "lint": (
+                py("import sys; print('first says no'); sys.exit(1)"),
+                py("print('second still ran')"),
+            )
+        },
+    )
+
+    result = run_check("lint", config)
+
+    assert not result.ok
+    assert "first says no" in result.output
+    assert "second still ran" in result.output
+
+
+def test_several_commands_are_labelled_in_the_report(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (py("print('a')"), py("print('b')"))})
+
+    output = run_check("lint", config).output
+
+    assert output.count("$ ") == 2, "each command names itself, or the report cannot be read"
+
+
+def test_a_single_command_keeps_the_report_it_always_had(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (py("print('only')"),)})
+    assert run_check("lint", config).output == "only\n"
+
+
+def test_a_threaded_kind_runs_its_commands_at_the_same_time(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    sleeper = py("import time; time.sleep(2)")
+    config = Config(
+        root=tmp_path,
+        commands={"lint": (sleeper, sleeper)},
+        threaded=frozenset({"lint"}),
+        max_parallel=4,
+    )
+
+    started = time.monotonic()
+    run_check("lint", config)
+    elapsed = time.monotonic() - started
+
+    # Two two-second sleeps: sequential is 4s, concurrent is 2s. The bound sits
+    # between them with room for a loaded machine, which is why it is 3.5 and
+    # not 2.5. Relative and generous on purpose -- this is the suite's second
+    # wall-clock test.
+    assert elapsed < 3.5, f"the two commands took {elapsed:.1f}s; they did not overlap"
+
+
+def test_the_report_order_is_the_configured_one_even_when_threaded(tmp_path: Path) -> None:
+    """The order commands finish in is noise; a report that reorders cannot be diffed."""
+    python_project(tmp_path)
+    config = Config(
+        root=tmp_path,
+        commands={
+            "lint": (
+                py("import time; time.sleep(1); print('slow first')"),
+                py("print('fast second')"),
+            )
+        },
+        threaded=frozenset({"lint"}),
+        max_parallel=4,
+    )
+
+    output = run_check("lint", config).output
+
+    assert output.index("slow first") < output.index("fast second")
+
+
+def test_a_warning_rides_in_front_of_the_report_without_being_a_verdict(tmp_path: Path) -> None:
+    """Spec 8: reading something no command in this run produced is worth saying,
+    but it is never the reason a check is red."""
+    python_project(tmp_path)
+    command = Command("lint", (_argv(py("print('clean')")),), "config", warning="stale data")
+
+    result = _run_command(command, Config(root=tmp_path))
+
+    assert result.ok
+    assert result.output == "stale data\nclean\n"

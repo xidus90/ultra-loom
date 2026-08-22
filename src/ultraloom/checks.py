@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from threading import BoundedSemaphore, Semaphore
 
 from ultraloom import process
 from ultraloom.config import Config
@@ -85,15 +86,25 @@ class CheckUnavailableError(RuntimeError):
 class Command:
     """A resolved check: what to run, and where the decision came from.
 
-    `measure` is the step that prepares what `argv` then reads. It is empty for
-    every check that measures and reports in one go, which is all of them
-    except Python's coverage.
+    `argvs` is a *sequence* because a kind may name several equal-ranking
+    commands -- two linters that check different things. They all run, even
+    after a red one: the point of the chain is a complete list of findings, and
+    half a list costs the repairer a whole extra round.
+
+    `measure` is the step that prepares what `argvs` then reads, and it is not
+    equal-ranking: a report over data nobody measured is meaningless, so its
+    failure stops the check. It is empty for every check that measures and
+    reports in one go, which is all of them except Python's coverage.
     """
 
     kind: str
-    argv: tuple[str, ...]
+    argvs: tuple[tuple[str, ...], ...]
     source: str
     measure: tuple[str, ...] = ()
+    threaded: bool = False
+    # Prepended to the output when this check reads something no command in
+    # this run produced. A warning and never a verdict -- see spec 8.
+    warning: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,18 +131,19 @@ def resolve_check(kind: str, config: Config) -> Command:
         words = tuple(shlex.split(config.coverage_report))
         if not words:
             raise CheckUnavailableError("empty command configured for [verify.coverage].report")
-        return Command(kind, config.exec_prefix + words, "config")
+        return Command(kind, (config.exec_prefix + words,), "config")
 
     if kind in config.commands:
-        # One argv, although a kind may now name several commands: running the
-        # rest is Task 6's job. Config itself refuses an empty list and a blank
-        # command, so the first one exists and is never a bare [exec].prefix.
-        words = tuple(shlex.split(config.commands[kind][0]))
-        return Command(kind, config.exec_prefix + words, "config")
+        # Config itself refuses an empty list and a blank command, so every
+        # argv here exists and none is a bare [exec].prefix.
+        argvs = tuple(
+            config.exec_prefix + tuple(shlex.split(line)) for line in config.commands[kind]
+        )
+        return Command(kind, argvs, "config", threaded=kind in config.threaded)
 
     script = _script_for(kind, config.root)
     if script is not None:
-        return Command(kind, config.exec_prefix + script, "script")
+        return Command(kind, (config.exec_prefix + script,), "script")
 
     marker = _marker(config.root)
     if marker is None:
@@ -151,7 +163,7 @@ def resolve_check(kind: str, config: Config) -> Command:
     # nowhere to be reported from.
     if len(steps) > 2:  # pragma: no cover  # guards the preset table, not any input
         raise CheckUnavailableError(f"the {kind!r} preset has more than two steps")
-    return Command(kind, steps[-1], "preset", measure=steps[0] if len(steps) == 2 else ())
+    return Command(kind, (steps[-1],), "preset", measure=steps[0] if len(steps) == 2 else ())
 
 
 def run_check(kind: str, config: Config) -> CheckResult:
@@ -227,17 +239,65 @@ def _preset_godot_binary(config: Config) -> str | None:
     return shlex.join((*config.exec_prefix, PRESETS["project.godot"]["test"][0][0]))
 
 
-def _run_command(command: Command, config: Config) -> CheckResult:
+def _run_command(command: Command, config: Config, gate: Semaphore | None = None) -> CheckResult:
+    """Every command of one kind, and one verdict out of them.
+
+    The cap is passed in rather than made here so that later callers -- stages
+    and kinds above this one -- can share a single one. A cap created per call
+    would let each level spend the whole budget again.
+    """
+    gate = gate or BoundedSemaphore(config.max_parallel)
     if command.measure:
-        measured = _run(command.measure, command.kind, config, command.source)
+        measured = _run(command.measure, command.kind, config, command.source, gate)
         if not measured.ok:
             return measured
-    return _run(command.argv, command.kind, config, command.source)
+
+    if command.threaded and len(command.argvs) > 1:
+        with ThreadPoolExecutor(max_workers=len(command.argvs)) as pool:
+            results = tuple(
+                pool.map(
+                    lambda argv: _run(argv, command.kind, config, command.source, gate),
+                    command.argvs,
+                )
+            )
+    else:
+        results = tuple(
+            _run(argv, command.kind, config, command.source, gate) for argv in command.argvs
+        )
+    return _merged(command, results)
 
 
-def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> CheckResult:
+def _merged(command: Command, results: tuple[CheckResult, ...]) -> CheckResult:
+    """One verdict and one report out of however many commands ran.
+
+    With a single command the report is byte for byte what it always was: a
+    heading over a lone command would change every existing output for nothing.
+    The order is the configured one, never the order they finished in -- a
+    report whose lines move between runs cannot be compared.
+    """
+    if len(results) == 1:
+        output = results[0].output
+    else:
+        output = "\n\n".join(
+            f"$ {shlex.join(argv)}\n{result.output.rstrip()}"
+            for argv, result in zip(command.argvs, results, strict=True)
+        )
+    if command.warning:
+        output = f"{command.warning}\n{output}"
+    return CheckResult(
+        command.kind,
+        all(result.ok for result in results),
+        output,
+        command.source,
+    )
+
+
+def _run(
+    argv: tuple[str, ...], kind: str, config: Config, source: str, gate: Semaphore
+) -> CheckResult:
     try:
-        completed = process.run(argv, cwd=config.root, timeout=config.timeout)
+        with gate:
+            completed = process.run(argv, cwd=config.root, timeout=config.timeout)
     except OSError as error:
         # A tool that is not installed must read as a failed check, not as a
         # traceback that takes the whole chain down with it.
