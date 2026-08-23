@@ -67,17 +67,24 @@ class Config:
     profiles: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """No check kind may carry a command that runs nothing.
+        """No check kind may carry a command that runs nothing, and the cap is real.
 
         Not only load_config's business: whoever builds a Config by hand gets
         the same assurance. An argv that is blank leaves nothing but the
         [exec].prefix, and a prefix that exits 0 reports a check nobody
         configured as passed -- the one failure in this system that actually
         does damage.
+
+        A cap of zero is the quiet version of the same thing: run_kinds makes a
+        BoundedSemaphore of it, and the first acquire against zero blocks in the
+        pool forever -- no timeout, no message, a run that checks nothing and
+        never comes back.
         """
         for kind, commands in self.commands.items():
             if not commands or any(not command.strip() for command in commands):
                 raise ConfigError(f"check {kind!r} has an empty command")
+        if self.max_parallel <= 0:
+            raise ConfigError(f"max_parallel must be greater than zero, not {self.max_parallel}")
 
 
 def load_config(root: Path) -> Config:

@@ -157,6 +157,23 @@ def test_a_handmade_config_cannot_carry_a_kind_without_commands(tmp_path: Path) 
         Config(root=tmp_path, commands={"lint": ()})
 
 
+def test_a_handmade_config_cannot_carry_a_parallelism_of_zero(tmp_path: Path) -> None:
+    """A cap of zero does not report red, it hangs.
+
+    run_kinds turns the number into a BoundedSemaphore, and the first acquire
+    against a semaphore of zero blocks in the pool with no timeout and nothing
+    to read the reason off. The file is refused this value; a Config built by
+    hand has to be refused it too.
+    """
+    with pytest.raises(ConfigError, match="greater than zero"):
+        Config(root=tmp_path, max_parallel=0)
+
+
+def test_a_handmade_config_cannot_carry_a_negative_parallelism(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="greater than zero"):
+        Config(root=tmp_path, max_parallel=-1)
+
+
 def test_the_coverage_table_refuses_the_keys_it_does_not_honour(tmp_path: Path) -> None:
     """[verify.coverage] looks like the new table form and is not one.
 

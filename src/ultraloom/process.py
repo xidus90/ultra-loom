@@ -22,10 +22,11 @@ descendants for the processes Windows refuses to put in it. Both are chosen by
 that can only execute one of the two.
 
 Nothing in here may leave a process running. Every path out of `run` -- a clean
-exit, a timeout, an exception on the way to the wait -- goes through a kill and
-a *bounded* reap. A process this module started suspended and then walked away
-from would sit there until the machine is rebooted, holding two pipes, one such
-process per check command.
+exit that left a descendant holding the pipe, a timeout, an exception on the way
+to the wait -- goes through a kill and a *bounded* reap; only a clean exit with
+nothing left behind needs none, because there is nothing left to kill. A process
+this module started suspended and then walked away from would sit there until
+the machine is rebooted, holding two pipes, one such process per check command.
 """
 
 from __future__ import annotations
@@ -114,7 +115,7 @@ def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
     # platform"; spawn_kwargs is where that decision is made, and tested.
     # Annotated because the ignore below would otherwise make `process` Any and
     # let every later mistake through unseen.
-    process: subprocess.Popen[bytes] = subprocess.Popen(  # type: ignore[call-overload]
+    process: subprocess.Popen[bytes] = subprocess.Popen(  # type: ignore[call-overload]  # see above
         tuple(argv),
         cwd=cwd,
         stdout=subprocess.PIPE,
@@ -141,12 +142,26 @@ def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
         for drain in (out, err):
             drain.thread.join(max(0.0, deadline - time.monotonic()))
 
+        abandoned = out.abandoned or err.abandoned
+        if abandoned and not timed_out:
+            # The command exited inside its limit and a reader is *still* stuck
+            # in read1(): a descendant inherited the pipe and outlived it.
+            # Nothing else will ever close that write end -- the two daemon
+            # readers would sit there for the life of this process, holding
+            # both pipe ends, and the descendant would run on. Asked only after
+            # the join, because before it a live reader means nothing: a thread
+            # that has not yet noticed EOF is not a thread that is stuck.
+            _kill_tree(process, deadline=deadline)
+
         return Completed(
             returncode=NO_EXIT_CODE if process.returncode is None else process.returncode,
             stdout=out.text(),
             stderr=err.text(),
             timed_out=timed_out,
-            output_abandoned=out.abandoned or err.abandoned,
+            # The state from before that kill, deliberately: whatever the tree
+            # would still have written died with it, so a capture that was
+            # short at that moment stays reported as short.
+            output_abandoned=abandoned,
         )
     except BaseException:
         # On Windows the process is at this point possibly still *suspended*:

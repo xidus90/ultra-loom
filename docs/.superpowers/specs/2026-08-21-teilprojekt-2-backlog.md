@@ -407,9 +407,43 @@ Verwandt und ausdrücklich *kein* Fehler: ein Tippfehler **innerhalb** von
 unbekannten Schlüssel abzulehnen eine eigene Entscheidung über Vorwärts-
 kompatibilität wäre. Der README benennt beides.
 
-**Was der Umbau noch nicht gemessen hat.** Der `precommit`-Lauf in space ist
-seither nicht wiederholt worden. Er wäre die erste Messung von zwei Zahlen, die
-dieser Umfang behauptet: was `threaded = true` über zwei gleichrangige
-GDScript-Linter bringt, und was die eingesparte zweite Suite kostet
-beziehungsweise spart. Die Zahlen gehören auf die Ablaufseite, neben die
-bestehenden Tabellen — dort steht bisher nur der Stand vor dem Umbau.
+**Was der Umbau behauptet hat, ist gemessen — siehe Ablaufseite.** Der
+`precommit`-Lauf in space ist wiederholt worden; die Zahlen stehen in
+`docs/abläufe/verify-until-green.md` neben den bestehenden Tabellen und nicht
+hier, damit sie eine Quelle haben statt zweier. Kurz: `threaded = true` über die
+zwei gleichrangigen GDScript-Linter bringt Faktor **1,60** (Median 5,94 s gegen
+9,48 s seriell, je drei Messungen), und die eingesparte zweite Suite ist an den
+`report_N/`-Verzeichnissen von gdUnit4 abgelesen. Wer die 1,60 anderswo als
+1,87 wiederfindet, liest einen überholten Zwischenstand: die erste serielle
+Zahl war eine Einzelmessung mit einem Ausreißer von 11,04 s, dessen Ursache
+offen bleibt.
+
+**`checks.py` trägt fünf Aufgaben auf 795 Zeilen.** Presettabelle, Auflösung und
+Messentscheidung, Godot-Bereitschaftstor, Ausführung und Berichtsverschmelzung,
+Scheduler. Die Nähte sind schon benannt und tragen: `schedule.py` nähme
+`run_kinds`, `_gated`, `_stages`, `_blocker`, `_run_or_report`, `run_all`,
+`BLOCKED` und `CheckRunner` mit — das hängt nur an `_predecessor_of`,
+`ConfigError` und dem `CheckRunner`-Protokoll, und das Protokoll ist genau der
+Schnitt. `readiness.py` nähme `_unready`, `_import_message`,
+`_preset_godot_binary` und die beiden Godot-Konstanten, also die einzige
+Godot-Sonderkenntnis außerhalb von `PRESETS`. Kosten: `test_module_boundary.py`
+muss die neuen Namen kennen. Eigener Task, kein Merge-Blocker.
+
+**Der eine verbliebene Weg zu Grün über alte Daten.** Ein Projekt mit eigenem
+`[verify].test` **und** `[verify.coverage].report` **und**
+`[verify.after].coverage = "test"`: `_measures_for` ist dann falsch — das
+Testkommando ist fremd, und über fremde Kommandos wird nichts angenommen —,
+aber `after in alongside` ist wahr, also gibt es weder einen `measure`-Schritt
+noch eine Warnung. Läuft `test` grün, ohne zu messen, berichtet `coverage` über
+den vorigen Lauf und kann grün melden; `blocked` schützt hier nicht, weil der
+Vorgänger ja grün ist. Das ist die beschlossene Restlücke des Rulings zu Task 8
+und steht so im Docstring von `_measures_for`. Der Backlog nannte bisher nur die
+umgekehrte Nachlässigkeit — die Warnung, die zu oft käme —, nicht diese.
+
+**`brief` ist vollständig aus `report` ableitbar und geht trotzdem in den
+`input_hash`.** Das Ruling bleibt richtig: der Zustand ist, was der Knoten
+gesehen hat, und eine gekürzte Fassung, die anders gekürzt wird, ist ein anderer
+Zustand. Die Kosten gehören aber danebengeschrieben: jede künftige Änderung an
+`clip` invalidiert zusätzlich sämtliche Journale — nicht nur die Einträge, die
+den Bericht wirklich gelesen haben. Wer `clip` anfasst, weiß dann, was er
+auslöst.

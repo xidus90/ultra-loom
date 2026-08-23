@@ -283,7 +283,15 @@ def test_run_all_actually_overlaps_the_waiting(tmp_path: Path) -> None:
     start-up cost, which on a loaded runner is the same order as the sleep.
     """
     slow = py("import time; time.sleep(0.4)")
-    verify_config(tmp_path, lint=slow, types=slow, test=slow)
+    # The cap is on processes and defaults to the machine's cpu count, so on a
+    # one- or two-core runner the three checks would queue behind it and the
+    # comparison below would measure the cap rather than the overlap.
+    write_config(
+        tmp_path,
+        "[verify]\nmax_parallel = 3\n"
+        + "\n".join(f"{kind} = {json.dumps(slow)}" for kind in ("lint", "types", "test"))
+        + "\n",
+    )
     config = load_config(tmp_path)
 
     started = time.perf_counter()
@@ -764,8 +772,8 @@ def test_a_threaded_kind_runs_its_commands_at_the_same_time(tmp_path: Path) -> N
 
     # Two two-second sleeps: sequential is 4s, concurrent is 2s. The bound sits
     # between them with room for a loaded machine, which is why it is 3.5 and
-    # not 2.5. Relative and generous on purpose -- this is the suite's second
-    # wall-clock test.
+    # not 2.5. Generous on purpose -- one of the suite's handful of wall-clock
+    # tests, all of which name max_parallel for the same reason.
     assert elapsed < 3.5, f"the two commands took {elapsed:.1f}s; they did not overlap"
 
 

@@ -70,9 +70,31 @@ _ORPHAN = (
 # printed its failures, and then something below it refuses to die.
 _ORPHAN_AFTER_OUTPUT = "print('before the orphan', flush=True); " + _ORPHAN
 
+# The same orphan, but the parent exits cleanly the moment it has been left
+# behind. That combination -- inside the timeout, and yet a reader that never
+# comes back -- is the one no other test in this suite produces.
+_ORPHAN_OF_A_CLEAN_EXIT = (
+    "import subprocess, sys; "
+    "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])"
+)
+
 
 def _python(code: str) -> tuple[str, ...]:
     return (sys.executable, "-c", code)
+
+
+def _unwrapped_python(code: str) -> tuple[str, ...]:
+    """The interpreter the venv was built from, not the venv's own python.exe.
+
+    Only for the tests that walk the *process tree*. A virtual environment's
+    python.exe on Windows can be a trampoline that re-executes the real
+    interpreter as a child of its own, which puts an extra, short-lived link
+    between the command and its orphan. When that link dies, Windows leaves the
+    orphan pointing at a pid that no longer exists, and no walk over
+    (pid, parent pid) pairs can bridge it -- which would make the test measure
+    the venv layout rather than the kill.
+    """
+    return (getattr(sys, "_base_executable", sys.executable), "-c", code)
 
 
 def test_it_reports_what_the_command_said(tmp_path: Path) -> None:
@@ -222,6 +244,36 @@ def test_a_timed_out_run_leaves_no_reader_behind(tmp_path: Path) -> None:
     """Abandoned readers used to accumulate over a run; a working tree kill ends that."""
     run(_python(_ORPHAN), cwd=tmp_path, timeout=1)
     assert not _leftover_drain_threads()
+
+
+def test_an_orphan_of_a_command_that_exited_cleanly_is_killed_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The module promises a kill on *every* way out, not only on the timeout.
+
+    A command that leaves a grandchild behind and then exits inside its limit
+    used to walk past the kill: nothing ever closes the inherited pipe, so both
+    daemon readers sit in read1() for the life of the process, and the
+    grandchild runs on. Over a repair round times four check kinds that is a
+    thread and a pipe pair per check, none of which anybody can see.
+    """
+    # The readers can only be waited on for as long as they are stuck, and the
+    # point of the test is that they are stuck; shortened so that costs half a
+    # second rather than the full grace period.
+    monkeypatch.setattr(process_module, "DRAIN_GRACE", 0.5)
+
+    completed = run(_unwrapped_python(_ORPHAN_OF_A_CLEAN_EXIT), cwd=tmp_path, timeout=30)
+
+    assert not completed.timed_out, "the command exited on its own, well inside its limit"
+    assert completed.output_abandoned, (
+        "a reader that was still stuck must be reported, or a short capture reads as a quiet tool"
+    )
+    # The kill happens after the readers have been given up on, so the threads
+    # end a moment later rather than before run() returns.
+    deadline = time.monotonic() + 10
+    while _leftover_drain_threads() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _leftover_drain_threads(), "the orphan still holds the pipe; it was never killed"
 
 
 def test_a_process_without_a_job_is_still_killed(tmp_path: Path) -> None:

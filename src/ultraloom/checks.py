@@ -225,7 +225,7 @@ def resolve_check(
         words = tuple(shlex.split(config.coverage_report))
         if not words:
             raise CheckUnavailableError("empty command configured for [verify.coverage].report")
-        _, warning = _measuring_state(kind, marker, config, alongside, ())
+        warning = _warning_for(kind, marker, config, alongside)
         return Command(kind, (config.exec_prefix + words,), "config", warning=warning)
 
     if kind in config.commands:
@@ -234,12 +234,12 @@ def resolve_check(
         argvs = tuple(
             config.exec_prefix + tuple(shlex.split(line)) for line in config.commands[kind]
         )
-        _, warning = _measuring_state(kind, marker, config, alongside, ())
+        warning = _warning_for(kind, marker, config, alongside)
         return Command(kind, argvs, "config", threaded=kind in config.threaded, warning=warning)
 
     script = _script_for(kind, config.root)
     if script is not None:
-        _, warning = _measuring_state(kind, marker, config, alongside, ())
+        warning = _warning_for(kind, marker, config, alongside)
         return Command(kind, (config.exec_prefix + script,), "script", warning=warning)
 
     if marker is None:
@@ -269,6 +269,17 @@ def resolve_check(
         measure=(config.exec_prefix + measure) if measure else (),
         warning=warning,
     )
+
+
+def _warning_for(kind: str, marker: str | None, config: Config, alongside: frozenset[str]) -> str:
+    """The stale-data warning for a check that brings no measuring step of its own.
+
+    A command the project named itself, a convention script, a configured
+    coverage report: none of them has a measuring step ultraloom could hand it,
+    so the only half of `_measuring_state` that can say anything here is the
+    warning. Named once rather than unpacked and thrown away at each call.
+    """
+    return _measuring_state(kind, marker, config, alongside, ())[1]
 
 
 def _measuring_state(

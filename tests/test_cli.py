@@ -390,7 +390,14 @@ def test_check_all_reports_the_resolvable_and_the_unavailable_alike(
 def test_check_all_waits_for_the_checks_at_the_same_time(tmp_path: Path) -> None:
     """The reason `all` exists: one startup cost, and the waiting overlaps."""
     slow = python_command("import time; time.sleep(0.5)")
-    write_config(tmp_path, f"[verify]\nlint = '{slow}'\ntypes = '{slow}'\ntest = '{slow}'\n")
+    # Spelled out rather than inherited: max_parallel defaults to the machine's
+    # cpu count and caps the *processes*, so on a one- or two-core runner these
+    # three sleeps would be serialised by the cap and the bound below would fail
+    # for a reason that has nothing to do with what is being tested.
+    write_config(
+        tmp_path,
+        f"[verify]\nmax_parallel = 3\nlint = '{slow}'\ntypes = '{slow}'\ntest = '{slow}'\n",
+    )
     started = time.perf_counter()
 
     main(["check", "all", "--root", str(tmp_path)])
