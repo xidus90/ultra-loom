@@ -608,3 +608,59 @@ MCP-Server des Benutzers anbietet. Er rief `mcp__context-mode__ctx_execute` auf,
 um sein Ergebnis mit einem eigenen gdlint-Lauf nachzuprüfen, und wurde von
 `permission_mode: "dontAsk"` abgewiesen — die Sperre hält, aber die Werkzeuge
 stehen im Prompt und kosten eine Werkzeugrunde.
+
+## Die Läufe mit Stufen: space, 23.08.2026
+
+Die offene Stelle von oben — das Coverage-Tor liest einen Bericht, den die Suite
+erst später schreibt — ist gemessen zu. Derselbe Worktree, dieselbe
+Konfiguration bis auf zwei Schlüssel: `[verify.lint]` als Tabelle mit `gdlint`
+**und** `gdformat --check`, und `[verify.after] coverage = "test"`.
+
+| Lauf | Aufruf | Exit | Runden | Token | Laufzeit |
+| --- | --- | --- | --- | --- | --- |
+| `check all` | alle vier Prüfarten | 1 | — | 0 | 484 s |
+| 0001 | `--checks precommit`, Baum wie vorgefunden | 1 | 1 | 0 | 728 s |
+| 0003 | `--checks precommit`, ein Fehler in der Quelle | 1 | 2 | 5482 | 1099 s |
+
+`check all` ist der eigentliche Nachweis: `coverage` lief in der Stufe **nach**
+`test`, mit `source="config"`, und fand den LCOV-Bericht, den die Suite
+unmittelbar davor geschrieben hatte. Die Zeichenkette „no coverage report" kommt
+in 1,2 MB Ausgabe null Mal vor. Rot war `coverage` trotzdem — mit 41 echten
+ungedeckten Zeilen, denselben, die space' eigenes Commit-Tor ausweist. Die Suite
+lief dabei **einmal**.
+
+`threaded = true` über die zwei Lint-Kommandos: 5,90 s gegen 11,04 s seriell,
+Faktor 1,87. `gdformat --check` lief damit zum ersten Mal überhaupt unter
+ultraloom und ist grün über 277 Dateien.
+
+### Was Lauf 0003 an der Mechanik zeigte
+
+Ein absichtlich invertierter Einzeiler in `core/market_pricing.gd` ließ 22
+Testfälle fallen. Runde 1: `failing = ['test', 'coverage']`,
+`blocked = ['coverage']` — die blockierte Prüfung beendete den Lauf **nicht**,
+der Reparateur wurde gerufen. Der Bericht an das Modell war auf **203 Zeilen**
+gekürzt, das Journal trägt die vollen **8540**; Faktor 42, und die 203 Zeilen
+genügten dem Modell, um in einer Runde auf die eine Zeile zu schließen (5482
+Token, 108 s, Effort `high`). Runde 2: `test` grün, `coverage` nicht mehr
+blockiert, sondern gelaufen und rot mit den 41 vorbestehenden Zeilen — als
+`unfixable` geführt, also endet der Lauf ehrlich rot.
+
+`guard` meldete nur ultraloom' eigene Journaldateien. Die fünfzehn Pfade, die
+der Godot-Import geändert hatte — `project.godot` darunter, geschützt —, stehen
+in der Grundlinie und blieben draußen.
+
+### Zwei Eigenschaften, die man kennen muss
+
+**`precommit` erreicht in space den Reparateur nie, solange `coverage` rot ist.**
+Lauf 0001 endete nach einem einzigen `check` mit 0 Token: `coverage` ist per Art
+unreparierbar, und wenn es die einzige rote Prüfung ist, greift die Kante nach
+`report_red` sofort. Das ist derselbe Befund wie bei ultraloom' eigenem Lauf
+0003 — er wiegt in space nur schwerer, weil die Abdeckung dort dauerhaft unter
+der Schwelle liegt. Wer die Reparatur erreichen will, lässt `coverage` weg.
+
+**ultraloom reicht `cli_path` nicht durch.** Auf einer Maschine, auf der nur
+der npm-Shim `claude.CMD` im `PATH` steht, weigert sich das Agent-SDK, ihn zu
+starten, und jeder Agent-Knoten fällt nach drei Sekunden — mit einer Meldung,
+die eine Option nennt, die ultraloom gar nicht anbietet. Bis es einen Schlüssel
+dafür gibt, hilft nur, das Verzeichnis einer nativen `claude.exe` vorn in den
+`PATH` zu schieben.
