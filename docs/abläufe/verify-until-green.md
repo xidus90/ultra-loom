@@ -620,18 +620,33 @@ Konfiguration bis auf zwei Schlüssel: `[verify.lint]` als Tabelle mit `gdlint`
 | --- | --- | --- | --- | --- | --- |
 | `check all` | alle vier Prüfarten | 1 | — | 0 | 484 s |
 | 0001 | `--checks precommit`, Baum wie vorgefunden | 1 | 1 | 0 | 728 s |
-| 0003 | `--checks precommit`, ein Fehler in der Quelle | 1 | 2 | 5482 | 1099 s |
+| 0002 | `--checks precommit`, Fehler in der Quelle | 1 | abgebrochen | 0 | 519 s |
+| 0003 | `--checks precommit`, derselbe Fehler | 1 | 2 | 5482 | 1099 s |
+
+Lauf 0002 steht hier, obwohl er nichts über die Stufen sagt: die Prüfkette lief
+vollständig durch, dann fiel der `repair`-Knoten nach 3,42 s am Agent-SDK. Warum,
+steht unten unter *Drei Befunde*.
 
 `check all` ist der eigentliche Nachweis: `coverage` lief in der Stufe **nach**
 `test`, mit `source="config"`, und fand den LCOV-Bericht, den die Suite
 unmittelbar davor geschrieben hatte. Die Zeichenkette „no coverage report" kommt
 in 1,2 MB Ausgabe null Mal vor. Rot war `coverage` trotzdem — mit 41 echten
-ungedeckten Zeilen, denselben, die space' eigenes Commit-Tor ausweist. Die Suite
-lief dabei **einmal**.
+ungedeckten Zeilen, denselben, die space' eigenes `coverage_gate.py` ausweist;
+die Gegenprobe zeigt sie damit als vorbestehend und nicht als Artefakt der
+Umstellung.
 
-`threaded = true` über die zwei Lint-Kommandos: 5,90 s gegen 11,04 s seriell,
-Faktor 1,87. `gdformat --check` lief damit zum ersten Mal überhaupt unter
-ultraloom und ist grün über 277 Dateien.
+**Die Suite lief dabei einmal, und das ist gezählt.** gdUnit4 legt je Lauf ein
+`reports/report_N/` an und schreibt je Sitzung ein Startbanner: im Protokoll des
+`check all` steht `GdUnit4 Comandline Tool` genau einmal, `GdUnit4 session
+starting` genau einmal, das Engine-Banner genau einmal — in einem Lauf, der
+`test` und `coverage` zusammen anforderte. Über alle fünf `check`-Besuche des
+Tages entstanden fünf `reports/report_N`: einer je Besuch, zwei davon für die
+zwei Runden von Lauf 0003. Vor den Stufen wären es zwei je Besuch gewesen.
+
+`threaded = true` über die zwei Lint-Kommandos, je drei Messungen: Median
+**5,94 s** (5,84–6,10) gegen **9,48 s** seriell (9,37–9,71), Faktor **1,60**.
+`gdformat --check` lief damit zum ersten Mal überhaupt unter ultraloom und ist
+grün über 277 Dateien.
 
 ### Was Lauf 0003 an der Mechanik zeigte
 
@@ -643,13 +658,23 @@ gekürzt, das Journal trägt die vollen **8540**; Faktor 42, und die 203 Zeilen
 genügten dem Modell, um in einer Runde auf die eine Zeile zu schließen (5482
 Token, 108 s, Effort `high`). Runde 2: `test` grün, `coverage` nicht mehr
 blockiert, sondern gelaufen und rot mit den 41 vorbestehenden Zeilen — als
-`unfixable` geführt, also endet der Lauf ehrlich rot.
+`unfixable` geführt, also endet der Lauf ehrlich rot. Der eingebaute Fehler ist
+nach dem Lauf zurückgenommen; space' Baum trägt ihn nicht.
 
-`guard` meldete nur ultraloom' eigene Journaldateien. Die fünfzehn Pfade, die
-der Godot-Import geändert hatte — `project.godot` darunter, geschützt —, stehen
-in der Grundlinie und blieben draußen.
+Bemerkenswert an der Reparatur: das Modell schrieb
+`SCARCITY_MAX - (MAX-MIN)*ratio`, wo vor dem eingebauten Fehler
+`SCARCITY_MIN + (MAX-MIN)*(1.0-ratio)` stand — algebraisch dasselbe, textlich
+etwas anderes. Es hat die Absicht rekonstruiert und nicht den Diff
+zurückgerollt; anders wäre nicht zu unterscheiden, ob der Reparateur die Ursache
+verstand oder nur eine Änderung rückgängig machte.
 
-### Zwei Eigenschaften, die man kennen muss
+Die Grundlinie hielt: die **vierzehn** Pfade aus dem Godot-Import
+(`project.godot` — geschützt —, zwölf `*.import`, eine `.uid`) blieben draußen.
+
+### Drei Befunde
+
+Der erste ist eine Eigenschaft, die man kennen muss; die beiden anderen sind
+Arbeit, die an ultraloom offen ist.
 
 **`precommit` erreicht in space den Reparateur nie, solange `coverage` rot ist.**
 Lauf 0001 endete nach einem einzigen `check` mit 0 Token: `coverage` ist per Art
@@ -660,7 +685,18 @@ der Schwelle liegt. Wer die Reparatur erreichen will, lässt `coverage` weg.
 
 **ultraloom reicht `cli_path` nicht durch.** Auf einer Maschine, auf der nur
 der npm-Shim `claude.CMD` im `PATH` steht, weigert sich das Agent-SDK, ihn zu
-starten, und jeder Agent-Knoten fällt nach drei Sekunden — mit einer Meldung,
-die eine Option nennt, die ultraloom gar nicht anbietet. Bis es einen Schlüssel
-dafür gibt, hilft nur, das Verzeichnis einer nativen `claude.exe` vorn in den
-`PATH` zu schieben.
+starten, und jeder Agent-Knoten fällt nach 3,42 s — mit einer Meldung, die eine
+Option nennt, die ultraloom gar nicht anbietet. Genau daran starb Lauf 0002. Bis
+es einen Schlüssel dafür gibt, hilft nur, das Verzeichnis einer nativen
+`claude.exe` vorn in den `PATH` zu schieben.
+
+**`guard` beschuldigt den Reparateur der Schreibvorgänge des Ablaufs.** In Lauf
+0003 meldete er `touched = ['.ultraloom/runs/0003.flow',
+'.ultraloom/runs/0003.jsonl']` — Dateien, die ultraloom selbst während des Laufs
+schreibt. Folgenlos war das nur, weil `.ultraloom/runs/` in keiner
+`[verify].tests`-Liste steht. Ein Projekt, das `.ultraloom/` dort einträgt — und
+das liegt nahe, dort stehen schließlich die Schwellen —, bekäme bei **jedem**
+Lauf Exit 4 und die Meldung, der Reparateur habe geschützte Dateien angefasst.
+`touched` ist damit heute nicht das, was es zu sein behauptet; `.ultraloom/runs/`
+gehört aus dem `git status` von `guard` herausgefiltert, so wie die Grundlinie
+den Import herausfiltert.
