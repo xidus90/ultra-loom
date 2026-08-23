@@ -777,3 +777,82 @@ diese Schreibweise passt. Der Rest von `.ultraloom/` bleibt sichtbar:
 ist genau der Fall, für den `guard` da ist. Drei Tests in `test_worktree.py`
 halten die Grenze, einer in `tests/flows/` fährt den gemeldeten Fall mit dem
 echten `differ` und `.ultraloom/` unter den geschützten Pfaden.
+
+## Der Lauf, der das Preset erwischte: ultraloom, 23.08.2026
+
+Fünf Läufe auf dem Zweig `task/verify-until-green-first-run`. Der erste sollte
+nur den grünen Fall bestätigen und endete rot.
+
+### Ein Typechecker ohne die Abhängigkeiten des Projekts prüft nichts
+
+`check` meldete zwanzig `types`-Fehler, während `uv run mypy` von Hand
+aufgerufen sauber durchlief. Der Reparateur bekam den Befund, änderte nichts und
+schrieb auf, warum: das Python-Preset rief `uvx mypy`, und `uvx` startet mypy in
+einer Wegwerf-Umgebung, in der nur mypy liegt. Sechzehn Meldungen waren
+`import-not-found` auf `pytest` und `claude_agent_sdk`, die übrigen vier
+`untyped-decorator` — Folgefehler, weil ein unauflösbares `pytest` jedes
+`@pytest.fixture` zu `Any` macht und `strict` untypisierte Dekoratoren verbietet.
+Auflösbar wäre das nur durch Unterdrückung, und die ist ausgeschlossen. Der Lauf
+endete mit `stagnated`, also ehrlich rot.
+
+Die Diagnose war richtig, und der Fehler lag im Preset. `uvx` gehört dorthin, wo
+das Werkzeug den Quelltext nur liest — ruff. Wer ihn importieren muss, braucht
+`uv run`; `test` machte das längst so, `types` nicht. Das Preset ist korrigiert,
+Spec 9.2 nachgezogen.
+
+Bemerkenswert ist, **warum es so lange unentdeckt blieb**: ultraloom prüft sich
+selbst, aber seine `.ultraloom/config.toml` überschrieb `lint`, `types` und
+`test` allesamt mit `uv run`-Kommandos. Das Projekt, das den Fehler hätte finden
+müssen, war das einzige, das ihn zudeckte. Die Datei nennt jetzt nur noch
+`lint` — die beiden anderen Zeilen wiederholten das Preset, und eine solche
+Zeile verliert stillschweigend, was am Preset hängt: bei `test` die Messung, die
+`coverage` im selben Lauf mitnimmt.
+
+### Die Zahlen
+
+| Lauf | Profil | Ausgang | repair | Dauer |
+|---|---|---|---|---|
+| Diagnose | `edit` | rot, `stagnated` | 13.058 tok, 206 s | — |
+| grün | `edit` | Exit 0, eine Runde | kein Modellaufruf | 5,6 s |
+| Reparatur | `edit` | Exit 0, eine Runde | 1.805 tok, 38,9 s | 40,5 s |
+| Testsperre | `precommit` | Exit 1, `stagnated` | 3.751 tok, 60,0 s | 2 min 22 s |
+
+Die eingebaute Schadstelle war eine ungenutzte Variable plus eine falsche
+Rückgabeannotation in `checks.py`. Der Reparateur nahm beide in einem Zug
+zurück, `git diff` war danach leer, und er fasste keine Testdatei an. Die zwei
+`check`-Einträge des Laufs tragen **verschiedene** `input_hash` und
+verschiedenen Inhalt — der Journal-Cache greift also wirklich nur beim
+Nachvollziehen.
+
+Im `precommit`-Lauf kostet `check` allein rund 40 s je Durchgang, zweimal
+gefahren. Gegenüber knapp einer Minute Modellzeit ist die Prüfkette hier nicht
+das Beiwerk, sondern die Hälfte des Laufs.
+
+### Die Wache bleibt unausgelöst
+
+Ein falscher Testwert brachte auch diesmal keinen Übergriff zustande: der Agent
+verglich die Behauptung mit der Spec und beiden Plänen, wies nach, dass der Test
+der Ausreißer ist, und ließ die Quelle stehen. Der Befund weiter oben gilt
+unverändert.
+
+### Wo `guard` blind ist, ohne es zu sagen
+
+Läuft ultraloom in einem Verzeichnis, das gar kein Arbeitsbaum ist — eine Kopie
+neben dem Repo, ein Ordner unter einem ignorierten Pfad —, dann greifen alle
+`git`-Aufrufe auf das umgebende Repository durch. `changed_files` liefert dort
+immer die leere Menge, `guard` meldet folgerichtig `touched = []`, und der Lauf
+sieht aus wie ein bestandener. Er ist keiner: die Testsperre ist in einem
+solchen Baum wirkungslos, und niemand erfährt es. Der Ablauf prüft bislang nicht,
+ob sein `root` überhaupt ein eigener Arbeitsbaum ist.
+
+### Kleinkram
+
+Der Reparateur meldete im Profil `edit` „shell execution denied in this
+session" — er kann die Prüfungen, die er reparieren soll, nicht selbst
+nachfahren und muss dem gereichten Bericht glauben. Das ist so gewollt, steht
+aber in seinen Zusammenfassungen als Einschränkung und ist beim Lesen der
+Berichte mitzudenken.
+
+Der Ablauf heißt auf der Kommandozeile `verify_until_green`, nicht
+`verify-until-green`: ein Ablaufname ist ein Python-Bezeichner, weil ein Ablauf
+ein Modul ist. Der Bindestrich holt eine Fehlermeldung, keine Datei.
