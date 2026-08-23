@@ -303,9 +303,14 @@ Vervielfältigung ist nichts entgegengesetzt.
 
 | Erkannt an | Lint | Typen | Tests / Coverage |
 |---|---|---|---|
-| `pyproject.toml` | `uvx ruff check`, `uvx ruff format --check` | `uvx mypy` | `uvx coverage` |
+| `pyproject.toml` | `uvx ruff check`, `uvx ruff format --check` | `uv run mypy` | `uv run pytest`, `uv run coverage` |
 | `package.json` | `eslint .` | `tsc --noEmit` | `vitest run --coverage` |
 | `project.godot` | `uvx gdlint` | — (GDScript hat keine) | Godot-Headless-Aufruf |
+
+`uvx` nur dort, wo das Werkzeug den Quelltext liest, ohne ihn zu importieren.
+Ein Typechecker und eine Testsuite brauchen die Abhängigkeiten des Projekts;
+in der Wegwerf-Umgebung von `uvx` sind sie nicht auflösbar, und die Prüfung
+meldet dann Fehler, die keine Quelländerung beheben kann.
 
 Fehlt eine Fähigkeit in einer Sprache — GDScript hat keinen Typechecker —, wird
 das als bekannte Einschränkung gemeldet, nicht als bestandene Prüfung.

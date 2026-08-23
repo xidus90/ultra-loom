@@ -64,7 +64,11 @@ _COVERAGE_RUN = ("uv", "run", "coverage", "run", "-m", "pytest", *_TERSE_PYTEST)
 PRESETS: Mapping[str, Mapping[str, Preset]] = {
     "pyproject.toml": {
         "lint": Preset(("uvx", "ruff", "check", ".", "--output-format=concise")),
-        "types": Preset(("uvx", "mypy", "--no-error-summary", "--no-pretty")),
+        # `uv run`, not `uvx`: a type checker has to see the project's
+        # dependencies. `uvx` starts mypy in a throwaway environment that holds
+        # only mypy, so every third-party import there is unresolvable and the
+        # check reports failures no source change can fix.
+        "types": Preset(("uv", "run", "mypy", "--no-error-summary", "--no-pretty")),
         # `measuring` rather than a second suite run: with coverage in the same
         # run, `test` measures as it goes and the report reads what it wrote.
         # Alone, `test` stays the fast path and pays no measuring overhead.

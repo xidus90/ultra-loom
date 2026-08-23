@@ -263,7 +263,7 @@ flowchart TD
 ```toml
 [verify]
 lint     = "uvx ruff check ."
-types    = "uvx mypy ."
+types    = "uv run mypy ."
 test     = "uv run pytest"
 coverage = { threshold = 100 }
 tests    = ["tests/"]     # was der Reparatur-Agent nicht anfassen darf

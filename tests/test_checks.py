@@ -112,7 +112,7 @@ def test_the_python_preset_is_found_from_pyproject(tmp_path: Path) -> None:
     command = resolve_check("types", load_config(tmp_path))
 
     assert command.source == "preset"
-    assert command.argvs[0][:2] == ("uvx", "mypy")
+    assert command.argvs[0][:3] == ("uv", "run", "mypy")
 
 
 def test_the_node_preset_is_found_from_package_json(tmp_path: Path) -> None:

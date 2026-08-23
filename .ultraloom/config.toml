@@ -1,12 +1,12 @@
-# ultraloom prüft sich mit seinem eigenen Werkzeug. Diese Kommandos sind nicht
-# das ausgeschriebene Python-Preset: das Preset greift zu `uvx ruff` und
-# `uvx mypy` und bekommt damit die Version, die uvx gerade holt. `uv run` löst
-# die Entwicklungsabhängigkeiten auf, die dieses Projekt festnagelt — die
-# Prüfungen des Ablaufs sind also dieselben, die auch die Gates fahren.
+# ultraloom prüft sich mit seinem eigenen Werkzeug. Nur `lint` steht hier: das
+# Preset greift zu `uvx ruff` und bekommt damit die Version, die uvx gerade
+# holt, während `uv run` die Entwicklungsabhängigkeit auflöst, die dieses
+# Projekt festnagelt — dieselbe ruff-Version also, die auch die Gates fahren.
+# `types` und `test` fehlen mit Absicht: das Preset trifft dort bereits zu, und
+# ein Eintrag, der es wiederholt, verliert stillschweigend, was daran hängt —
+# bei `test` die Messung, die `coverage` im selben Lauf mitnimmt.
 [verify]
-lint  = "uv run ruff check ."
-types = "uv run mypy"
-test  = "uv run pytest"
+lint = "uv run ruff check ."
 
 # Was der Reparateur nicht anfassen darf. `pyproject.toml` steht neben den
 # Tests, weil dort die Schwellen wohnen: eine gelockerte ruff-Regel oder ein
