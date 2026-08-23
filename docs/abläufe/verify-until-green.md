@@ -759,6 +759,13 @@ schreibt. Folgenlos war das nur, weil `.ultraloom/runs/` in keiner
 `[verify].tests`-Liste steht. Ein Projekt, das `.ultraloom/` dort einträgt — und
 das liegt nahe, dort stehen schließlich die Schwellen —, bekäme bei **jedem**
 Lauf Exit 4 und die Meldung, der Reparateur habe geschützte Dateien angefasst.
-`touched` ist damit heute nicht das, was es zu sein behauptet; `.ultraloom/runs/`
-gehört aus dem `git status` von `guard` herausgefiltert, so wie die Grundlinie
-den Import herausfiltert.
+`touched` war damit nicht das, was es zu sein behauptete.
+
+**Geschlossen.** `worktree.changed_files` lässt weg, was unter
+`.ultraloom/runs/` liegt — an der einen Stelle, die sowohl die Grundlinie als
+auch `guard` lesen, und erst nachdem die Pfade auf `root` bezogen sind, weil nur
+diese Schreibweise passt. Der Rest von `.ultraloom/` bleibt sichtbar:
+`config.toml` trägt die Schwellen, gegen die geprüft wird, und wer daran ändert,
+ist genau der Fall, für den `guard` da ist. Drei Tests in `test_worktree.py`
+halten die Grenze, einer in `tests/flows/` fährt den gemeldeten Fall mit dem
+echten `differ` und `.ultraloom/` unter den geschützten Pfaden.

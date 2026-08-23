@@ -17,14 +17,12 @@ from typing import TYPE_CHECKING
 
 from ultraloom.checks import CheckResult, CheckUnavailableError, run_all, run_check
 from ultraloom.config import Config, ConfigError, load_config
-from ultraloom.worktree import WorktreeError, changed_files
+from ultraloom.worktree import RUN_DIR, WorktreeError, changed_files
 
 if TYPE_CHECKING:
     # Type-only, so the check side still imports nothing from the harness at
     # runtime — the boundary is about sys.modules, not about annotations.
     from ultraloom.model.port import Model
-
-RUN_DIR = ".ultraloom/runs"
 
 _EXIT_OK = 0
 _EXIT_FAIL = 1

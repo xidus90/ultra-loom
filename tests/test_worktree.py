@@ -113,3 +113,51 @@ def test_a_change_outside_the_root_is_not_reported(tmp_path: Path) -> None:
 def test_a_clean_repository_answers_with_nothing(tmp_path: Path) -> None:
     """And without asking git a second question: there is no path to relocate."""
     assert changed_files(_repo(tmp_path)) == ()
+
+
+def test_the_run_directory_is_not_part_of_the_answer(tmp_path: Path) -> None:
+    """ultraloom's own journals are not a change to the project.
+
+    The guard reads this answer to say what the repair agent did, and every run
+    writes its journal and its marker while that agent works. Left in, they are
+    the agent's doing according to every caller -- and a project that lists
+    `.ultraloom/` among its protected paths gets exit 4 on every single run,
+    naming files ultraloom wrote itself.
+    """
+    repo = _repo(tmp_path)
+    runs = repo / ".ultraloom" / "runs"
+    runs.mkdir(parents=True)
+    (runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
+    (runs / "0001.flow").write_text("verify_until_green\n", encoding="utf-8")
+    (repo / "own.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert changed_files(repo) == ("own.py",)
+
+
+def test_the_rest_of_the_ultraloom_directory_stays_visible(tmp_path: Path) -> None:
+    """Only the journals are ours. The configuration is the project's own file.
+
+    It holds the thresholds a check is measured against, so an agent editing it
+    is exactly the kind of change the guard exists to see.
+    """
+    repo = _repo(tmp_path)
+    (repo / ".ultraloom").mkdir()
+    (repo / ".ultraloom" / "config.toml").write_text("[verify]\n", encoding="utf-8")
+
+    assert changed_files(repo) == (".ultraloom/config.toml",)
+
+
+def test_the_run_directory_is_only_dropped_below_the_given_root(tmp_path: Path) -> None:
+    """A sibling project's `.ultraloom/runs` is not below `root` anyway.
+
+    But `root`'s own is, however deep `root` sits below the repository root --
+    the filter runs after the paths have been made relative to `root`, which is
+    the only spelling that matches.
+    """
+    repo = _repo(tmp_path)
+    package = repo / "package"
+    (package / ".ultraloom" / "runs").mkdir(parents=True)
+    (package / ".ultraloom" / "runs" / "0001.jsonl").write_text("{}\n", encoding="utf-8")
+    (package / "own.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert changed_files(package) == ("own.py",)

@@ -257,6 +257,25 @@ def test_a_test_file_renamed_away_does_not_escape_the_guard(tmp_path: Path) -> N
     assert "tests/test_cli.py" in str(raised.value)
 
 
+def test_the_run_journal_is_not_charged_to_the_repairer(tmp_path: Path) -> None:
+    """The case from space's first run, with the real differ rather than a fake.
+
+    A project that lists `.ultraloom/` among its protected paths is the normal
+    thing to do -- that is where its thresholds live. Every run writes its
+    journal and its marker below it while the repair agent works, so before
+    those were dropped this guard took exit 4 on every run, naming files
+    ultraloom had written itself.
+    """
+    repo = _repo(tmp_path)
+    runs = repo / ".ultraloom" / "runs"
+    runs.mkdir(parents=True)
+    (runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
+    (runs / "0001.flow").write_text("verify_until_green\n", encoding="utf-8")
+    guard = make_guard(repo, ("tests/", ".ultraloom/"))
+
+    assert guard(VerifyState()) == {"touched": ()}
+
+
 def test_a_test_deep_below_a_protected_directory_is_protected() -> None:
     guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("tests/flows/sub/test_x.py",))
 

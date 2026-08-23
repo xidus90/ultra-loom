@@ -15,6 +15,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+# Where a run keeps its journal and its marker. Defined here and not in the CLI
+# that writes them: this module has to know what to leave out of its answer, and
+# it sits below the CLI, so the constant travels the other way round.
+RUN_DIR = ".ultraloom/runs"
+
 
 class WorktreeError(RuntimeError):
     """Raised when git cannot answer what changed. Never read as "nothing"."""
@@ -38,6 +43,15 @@ def changed_files(root: Path) -> tuple[str, ...]:
     "tests/", nothing a caller configured ever matches, and a guard built on
     this answer is silently off. Anything outside `root` is dropped for the
     same reason: it is not this project's change.
+
+    What `RUN_DIR` holds is dropped as well, and for a reason of its own: those
+    files are ultraloom's, not the project's. Every run writes its journal and
+    its marker while the repair agent works, so a guard reading this answer
+    would report them as the agent's doing -- and a project that lists
+    `.ultraloom/` among its protected paths would take exit 4 on every single
+    run, named after files ultraloom wrote itself. The rest of `.ultraloom/`
+    stays visible: `config.toml` holds the thresholds a check is measured
+    against, and an agent editing that one is exactly what the guard is for.
     """
     output = _status(root)
     paths = _parse_status(output)
@@ -45,9 +59,11 @@ def changed_files(root: Path) -> tuple[str, ...]:
         # Nothing to relocate, so the second git call is not worth its process.
         return paths
     prefix = _prefix(root)
-    if not prefix:
-        return paths
-    return tuple(path[len(prefix) :] for path in paths if path.startswith(prefix))
+    if prefix:
+        paths = tuple(path[len(prefix) :] for path in paths if path.startswith(prefix))
+    # After the relocation, so the comparison is against the spelling a caller
+    # below `root` would use rather than the repository-relative one.
+    return tuple(path for path in paths if not path.startswith(RUN_DIR + "/"))
 
 
 def _git(root: Path, *arguments: str) -> str:
