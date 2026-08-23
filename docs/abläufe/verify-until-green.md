@@ -748,9 +748,17 @@ der Schwelle liegt. Wer die Reparatur erreichen will, lässt `coverage` weg.
 **ultraloom reicht `cli_path` nicht durch.** Auf einer Maschine, auf der nur
 der npm-Shim `claude.CMD` im `PATH` steht, weigert sich das Agent-SDK, ihn zu
 starten, und jeder Agent-Knoten fällt nach 3,42 s — mit einer Meldung, die eine
-Option nennt, die ultraloom gar nicht anbietet. Genau daran starb Lauf 0002. Bis
-es einen Schlüssel dafür gibt, hilft nur, das Verzeichnis einer nativen
-`claude.exe` vorn in den `PATH` zu schieben.
+Option nennt, die ultraloom gar nicht anbietet. Genau daran starb Lauf 0002.
+
+**Geschlossen.** `[agent].cli_path` benennt die Datei, und
+`ULTRALOOM_CLI_PATH` schlägt sie — der Pfad ist Maschinensache, wer die
+Variable setzt, tut es gerade weil die Projektdatei für diese Maschine falsch
+ist. Ein Pfad, der auf keine Datei zeigt, wird beim Lesen der Konfiguration
+abgelehnt und nicht erst nach 3,42 s im Adapter; ein leerer Wert zählt auf
+beiden Seiten als nicht gesetzt, sonst ließe sich die Variable nicht wieder
+abschalten. Ist nichts gesetzt, steht der Schlüssel gar nicht erst in den
+SDK-Optionen: was das SDK aus einem ausdrücklichen `None` macht, darf es
+weiterhin selbst entscheiden.
 
 **`guard` beschuldigt den Reparateur der Schreibvorgänge des Ablaufs.** In Lauf
 0003 meldete er `touched = ['.ultraloom/runs/0003.flow',

@@ -430,9 +430,12 @@ def test_the_agent_extra_is_used_when_it_is_installed(
     """With the extra present the CLI must hand the runner the real model."""
     asked: list[object] = []
 
+    built: list[tuple[Path, Path | None]] = []
+
     class StandInModel:
-        def __init__(self, cwd: Path) -> None:
+        def __init__(self, cwd: Path, cli_path: Path | None = None) -> None:
             self.cwd = cwd
+            built.append((cwd, cli_path))
 
         def ask(self, request: object) -> Reply:
             asked.append(request)
@@ -448,6 +451,7 @@ def test_the_agent_extra_is_used_when_it_is_installed(
 
     assert code == 0
     assert len(asked) == 1
+    assert built == [(tmp_path, None)], "nothing configured, so the SDK does its own looking"
     assert "done" in capsys.readouterr().out
 
 
@@ -883,3 +887,36 @@ def test_check_prints_the_heading_of_every_command_of_one_kind(
     assert "f23" in out, "the first command's own output must survive"
     assert "s24" in out, "and so must the second's"
     assert "(failed)" in out, "the heading carries the verdict of its own command"
+
+
+def test_the_configured_cli_path_reaches_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What [agent].cli_path is for: the SDK is told where the CLI is.
+
+    Read from the config the run already loaded rather than from the
+    environment a second time, so the answer the run acts on is the one
+    load_config validated.
+    """
+    built: list[Path | None] = []
+
+    class StandInModel:
+        def __init__(self, cwd: Path, cli_path: Path | None = None) -> None:
+            built.append(cli_path)
+
+        def ask(self, request: object) -> Reply:
+            return Reply(value=None, tokens=7)
+
+    module = ModuleType("ultraloom.model.agent_sdk")
+    module.AgentSdkModel = StandInModel  # type: ignore[attr-defined]  # a stub module grows its attributes
+    monkeypatch.setitem(sys.modules, "ultraloom.model.agent_sdk", module)
+    monkeypatch.delenv("ULTRALOOM_CLI_PATH", raising=False)
+    cli = tmp_path / "claude.exe"
+    cli.write_text("", encoding="utf-8")
+    config = tmp_path / ".ultraloom" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f'[agent]\ncli_path = "{cli.as_posix()}"\n', encoding="utf-8")
+    write_flow(tmp_path, "needs_model", A_MODEL_FLOW)
+
+    assert main(["run", "needs_model", "--root", str(tmp_path)]) == 0
+    assert built == [cli]

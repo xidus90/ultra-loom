@@ -33,6 +33,12 @@ _CHECK_KINDS = ("lint", "types", "test", "coverage")
 # limit that was chosen for somebody else's tools.
 DEFAULT_TIMEOUT = 600
 
+# The machine's answer to where the Claude CLI is. It beats [agent].cli_path:
+# whoever exports it does so *because* the project file is wrong for this
+# machine, and the other way round the variable would be dead on every machine
+# as soon as one project writes the key down.
+CLI_PATH_ENV = "ULTRALOOM_CLI_PATH"
+
 
 def _default_parallelism() -> int:
     # process_cpu_count honours a CPU affinity mask, which a build agent may
@@ -55,6 +61,9 @@ class Config:
     coverage_report: str | None = None
     coverage_threshold: int = 100
     mcp_servers: tuple[str, ...] = ()
+    # Where the Claude CLI is, when the SDK's own search does not find it. None
+    # is the normal case and means "let the SDK look".
+    cli_path: Path | None = None
     test_paths: tuple[str, ...] = ()
     timeout: int = DEFAULT_TIMEOUT
     godot_import: bool = True
@@ -85,6 +94,12 @@ class Config:
                 raise ConfigError(f"check {kind!r} has an empty command")
         if self.max_parallel <= 0:
             raise ConfigError(f"max_parallel must be greater than zero, not {self.max_parallel}")
+        if self.cli_path is not None and not self.cli_path.is_file():
+            # Here and not in load_config, so a Config built by hand carries the
+            # same assurance. The alternative is the failure this key exists to
+            # remove: a run that starts, spends 3.4 seconds per agent node, and
+            # reports a fault of the SDK's.
+            raise ConfigError(f"cli_path is not a file: {self.cli_path}")
 
 
 def load_config(root: Path) -> Config:
@@ -93,7 +108,9 @@ def load_config(root: Path) -> Config:
     # is_file() and not exists(): a *directory* of that name exists, and
     # read_text would raise IsADirectoryError past every ConfigError handler.
     if not path.is_file():
-        return Config(root)
+        # Still not empty defaults: the machine may name the CLI for a project
+        # that configured nothing at all, which is the case the variable is for.
+        return Config(root, cli_path=_cli_path(None, path))
 
     try:
         # tomllib returns nested tables of unknown shape; every field below is
@@ -180,6 +197,8 @@ def load_config(root: Path) -> Config:
     if not isinstance(prefix, str):
         raise ConfigError(f"{path}: [exec].prefix must be a string")
 
+    cli_path = _cli_path(agent.get("cli_path"), path)
+
     servers = agent.get("mcp_servers", [])
     if not isinstance(servers, list) or not all(isinstance(name, str) for name in servers):
         raise ConfigError(f"{path}: [agent].mcp_servers must be a list of strings")
@@ -192,6 +211,7 @@ def load_config(root: Path) -> Config:
         coverage_report=report,
         coverage_threshold=threshold,
         mcp_servers=tuple(servers),
+        cli_path=cli_path,
         test_paths=tuple(raw_tests),
         timeout=timeout,
         godot_import=godot_import,
@@ -199,6 +219,22 @@ def load_config(root: Path) -> Config:
         after=after,
         profiles=profiles,
     )
+
+
+def _cli_path(configured: object, path: Path) -> Path | None:
+    """What the machine says, else what the file says, else nothing.
+
+    Blank counts as unset on both sides. That is how a machine that exports
+    CLI_PATH_ENV switches it off again for one run -- and it keeps an empty
+    string from being read as a path, which would be the current directory and
+    would come back refused as "not a file", indistinguishable from a typo.
+    """
+    if configured is not None and not isinstance(configured, str):
+        raise ConfigError(f"{path}: [agent].cli_path must be a string")
+    for candidate in (os.environ.get(CLI_PATH_ENV), configured):
+        if candidate is not None and candidate.strip():
+            return Path(candidate.strip())
+    return None
 
 
 def _parallelism(value: object, path: Path) -> int:

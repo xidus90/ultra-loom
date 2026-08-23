@@ -338,6 +338,15 @@ def test_every_name_the_adapter_uses_exists_on_the_installed_sdk(tmp_path: Path)
     passed = set(options)
     assert passed <= option_fields, f"the SDK no longer takes {sorted(passed - option_fields)}"
 
+    # The optional field appears only when it is set, so the shape above never
+    # reaches it -- and it is the one field a project configures by hand.
+    with_cli = AgentSdkModel(cwd=tmp_path, cli_path=tmp_path / "claude.exe")._options_for(
+        a_request()
+    )
+    assert set(with_cli) <= option_fields, (
+        f"the SDK no longer takes {sorted(set(with_cli) - option_fields)}"
+    )
+
     # Names are not enough. An unrecognised permission mode is the difference
     # between "denied at once" and whatever the SDK falls back to, and the
     # harness runs unattended, where that difference is the whole guarantee.
@@ -398,3 +407,24 @@ def test_the_real_sdk_answers_a_trivial_question(tmp_path: Path) -> None:
 
     assert isinstance(reply.value, Answer)
     assert reply.tokens > 0
+
+
+def test_a_configured_cli_path_reaches_the_sdk(tmp_path: Path) -> None:
+    """The finding this key closes: on a machine holding only the npm shim
+    `claude.CMD`, the SDK refuses to start it and every agent node dies after
+    3.4 seconds -- naming an option ultraloom did not offer."""
+    from ultraloom.model.agent_sdk import AgentSdkModel
+
+    cli = tmp_path / "claude.exe"
+    options = AgentSdkModel(cwd=tmp_path, cli_path=cli)._options_for(a_request())
+
+    assert options["cli_path"] == str(cli)
+
+
+def test_without_a_cli_path_the_option_is_not_passed_at_all(tmp_path: Path) -> None:
+    """Not passed rather than passed as None: what the SDK does with an explicit
+    None is the SDK's business to change, and ultraloom has nothing to say when
+    nobody configured anything."""
+    from ultraloom.model.agent_sdk import AgentSdkModel
+
+    assert "cli_path" not in AgentSdkModel(cwd=tmp_path)._options_for(a_request())

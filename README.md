@@ -83,7 +83,20 @@ prefix = "docker compose exec -T web"
 [agent]
 # MCP servers an agent node with the "mcp" tool profile may reach.
 mcp_servers = ["wiki"]
+# Where the Claude CLI is, when the SDK's own search does not find it.
+cli_path = "C:/Users/me/AppData/Local/Programs/claude/claude.exe"
 ```
+
+`[agent].cli_path` is for the machine whose only Claude CLI is something the
+SDK refuses to start -- an npm shim named `claude.CMD`, say. Without it every
+agent node dies a few seconds in, on a message naming an option ultraloom did
+not offer. `ULTRALOOM_CLI_PATH` says the same thing and **beats** the file:
+whoever exports it does so because the project's file is wrong for this
+machine, and the other way round the variable would be dead everywhere as soon
+as one project wrote the key down. A blank value on either side counts as
+unset, which is how a machine that exports the variable switches it off again.
+A path that is not a file is refused when the configuration is read -- before
+the first node, rather than once per agent call.
 
 `lint`, `types` and `test` take three shapes, told apart by type: a string is
 one command, a list is several, and a table is the full form with `commands`

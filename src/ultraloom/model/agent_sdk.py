@@ -36,8 +36,9 @@ class AgentSdkModel:
     `FakeModel` does — the port is a shape, not a base class.
     """
 
-    def __init__(self, cwd: Path) -> None:
+    def __init__(self, cwd: Path, cli_path: Path | None = None) -> None:
         self._cwd = cwd
+        self._cli_path = cli_path
 
     def ask(self, request: Request) -> Reply:
         """Answer one request, or raise ModelError."""
@@ -88,7 +89,7 @@ class AgentSdkModel:
         these names against the installed ClaudeAgentOptions without a network
         call — the unit tests run against a stub that would accept anything.
         """
-        return {
+        options: dict[str, Any] = {
             # Two different questions, two different fields: `tools` is the
             # ceiling on the built-in tools, `allowed_tools` decides what runs
             # without asking. An `mcp__<server>` entry is a permission rule and
@@ -103,6 +104,12 @@ class AgentSdkModel:
             "cwd": str(self._cwd),
             "output_format": {"type": "json_schema", "schema": _schema_of(request.schema)},
         }
+        if self._cli_path is not None:
+            # Only when configured. Passing None would hand the SDK an explicit
+            # answer where ultraloom has none, and what it makes of that is the
+            # SDK's business to change.
+            options["cli_path"] = str(self._cli_path)
+        return options
 
 
 async def _last_result(result_type: type, stream: AsyncIterator[Any]) -> Any:

@@ -553,3 +553,153 @@ def test_after_that_is_not_a_table_is_named_as_the_file_spells_it(tmp_path: Path
 
     with pytest.raises(ConfigError, match=r"\[verify.after\] must be a table"):
         load_config(tmp_path)
+
+
+ENV_CLI_PATH = "ULTRALOOM_CLI_PATH"
+
+
+def _a_cli(root: Path) -> Path:
+    """A file that exists, so only the key under test decides the outcome."""
+    cli = root / "claude.exe"
+    cli.write_text("", encoding="utf-8")
+    return cli
+
+
+def test_the_cli_path_is_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ENV_CLI_PATH, raising=False)
+    cli = _a_cli(tmp_path)
+    write_config(
+        tmp_path,
+        f"""
+        [agent]
+        cli_path = "{cli.as_posix()}"
+        """,
+    )
+
+    assert load_config(tmp_path).cli_path == cli
+
+
+def test_without_the_key_and_without_the_variable_there_is_no_cli_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The normal case: the SDK looks for the CLI the way it always has."""
+    monkeypatch.delenv(ENV_CLI_PATH, raising=False)
+
+    assert load_config(tmp_path).cli_path is None
+
+
+def test_the_variable_beats_the_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The path is a property of the machine, the file a property of the project.
+
+    Whoever sets the variable does it *because* the file is wrong for this
+    machine. The other way round the variable would be dead on every machine as
+    soon as one project writes the key down.
+    """
+    machine = _a_cli(tmp_path)
+    project = tmp_path / "project-claude.exe"
+    project.write_text("", encoding="utf-8")
+    write_config(
+        tmp_path,
+        f"""
+        [agent]
+        cli_path = "{project.as_posix()}"
+        """,
+    )
+    monkeypatch.setenv(ENV_CLI_PATH, str(machine))
+
+    assert load_config(tmp_path).cli_path == machine
+
+
+def test_the_variable_works_without_a_config_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project that never configured anything is the case the variable is for."""
+    cli = _a_cli(tmp_path)
+    monkeypatch.setenv(ENV_CLI_PATH, str(cli))
+
+    assert load_config(tmp_path).cli_path == cli
+
+
+def test_an_empty_variable_is_not_a_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The way to switch the variable off again on a machine that exports it.
+
+    An empty string read as a path would be the current directory, and refused
+    as "not a file" -- which makes an unset variable indistinguishable from a
+    typo.
+    """
+    monkeypatch.setenv(ENV_CLI_PATH, "   ")
+
+    assert load_config(tmp_path).cli_path is None
+
+
+def test_an_empty_key_is_not_a_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ENV_CLI_PATH, raising=False)
+    write_config(
+        tmp_path,
+        """
+        [agent]
+        cli_path = ""
+        """,
+    )
+
+    assert load_config(tmp_path).cli_path is None
+
+
+def test_a_cli_path_that_is_not_there_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Before the first node rather than 3.4 seconds into every agent call.
+
+    This is the whole point of the key: the run that found the bug died on a
+    message naming an option ultraloom did not offer. A typo must not cost the
+    same kind of report.
+    """
+    monkeypatch.delenv(ENV_CLI_PATH, raising=False)
+    write_config(
+        tmp_path,
+        """
+        [agent]
+        cli_path = "nowhere/claude.exe"
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="cli_path"):
+        load_config(tmp_path)
+
+
+def test_a_cli_path_that_is_a_directory_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(ENV_CLI_PATH, raising=False)
+    write_config(
+        tmp_path,
+        f"""
+        [agent]
+        cli_path = "{tmp_path.as_posix()}"
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="cli_path"):
+        load_config(tmp_path)
+
+
+def test_a_cli_path_that_is_not_a_string_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(ENV_CLI_PATH, raising=False)
+    write_config(
+        tmp_path,
+        """
+        [agent]
+        cli_path = 7
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="cli_path"):
+        load_config(tmp_path)
+
+
+def test_a_config_built_by_hand_is_held_to_the_same_rule(tmp_path: Path) -> None:
+    """The check sits on the dataclass, not on the reader -- as with `commands`."""
+    with pytest.raises(ConfigError, match="cli_path"):
+        Config(root=tmp_path, cli_path=tmp_path / "nowhere")

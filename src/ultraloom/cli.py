@@ -262,7 +262,7 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
     runner: Runner[object] = Runner(
         loaded.graph,
         Journal(root / RUN_DIR / f"{run_id}.jsonl"),
-        model=None if getattr(args, "no_model", False) else _model(root),
+        model=None if getattr(args, "no_model", False) else _model(root, config),
         mcp_servers=config.mcp_servers,
         replay=args.command == "replay",
     )
@@ -406,7 +406,7 @@ def _baseline(root: Path) -> frozenset[str]:
         return frozenset()
 
 
-def _model(root: Path) -> Model:
+def _model(root: Path, config: Config) -> Model:
     """The real model. A missing agent extra shows up the first time it is asked."""
     # Local import: the adapter lives on the harness side, and `ultraloom
     # check` must not pull it in (spec 15.2). The adapter itself imports the
@@ -415,4 +415,4 @@ def _model(root: Path) -> Model:
     # an ImportError from a command that had already started.
     from ultraloom.model.agent_sdk import AgentSdkModel
 
-    return AgentSdkModel(cwd=root)
+    return AgentSdkModel(cwd=root, cli_path=config.cli_path)
