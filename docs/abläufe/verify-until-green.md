@@ -549,10 +549,18 @@ entfernte; die zweite Runde war grün.
 
 ### Die Grundlinie hält sich auch in einem fremden Baum
 
-Der erste Engine-Start in einem frischen Worktree legt `.godot/` an und ändert
-dabei `project.godot` und jede `*.import`-Datei — fünfzehn Pfade, darunter ein
-geschützter. Ohne die Grundlinie hätte hier jeder Lauf mit Exit 4 geendet und
-den Agenten für die Arbeit des Godot-Editors beschuldigt.
+Der erste Engine-Start in einem frischen Worktree legt `.godot/` an und schreibt
+dabei `project.godot` und jede `*.import`-Datei neu — am 23.08. gemessen
+**vierzehn Pfade**, darunter mit `project.godot` ein geschützter. (Hier stand
+zuerst „fünfzehn"; die Zahl war nie nachgezählt, und die Zählung unten ergibt
+vierzehn.) Ohne die Grundlinie hätte hier jeder Lauf mit Exit 4 geendet und den
+Agenten für die Arbeit des Godot-Editors beschuldigt.
+
+„Neu schreiben" ist dabei nicht „ändern", und der Unterschied ist für die
+Grundlinie gleichgültig, für einen Leser aber nicht: von den vierzehn Pfaden
+trägt genau einer — `project.godot` — einen Inhaltsunterschied. Die zwölf
+`*.import` sind hinterher byteweise dieselben, `git status` führt sie trotzdem
+als geändert. Warum, steht unten unter *Der Zustand danach*.
 
 ### Was nicht mitwandert: der Exit-Code als Urteil
 
@@ -635,18 +643,30 @@ ungedeckten Zeilen, denselben, die space' eigenes `coverage_gate.py` ausweist;
 die Gegenprobe zeigt sie damit als vorbestehend und nicht als Artefakt der
 Umstellung.
 
-**Die Suite lief dabei einmal, und das ist gezählt.** gdUnit4 legt je Lauf ein
-`reports/report_N/` an und schreibt je Sitzung ein Startbanner: im Protokoll des
-`check all` steht `GdUnit4 Comandline Tool` genau einmal, `GdUnit4 session
-starting` genau einmal, das Engine-Banner genau einmal — in einem Lauf, der
-`test` und `coverage` zusammen anforderte. Über alle fünf `check`-Besuche des
-Tages entstanden fünf `reports/report_N`: einer je Besuch, zwei davon für die
-zwei Runden von Lauf 0003. Vor den Stufen wären es zwei je Besuch gewesen.
+**Die Suite lief dabei einmal, und das ist für `check all` gezählt.** gdUnit4
+schreibt je Sitzung ein Startbanner ins Protokoll; im Protokoll des `check all`
+steht `GdUnit4 Comandline Tool` genau einmal, `GdUnit4 session starting` genau
+einmal und das Engine-Banner genau einmal — in einem Lauf, der `test` und
+`coverage` zusammen anforderte. Drei unabhängige Marken, je genau eine. Vor den
+Stufen wären es zwei gewesen.
+
+Für die vier übrigen `check`-Besuche des Tages ist dieselbe Aussage **eine
+Inferenz**, keine Zählung: gdUnit4 legt je Lauf ein `reports/report_N/` an, und
+am Ende des Tages standen dort fünf Verzeichnisse mit lückenlos aufsteigenden
+Zeitstempeln, die sich mit den fünf Besuchen decken — der Abstand
+`report_4` → `report_5` etwa mit der zweiten Runde aus der Knotentabelle von
+Lauf 0003. Dass fünf Verzeichnisse fünf Suitenläufe bedeuten, gilt allerdings
+nur, wenn `reports/` vorher leer war, und das ist nicht festgehalten worden;
+der Worktree war frisch und hatte vor dem Import nicht einmal `.godot/`, was
+dafür spricht, aber es beweist es nicht.
 
 `threaded = true` über die zwei Lint-Kommandos, je drei Messungen: Median
-**5,94 s** (5,84–6,10) gegen **9,48 s** seriell (9,37–9,71), Faktor **1,60**.
-`gdformat --check` lief damit zum ersten Mal überhaupt unter ultraloom und ist
-grün über 277 Dateien.
+**5,94 s** (Spanne 5,84–6,10, also 4,4 %) gegen **9,48 s** seriell (9,37–9,71,
+3,6 %), Faktor **1,60**. Zuerst stand hier 1,87 aus je einer Einzelmessung; die
+serielle war mit 11,04 s ein Ausreißer, dessen Ursache offen ist — sie lief
+chronologisch **nach** der nebenläufigen, ein kalter Werkzeug-Cache scheidet
+also aus. Genau dafür sind Einzelmessungen untauglich. `gdformat --check` lief
+zum ersten Mal überhaupt unter ultraloom und ist grün über 277 Dateien.
 
 ### Was Lauf 0003 an der Mechanik zeigte
 
@@ -664,12 +684,41 @@ nach dem Lauf zurückgenommen; space' Baum trägt ihn nicht.
 Bemerkenswert an der Reparatur: das Modell schrieb
 `SCARCITY_MAX - (MAX-MIN)*ratio`, wo vor dem eingebauten Fehler
 `SCARCITY_MIN + (MAX-MIN)*(1.0-ratio)` stand — algebraisch dasselbe, textlich
-etwas anderes. Es hat die Absicht rekonstruiert und nicht den Diff
-zurückgerollt; anders wäre nicht zu unterscheiden, ob der Reparateur die Ursache
-verstand oder nur eine Änderung rückgängig machte.
+etwas anderes. Es hat die Absicht rekonstruiert, und die Begründung im Journal
+nennt die Quellen, aus denen es sie nahm: die eigene Doku der Funktion, den
+Zweig `reference <= 0.0` und die Formel im Wiki.
 
 Die Grundlinie hielt: die **vierzehn** Pfade aus dem Godot-Import
 (`project.godot` — geschützt —, zwölf `*.import`, eine `.uid`) blieben draußen.
+
+### Der Zustand danach
+
+Der eingebaute Fehler ist zurückgenommen, und `core/market_pricing.gd` steht in
+keiner Statusausgabe mehr. Was im Baum bleibt, ist die umgezogene
+`.ultraloom/config.toml`, die Journale unter `.ultraloom/runs/` und das, was der
+Godot-Import hinterlassen hat.
+
+Bei Letzterem lohnt der genaue Blick, weil `git status` hier mehr behauptet, als
+`git diff` zeigt: dreizehn Dateien stehen als `` M`` da, `git diff --stat` nennt
+nur `project.godot`. Kein Widerspruch, sondern ein bekannter Windows-Fall — die
+Prüfung Datei für Datei:
+
+```
+$ git ls-files -s ui/theme/icons/cargo.svg.import   → ff28cb2e…
+$ git hash-object ui/theme/icons/cargo.svg.import   → ff28cb2e…
+$ git update-index --refresh
+ui/theme/icons/cargo.svg.import: needs update       (und bleibt es)
+```
+
+Gleicher Blob im Index wie im Arbeitsbaum, für alle zwölf `*.import`; nur
+`project.godot` trägt wirklich einen Inhaltsunterschied. Godot hat die zwölf
+Dateien mit **identischem Inhalt** neu geschrieben. Ihr Stat-Eintrag im Index ist
+damit veraltet, und `core.autocrlf = true` verhindert, dass ein Refresh das
+beilegt: git erwartet im Arbeitsbaum CRLF, findet LF, und die Einträge bleiben
+dauerhaft „stat-dirty". Für die Grundlinie ist das gleichgültig — sie liest
+`git status` und nimmt sie damit ohnehin heraus. Für einen Leser ist es der
+Unterschied zwischen „der Import hat vierzehn Dateien geändert" und „der Import
+hat vierzehn Dateien angefasst, von denen eine anders ist".
 
 ### Drei Befunde
 
