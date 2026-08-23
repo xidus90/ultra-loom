@@ -3,61 +3,125 @@
 Four stages, first hit wins: explicit configuration, a script at a named path,
 the language preset, then refusal. Detection saves work; guessing would cost
 reliability — and a missing tool is a failure, never a skipped check.
+
+Two languages on purpose, and the line runs along the reader: what lands in a
+`CheckResult.output` speaks German, because it is read by a person and by the
+repairing model (the spec prescribes those strings word for word), while every
+tool-facing message — argv, exceptions, log lines — stays English.
 """
 
 from __future__ import annotations
 
 import shlex
-import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from threading import BoundedSemaphore, Semaphore
 
-from ultraloom.config import Config
+from ultraloom import process
+from ultraloom.config import Config, ConfigError
 
 KINDS = ("lint", "types", "test", "coverage")
 
-# marker file -> check kind -> the tool's argv
-# A preset is a *sequence* of commands, because not every tool measures what
-# it reports. The last one is the check; anything before it prepares the data
-# the check reads. Only Python's coverage needs the distinction today, and it
-# is spelled out for every preset rather than special-cased at the one place
-# that has it.
-PRESETS: Mapping[str, Mapping[str, tuple[tuple[str, ...], ...]]] = {
+
+@dataclass(frozen=True, slots=True)
+class Preset:
+    """What a language's tool for one check kind looks like.
+
+    Three fields with distinct jobs, and the distinction is the whole point:
+
+    `measuring` -- this check can measure as a by-product, if somebody needs it
+    `after`     -- this check reads what another one leaves behind
+    `measure`   -- if nobody measures for me, I measure myself
+
+    Which of them applies follows from the set of kinds requested in one pass,
+    never from the table alone: `measuring` is taken up only when something in
+    that pass reads what this check leaves behind, and `measure` is skipped only
+    when the check named by `after` did the measuring instead.
+    """
+
+    argv: tuple[str, ...]
+    measuring: tuple[str, ...] = ()
+    measure: tuple[str, ...] = ()
+    after: str = ""
+
+
+# The tools are asked to be terse wherever a flag says so: a check report is
+# read by a repairer that pays for every token of it, on every round. Each of
+# these flags was run against a failing project first -- one that turned a red
+# check green would be worse than any amount of noise.
+# Shared rather than spelled out twice: `test` and test-under-measurement run
+# the same suite, and a flag that reached only one of them would make the two
+# modes report in different shapes -- the one property that makes them
+# incomparable.
+_TERSE_PYTEST = ("-q", "--tb=short", "--no-header")
+_PYTEST = ("uv", "run", "pytest", *_TERSE_PYTEST)
+_COVERAGE_RUN = ("uv", "run", "coverage", "run", "-m", "pytest", *_TERSE_PYTEST)
+
+# marker file -> check kind -> the preset for it
+PRESETS: Mapping[str, Mapping[str, Preset]] = {
     "pyproject.toml": {
-        "lint": (("uvx", "ruff", "check", "."),),
-        "types": (("uvx", "mypy"),),
-        "test": (("uv", "run", "pytest"),),
-        # Two steps: `coverage report` reads .coverage and never writes it. A
-        # single-step preset is therefore red in every project that has not
-        # measured by some other route -- and `run_all` cannot supply one,
-        # because the four checks run at the same time and `test` measures
-        # nothing. The tests run twice, once here and once under `test`; that
-        # is the price of checks that stay independent of each other (spec 9.4).
-        "coverage": (
-            ("uv", "run", "coverage", "run", "-m", "pytest"),
-            ("uv", "run", "coverage", "report"),
+        "lint": Preset(("uvx", "ruff", "check", ".", "--output-format=concise")),
+        "types": Preset(("uvx", "mypy", "--no-error-summary", "--no-pretty")),
+        # `measuring` rather than a second suite run: with coverage in the same
+        # run, `test` measures as it goes and the report reads what it wrote.
+        # Alone, `test` stays the fast path and pays no measuring overhead.
+        "test": Preset(_PYTEST, measuring=_COVERAGE_RUN),
+        # `--skip-covered --skip-empty`: the files at 100% are the ones nobody
+        # needs to read, and in a project that holds the line they are almost
+        # all of them. `-m` pulls the other way and is worth it: without it the
+        # report names the file that is at 83% but not the line that is
+        # missing, and the repairer spends a whole round only looking it up.
+        # Not left to the project's own config -- `show_missing` is off by
+        # default, and ultraloom setting it in its own pyproject.toml says
+        # nothing about anybody else's.
+        "coverage": Preset(
+            ("uv", "run", "coverage", "report", "--skip-covered", "--skip-empty", "-m"),
+            measure=_COVERAGE_RUN,
+            after="test",
         ),
     },
     "package.json": {
-        "lint": (("eslint", "."),),
-        "types": (("tsc", "--noEmit"),),
-        "test": (("vitest", "run"),),
-        # One step: vitest measures and reports in the same run.
-        "coverage": (("vitest", "run", "--coverage"),),
+        "lint": Preset(("eslint", ".")),
+        "types": Preset(("tsc", "--noEmit")),
+        "test": Preset(("vitest", "run")),
+        # One stage: vitest measures and reports in the same run, so there is
+        # nothing for coverage to wait on.
+        "coverage": Preset(("vitest", "run", "--coverage")),
     },
     "project.godot": {
-        "lint": (("uvx", "gdlint", "."),),
-        "test": (("godot", "--headless", "--quit"),),
+        "lint": Preset(("uvx", "gdlint", ".")),
+        "test": Preset(("godot", "--headless", "--quit")),
+        # No coverage preset, deliberately. GDScript coverage in the project
+        # this came from is the Nano Coverage *editor addon*: it instruments the
+        # sources in place and writes lcov.info as a by-product of the suite,
+        # and the threshold over that file is enforced by a project-owned
+        # script. Neither half is a command a second Godot project could run, so
+        # there is nothing general to name here. A guessed command would be the
+        # worse outcome: it would look like a check and be none. Such a project
+        # configures its report under [verify.coverage] and its order under
+        # [verify.after].
     },
 }
+
+# A red result whose cause is a tool that could not be resolved at all. A
+# constant and not a literal at its one raising site: the flow reads this value
+# to decide what no repair pass can close, and across a module boundary a
+# literal on one side and a constant on the other is a coupling that a rename
+# would break silently.
+UNAVAILABLE = "unavailable"
 
 # A red result whose cause is the project's state, not a missing tool: reported
 # with a source of its own, because "unavailable" would say a tool is missing
 # when the tool is there and the project is not ready for it.
 UNREADY = "unready"
+
+# A red result whose cause is another check: reported with a source of its own,
+# because neither "failed" nor "unavailable" says that this check never ran and
+# will run fine as soon as its predecessor is green.
+BLOCKED = "blocked"
 
 # What a Godot import writes, and the only file here that an *empty* `.godot/`
 # does not have -- the directory itself appears long before the import fills it.
@@ -85,15 +149,37 @@ class CheckUnavailableError(RuntimeError):
 class Command:
     """A resolved check: what to run, and where the decision came from.
 
-    `measure` is the step that prepares what `argv` then reads. It is empty for
-    every check that measures and reports in one go, which is all of them
-    except Python's coverage.
+    `argvs` is a *sequence* because a kind may name several equal-ranking
+    commands -- two linters that check different things. They all run, even
+    after a red one: the point of the chain is a complete list of findings, and
+    half a list costs the repairer a whole extra round.
+
+    `measure` is the step that prepares what `argvs` then reads, and it is not
+    equal-ranking: a report over data nobody measured is meaningless, so its
+    failure stops the check. It is empty for every check that measures and
+    reports in one go, which is all of them except Python's coverage.
     """
 
     kind: str
-    argv: tuple[str, ...]
+    argvs: tuple[tuple[str, ...], ...]
     source: str
     measure: tuple[str, ...] = ()
+    threaded: bool = False
+    # Prepended to the output when this check reads something no command in
+    # this run produced. A warning and never a verdict -- see spec 8.
+    warning: str = ""
+
+    def __post_init__(self) -> None:
+        """A check must name at least one command.
+
+        `all(())` is True, so a Command with no argvs would merge into a green
+        result over an empty report -- a passed check that ran nothing, which
+        is the one failure Grundsatz 4 rules out. `resolve_check` cannot build
+        one today, but a Command is also built by hand, and the guard belongs
+        where the invariant is, not where one caller happens to hold it.
+        """
+        if not self.argvs:
+            raise CheckUnavailableError(f"check {self.kind!r} resolved to no command at all")
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,10 +192,29 @@ class CheckResult:
     source: str
 
 
-def resolve_check(kind: str, config: Config) -> Command:
-    """Find the command for this check, or refuse to guess."""
+def resolve_check(
+    kind: str,
+    config: Config,
+    *,
+    alongside: frozenset[str] = frozenset(),
+) -> Command:
+    """Find the command for this check, or refuse to guess.
+
+    `alongside` names the kinds running in this same pass. It decides who
+    measures: a check that can measure as a by-product does so when something
+    depends on it, and a check that depends on it then skips its own measuring
+    step. Empty by default, so a caller that resolves one kind on its own gets
+    a check that stands alone -- correct, and possibly slower than what the
+    scheduler would have built. That silent precedence is the price of a
+    signature that does not force every caller to know about the others.
+    """
     if kind not in KINDS:
         raise CheckUnavailableError(f"unknown check {kind!r}; known: {', '.join(KINDS)}")
+
+    # Read up front rather than in the preset branch alone: the language also
+    # answers who measures, and that question is asked of a project-configured
+    # report too.
+    marker = _marker(config.root)
 
     if kind == "coverage" and config.coverage_report is not None:
         # The one check whose command does not live in [verify]: coverage has
@@ -120,25 +225,23 @@ def resolve_check(kind: str, config: Config) -> Command:
         words = tuple(shlex.split(config.coverage_report))
         if not words:
             raise CheckUnavailableError("empty command configured for [verify.coverage].report")
-        return Command(kind, config.exec_prefix + words, "config")
+        warning = _warning_for(kind, marker, config, alongside)
+        return Command(kind, (config.exec_prefix + words,), "config", warning=warning)
 
     if kind in config.commands:
-        words = tuple(shlex.split(config.commands[kind]))
-        if not words:
-            # Checked before the prefix is prepended, not after: with a prefix
-            # configured, a blank command line leaves the bare prefix, and
-            # ultraloom would run *that* and report its exit code as the
-            # check's. A prefix that exits 0 would turn a check nobody
-            # configured into a green line -- the one failure in this system
-            # that actually does damage.
-            raise CheckUnavailableError(f"empty command configured for check {kind!r}")
-        return Command(kind, config.exec_prefix + words, "config")
+        # Config itself refuses an empty list and a blank command, so every
+        # argv here exists and none is a bare [exec].prefix.
+        argvs = tuple(
+            config.exec_prefix + tuple(shlex.split(line)) for line in config.commands[kind]
+        )
+        warning = _warning_for(kind, marker, config, alongside)
+        return Command(kind, argvs, "config", threaded=kind in config.threaded, warning=warning)
 
     script = _script_for(kind, config.root)
     if script is not None:
-        return Command(kind, config.exec_prefix + script, "script")
+        warning = _warning_for(kind, marker, config, alongside)
+        return Command(kind, (config.exec_prefix + script,), "script", warning=warning)
 
-    marker = _marker(config.root)
     if marker is None:
         raise CheckUnavailableError(
             f"could not tell what kind of project {config.root} is; "
@@ -150,28 +253,171 @@ def resolve_check(kind: str, config: Config) -> Command:
         raise CheckUnavailableError(
             f"{_LANGUAGE_NAMES[marker]} has no {kind} tool — a known limitation, not a passed check"
         )
-    steps = tuple(config.exec_prefix + step for step in preset[kind])
-    # A preset with more than two steps has no meaning here: the last one is
-    # the check, the one before it prepares its data, and a third would have
-    # nowhere to be reported from.
-    if len(steps) > 2:  # pragma: no cover  # guards the preset table, not any input
-        raise CheckUnavailableError(f"the {kind!r} preset has more than two steps")
-    return Command(kind, steps[-1], "preset", measure=steps[0] if len(steps) == 2 else ())
+    entry = preset[kind]
+    argv = entry.argv
+    if entry.measuring and _has_dependant(kind, marker, config, alongside):
+        # Something in this pass reads what this check leaves behind, so it
+        # measures as it goes -- and that dependant drops its own measuring
+        # step below. One suite run instead of two.
+        argv = entry.measuring
+
+    measure, warning = _measuring_state(kind, marker, config, alongside, entry.measure)
+    return Command(
+        kind,
+        (config.exec_prefix + argv,),
+        "preset",
+        measure=(config.exec_prefix + measure) if measure else (),
+        warning=warning,
+    )
 
 
-def run_check(kind: str, config: Config) -> CheckResult:
+def _warning_for(kind: str, marker: str | None, config: Config, alongside: frozenset[str]) -> str:
+    """The stale-data warning for a check that brings no measuring step of its own.
+
+    A command the project named itself, a convention script, a configured
+    coverage report: none of them has a measuring step ultraloom could hand it,
+    so the only half of `_measuring_state` that can say anything here is the
+    warning. Named once rather than unpacked and thrown away at each call.
+    """
+    return _measuring_state(kind, marker, config, alongside, ())[1]
+
+
+def _measuring_state(
+    kind: str,
+    marker: str | None,
+    config: Config,
+    alongside: frozenset[str],
+    measure: tuple[str, ...],
+) -> tuple[tuple[str, ...], str]:
+    """What this check still has to measure itself, and what to say if nobody did.
+
+    The middle outcome is the whole point of the pass: somebody else measures
+    for this check, so it drops its own step and the suite runs once instead of
+    twice. Otherwise it falls back on its own measuring step.
+
+    The warning is the last resort and its condition is narrow on purpose (spec
+    8): `after` is named, the predecessor does *not* run in this pass, and there
+    is no measuring step to fall back on. A predecessor that runs silences it,
+    even where ultraloom cannot tell whether it measured anything -- that is
+    precisely what ultraloom cannot know, and warning about it would put the
+    line on every Godot run. A warning that always comes stops being read.
+
+    `[verify.after]` is an ordering statement over all four kinds, not a claim
+    about data: `test` after `types` is a perfectly ordinary line to write, and
+    it must not make every test report carry a warning about `types`.
+    """
+    after = _predecessor_of(kind, marker, config)
+    if not after:
+        return measure, ""
+    if _measures_for(after, marker, config, alongside):
+        return (), ""
+    if measure or after in alongside:
+        return measure, ""
+    return (), (
+        f"Achtung: `{after}` lief in diesem Lauf nicht; "
+        "dieser Bericht kann von einem älteren Lauf stammen."
+    )
+
+
+def _measures_for(kind: str, marker: str | None, config: Config, alongside: frozenset[str]) -> bool:
+    """Whether `kind` runs in this pass *and* measures while it does.
+
+    A kind the project configured itself never counts: ultraloom cannot know
+    whether a foreign test command measures, and guessing here would produce a
+    coverage report over data nobody wrote. The refusal runs one way only --
+    about *another* check's command. What this check's own configured command
+    measures is not asked either, so a project that measures inside its own
+    `[verify.coverage].report` still keeps its `measure` empty.
+
+    Usually that costs no more than a warning. Not always: with a configured
+    `[verify].test`, a configured `[verify.coverage].report` and
+    `[verify.after].coverage = "test"`, this returns False, but the caller's
+    `after in alongside` is true -- so there is neither a measuring step nor a
+    warning, and a green `test` that did not measure leaves `coverage`
+    reporting on the previous run. `blocked` does not catch it, because the
+    predecessor is green. That is the one accepted way to green over stale data;
+    it is written up in the backlog under "Der eine verbliebene Weg zu Grün über
+    alte Daten".
+
+    `kind in alongside` means *requested*, not *finished*, and nothing here can
+    upgrade it: this runs while the pass is being planned, before any command
+    started. So a predecessor that is asked for and then dies -- timed out and
+    killed with its tree, or never started at all -- has already caused this
+    check to drop its own measuring step, and the report would read whatever an
+    earlier run left behind. The only thing standing between that and a green
+    report over stale data is the scheduler refusing to run a check whose
+    predecessor went red (`blocked`). Whoever changes that, or this, must change
+    the other.
+    """
+    if kind not in alongside or kind in config.commands:
+        return False
+    if _script_for(kind, config.root) is not None:
+        return False
+    if marker is None:
+        return False
+    entry = PRESETS[marker].get(kind)
+    return entry is not None and bool(entry.measuring)
+
+
+def _has_dependant(kind: str, marker: str, config: Config, alongside: frozenset[str]) -> bool:
+    """Whether some kind in this pass waits for `kind`, and can actually run.
+
+    A dependant that does not resolve is no dependant: switching to the
+    measuring command for a check that will leave the pass with
+    CheckUnavailableError would be measuring work done for nobody. Resolved with
+    the default empty `alongside`, which is both enough for the question --
+    availability does not depend on who else runs -- and what keeps this from
+    recursing back into itself.
+    """
+    for other in alongside:
+        if other == kind or _predecessor_of(other, marker, config) != kind:
+            continue
+        try:
+            resolve_check(other, config)
+        except CheckUnavailableError:
+            continue
+        return True
+    return False
+
+
+def _predecessor_of(kind: str, marker: str | None, config: Config) -> str:
+    """What this kind waits for: the project's answer first, then the language's.
+
+    A project of no recognisable language has no language answer to fall back
+    on -- handled here rather than at each caller, so that "no marker" cannot
+    turn into an order nobody configured.
+    """
+    if kind in config.after:
+        return config.after[kind]
+    if marker is None:
+        return ""
+    entry = PRESETS[marker].get(kind)
+    return entry.after if entry is not None else ""
+
+
+def run_check(
+    kind: str,
+    config: Config,
+    alongside: frozenset[str] = frozenset(),
+    gate: Semaphore | None = None,
+) -> CheckResult:
     """Run the check and report what it said.
 
     A check with a measuring step runs that first. Its failure is the check's
     failure and stops the check there: a report over data nobody measured --
     or over data left behind by an earlier run -- would be green for reasons
     that have nothing to do with this one.
+
+    `gate` is the run's cap on processes, handed down from the scheduler. A
+    caller that runs one check on its own leaves it out and gets a cap of its
+    own -- correct for a lone check, and the reason the scheduler does not let
+    every kind build one.
     """
-    command = resolve_check(kind, config)
+    command = resolve_check(kind, config, alongside=alongside)
     unready = _unready(command, config)
     if unready is not None:
         return unready
-    return _run_command(command, config)
+    return _run_command(command, config, gate)
 
 
 def _unready(command: Command, config: Config) -> CheckResult | None:
@@ -229,34 +475,105 @@ def _preset_godot_binary(config: Config) -> str | None:
     """The engine the `test` preset would start, or None if the project names its own."""
     if "test" in config.commands or _script_for("test", config.root) is not None:
         return None
-    return shlex.join((*config.exec_prefix, PRESETS["project.godot"]["test"][0][0]))
+    return shlex.join((*config.exec_prefix, PRESETS["project.godot"]["test"].argv[0]))
 
 
-def _run_command(command: Command, config: Config) -> CheckResult:
+def _run_command(command: Command, config: Config, gate: Semaphore | None = None) -> CheckResult:
+    """Every command of one kind, and one verdict out of them.
+
+    `gate` is the cap on running *processes*. It is passed in rather than made
+    here so that the levels above -- stages, and the kinds within a stage --
+    can share one instead of each handing out the whole budget again.
+
+    The contract that comes with it: the cap is acquired at the process and
+    nowhere else. Whoever passes this cap on does not acquire it -- the levels
+    above are thread pools, and a pool that held a permit while waiting for the
+    work below it to take one would deadlock. Held that way the semaphore never
+    has to be reentrant, and the deadlock is ruled out structurally instead of
+    by counting.
+    """
+    if gate is None:
+        # `is None` and not `or`: a Semaphore is always truthy, so `or` would
+        # work by an accident of a class this module does not own.
+        gate = BoundedSemaphore(config.max_parallel)
     if command.measure:
-        measured = _run(command.measure, command.kind, config, command.source)
+        measured = _run(command.measure, command.kind, config, command.source, gate)
         if not measured.ok:
-            return measured
-    return _run(command.argv, command.kind, config, command.source)
+            # Through _warned rather than returned bare: this is the path where
+            # the output most needs the warning that explains it.
+            return _warned(command, measured)
 
-
-def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> CheckResult:
-    try:
-        completed = subprocess.run(
-            argv,
-            cwd=config.root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=config.timeout,
+    if command.threaded and len(command.argvs) > 1:
+        # Capped too: threads past the cap would only queue at the gate, so a
+        # kind with ten commands under max_parallel = 2 would spend eight
+        # threads on waiting.
+        workers = min(len(command.argvs), config.max_parallel)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = tuple(
+                pool.map(
+                    lambda argv: _run(argv, command.kind, config, command.source, gate),
+                    command.argvs,
+                )
+            )
+    else:
+        results = tuple(
+            _run(argv, command.kind, config, command.source, gate) for argv in command.argvs
         )
-    except subprocess.TimeoutExpired as expired:
-        # A red result and not an exception: a check that never finished is a
-        # check that failed, and giving it its own exception would buy the flow
-        # a special path that ends in exactly the same place.
-        partial = _decode(expired.stdout) + _decode(expired.stderr)
-        detail = f"{shlex.join(argv)!r} timed out after {config.timeout}s"
-        return CheckResult(kind, False, f"{detail}\n{partial}".rstrip(), source)
+    return _merged(command, results)
+
+
+def _merged(command: Command, results: tuple[CheckResult, ...]) -> CheckResult:
+    """One verdict and one report out of however many commands ran.
+
+    With a single command the report is byte for byte what it always was: a
+    heading over a lone command would change every existing output for nothing.
+    The order is the configured one, never the order they finished in -- a
+    report whose lines move between runs cannot be compared.
+    """
+    if len(results) == 1:
+        output = results[0].output
+    else:
+        # The verdict rides on the heading because a command can fail without
+        # writing a word. Without it such a run shows the *other* command's
+        # findings and nothing else, and the report of a red check would name
+        # no reason for being red.
+        headed = (
+            f"$ {shlex.join(argv)}{'' if result.ok else ' (failed)'}\n{result.output.rstrip()}"
+            for argv, result in zip(command.argvs, results, strict=True)
+        )
+        # The trailing newline is what a single command's report ends in, from
+        # the tool's own output. Without it here there would be two shapes of
+        # report, and every reader downstream would have to know both.
+        output = "\n\n".join(headed) + "\n"
+    return _warned(
+        command,
+        CheckResult(
+            command.kind,
+            all(result.ok for result in results),
+            output,
+            command.source,
+        ),
+    )
+
+
+def _warned(command: Command, result: CheckResult) -> CheckResult:
+    """The result with the check's warning in front of it, if it has one.
+
+    A line above the report and never a change to `ok`: a warning says the
+    numbers may be reading something this run did not produce, which is worth
+    knowing and is not a finding.
+    """
+    if not command.warning:
+        return result
+    return replace(result, output=f"{command.warning}\n{result.output}")
+
+
+def _run(
+    argv: tuple[str, ...], kind: str, config: Config, source: str, gate: Semaphore
+) -> CheckResult:
+    try:
+        with gate:
+            completed = process.run(argv, cwd=config.root, timeout=config.timeout)
     except OSError as error:
         # A tool that is not installed must read as a failed check, not as a
         # traceback that takes the whole chain down with it.
@@ -274,37 +591,176 @@ def _run(argv: tuple[str, ...], kind: str, config: Config, source: str) -> Check
                 f"relative to the project root. Use `uv run` (or an absolute path)."
             )
         return CheckResult(kind, False, detail, source)
+
     output = completed.stdout + completed.stderr
+    if completed.timed_out:
+        # A red result and not an exception: a check that never finished is a
+        # check that failed, and giving it its own exception would buy the flow
+        # a special path that ends in exactly the same place.
+        detail = f"{shlex.join(argv)!r} timed out after {config.timeout}s"
+        return CheckResult(kind, False, _with(detail, completed, output), source)
+    if completed.output_abandoned:
+        # Red although the tool may well have exited 0: what came back is a
+        # prefix, and a threshold or a failure count could be in the part that
+        # did not. Grundsatz 4 -- a check nobody could read is not a passed
+        # check.
+        detail = f"{shlex.join(argv)!r} exited {completed.returncode}"
+        return CheckResult(kind, False, _with(detail, completed, output), source)
     return CheckResult(kind, completed.returncode == 0, output, source)
 
 
-def _decode(captured: bytes | str | None) -> str:
-    """What a timed-out process managed to write before it was killed.
+def _with(detail: str, completed: process.Completed, output: str) -> str:
+    """The reason, what arrived, and -- if it is a prefix -- that it is one."""
+    if completed.output_abandoned:
+        # Said out loud: a descendant still holds the pipe, so what follows is
+        # what had arrived by then and not everything the tool wrote.
+        detail += " (output incomplete: a reader had to be given up on)"
+    return f"{detail}\n{output}".rstrip()
 
-    TimeoutExpired types its capture as bytes|str|None regardless of text=True,
-    and the partial output is the only clue to *where* the tool hung.
+
+type CheckRunner = Callable[[str, Config, frozenset[str]], CheckResult]
+
+
+def run_kinds(
+    kinds: Sequence[str],
+    config: Config,
+    runner: CheckRunner | None = None,
+) -> tuple[CheckResult, ...]:
+    """Run these checks in dependency order and report them in the order asked.
+
+    Concurrent within a stage with plain threads: subprocess waiting releases
+    the GIL, so parallel waiting reaches most of its ceiling without a special
+    interpreter (spec 9.4). Sequential *between* stages, because a check that
+    reads what another one writes cannot start at the same time as it.
+
+    The one scheduler both callers use. `ultraloom check all` and the
+    verify_until_green flow ran a pool each, and a stage built into only one of
+    them would leave the flow -- the reason this exists -- running unordered.
+
+    `runner` defaults to None rather than to `run_check` so that the default
+    path can carry the run's process cap: it is built here, once, and handed
+    down. An injected runner starts no processes worth capping -- that
+    parameter is where the flow tests hang.
     """
-    if captured is None:
-        return ""
-    if isinstance(captured, bytes):
-        return captured.decode("utf-8", errors="replace")
-    return captured
+    if not kinds:
+        raise ValueError(
+            "run_kinds needs at least one check; a run that checks nothing is not a pass"
+        )
+
+    # Deduplicated, not run twice: two `test` entries in one profile would put
+    # two `coverage run -m pytest` on the same .coverage file at the same time.
+    # A repeated kind means the same check, and a check runs once per run.
+    kinds = tuple(dict.fromkeys(kinds))
+    alongside = frozenset(kinds)
+    marker = _marker(config.root)
+    results: dict[str, CheckResult] = {}
+    run = _gated(BoundedSemaphore(config.max_parallel)) if runner is None else runner
+
+    for stage in _stages(kinds, marker, config):
+        pending: list[str] = []
+        for kind in stage:
+            blocker = _blocker(kind, marker, config, results)
+            if blocker is None:
+                pending.append(kind)
+            else:
+                results[kind] = CheckResult(
+                    kind, False, f"läuft nicht, weil `{blocker}` rot war", BLOCKED
+                )
+        if not pending:
+            continue
+        with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+            reported = pool.map(lambda kind: _run_or_report(kind, config, alongside, run), pending)
+            # Filed under the kind that was asked for, never under the kind the
+            # result names itself: an injected runner that answers about
+            # something else would otherwise leave a KeyError at the end of the
+            # run instead of a result nobody can miss.
+            for kind, result in zip(pending, reported, strict=True):
+                results[kind] = result
+
+    return tuple(results[kind] for kind in kinds)
 
 
-def run_all(config: Config) -> tuple[CheckResult, ...]:
-    """Run every resolvable check at once, and report them in a fixed order.
+def _gated(gate: Semaphore) -> CheckRunner:
+    """The real runner, carrying this run's one process cap.
 
-    Concurrent with plain threads: subprocess.run releases the GIL while it
-    waits, so parallel waiting reaches most of its ceiling without a special
-    interpreter (spec 9.4). The order of the result is KINDS, never the order
-    in which the checks happened to finish — a report whose lines move around
-    between runs cannot be compared.
+    A closure and not a partial over `run_check` bound at definition time: the
+    name is looked up when the check runs, so a test that replaces `run_check`
+    on the module is seen.
     """
-    with ThreadPoolExecutor(max_workers=len(KINDS)) as pool:
-        return tuple(pool.map(lambda kind: _run_or_report(kind, config), KINDS))
+
+    def run(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return run_check(kind, config, alongside, gate)
+
+    return run
 
 
-def _run_or_report(kind: str, config: Config) -> CheckResult:
+def _stages(
+    kinds: Sequence[str], marker: str | None, config: Config
+) -> tuple[tuple[str, ...], ...]:
+    """The requested kinds, grouped so that nothing runs before what it reads.
+
+    A kind whose predecessor was not requested lands in the first stage: it has
+    nothing to wait for in *this* run, and holding it behind an empty stage
+    would be waiting for something that is never going to come. Whether it then
+    reads a stale report is a question ultraloom cannot answer, and
+    `resolve_check` says so in a warning rather than guessing.
+
+    The ring is caught here and not at load time, because here is where the
+    edges actually are. `[verify.after]` is checked against itself by the config
+    loader, but an order is only half configured: the project names some edges
+    and the preset supplies the rest, and half a ring from each side passes both
+    halves of the check. A single line `test = "coverage"` against Python's
+    `coverage after test` is exactly that -- accepted by the loader, and a walk
+    with no end for whoever follows the effective edges.
+    """
+    requested = set(kinds)
+    depth: dict[str, int] = {}
+
+    def level(kind: str, walked: tuple[str, ...]) -> int:
+        if kind in depth:
+            return depth[kind]
+        if kind in walked:
+            # Named as a path and not as a node: a ring the reader has to find
+            # for themselves is a refusal that does not help.
+            ring = " -> ".join((*walked[walked.index(kind) :], kind))
+            raise ConfigError(f"the check order has a cycle: {ring}")
+        predecessor = _predecessor_of(kind, marker, config)
+        # Only an edge into this run can hold anything up, so only those are
+        # walked -- a ring whose other half was not requested is not a ring
+        # anybody waits in.
+        depth[kind] = level(predecessor, (*walked, kind)) + 1 if predecessor in requested else 0
+        return depth[kind]
+
+    ordered: dict[int, list[str]] = {}
+    for kind in kinds:
+        ordered.setdefault(level(kind, ()), []).append(kind)
+    return tuple(tuple(ordered[key]) for key in sorted(ordered))
+
+
+def _blocker(
+    kind: str, marker: str | None, config: Config, results: Mapping[str, CheckResult]
+) -> str | None:
+    """The predecessor that failed, if there is one.
+
+    Any red result blocks, `unavailable` and `unready` included: a report over a
+    suite that never ran is worth exactly as much as one over a suite that
+    failed -- and by then the report has already dropped its own measuring step
+    (see `_measures_for`), so what it would read is an earlier run's data.
+    Transitive by construction -- a blocked check is itself red, so whatever
+    waits on it is blocked in turn.
+    """
+    predecessor = _predecessor_of(kind, marker, config)
+    if not predecessor:
+        return None
+    result = results.get(predecessor)
+    if result is None or result.ok:
+        return None
+    return predecessor
+
+
+def _run_or_report(
+    kind: str, config: Config, alongside: frozenset[str], runner: CheckRunner
+) -> CheckResult:
     """One check, with any failure of its own turned into a visible result.
 
     Broad on purpose. `pool.map` re-raises the first exception when the tuple
@@ -313,13 +769,18 @@ def _run_or_report(kind: str, config: Config) -> CheckResult:
     KeyboardInterrupt and SystemExit must still stop the run.
     """
     try:
-        return run_check(kind, config)
+        return runner(kind, config, alongside)
     except CheckUnavailableError as error:
         # Reported, not skipped: a run that looks green because nothing ran is
         # the one failure in this system that actually does damage.
-        return CheckResult(kind, False, str(error), "unavailable")
+        return CheckResult(kind, False, str(error), UNAVAILABLE)
     except Exception as error:
         return CheckResult(kind, False, f"{type(error).__name__}: {error}", "error")
+
+
+def run_all(config: Config) -> tuple[CheckResult, ...]:
+    """Every check this project has, in the fixed order of KINDS."""
+    return run_kinds(KINDS, config)
 
 
 def _script_for(kind: str, root: Path) -> tuple[str, ...] | None:

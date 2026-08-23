@@ -7,17 +7,28 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.checks import KINDS, CheckResult, CheckUnavailableError
+from ultraloom.checks import (
+    BLOCKED,
+    KINDS,
+    UNREADY,
+    CheckResult,
+    CheckRunner,
+    CheckUnavailableError,
+    run_check,
+)
 from ultraloom.config import Config
 from ultraloom.discovery import FlowContext
 from ultraloom.flows.verify_until_green import (
     _EXIT_STILL_RED,
-    CheckRunner,
+    MODEL_OUTPUT_LINES,
     Differ,
     RepairResult,
     VerifyState,
+    _out_of_reach,
+    _render,
     assemble,
     build,
+    clip,
     make_check,
     make_guard,
     make_repair,
@@ -30,13 +41,18 @@ from ultraloom.runner import FlowExit, Result, Runner
 from ultraloom.state import Delta
 from ultraloom.worktree import WorktreeError
 
+# A marker file is all `checks` needs to know the language -- and with it, that
+# `coverage` waits for `test`. The order under test lives in the preset table,
+# so a project this thin is enough to reach it.
+_PYPROJECT = '[project]\nname = "x"\n'
+
 
 def _config() -> Config:
     return Config(root=Path("."), test_paths=("tests/",))
 
 
 def _runner(outcomes: Mapping[str, bool]) -> CheckRunner:
-    def run(kind: str, _config: Config) -> CheckResult:
+    def run(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         ok = outcomes[kind]
         return CheckResult(kind, ok, "" if ok else f"{kind} is unhappy", "test")
 
@@ -75,7 +91,7 @@ def test_coverage_is_red_but_out_of_the_repairers_reach() -> None:
 def test_a_check_that_never_resolved_is_out_of_reach_too() -> None:
     """A missing tool is red with source "unavailable"; nobody can repair it."""
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         return CheckResult(kind, False, "no gdlint here", "unavailable")
 
     delta = make_check(_config(), runner)(VerifyState(kinds=("types",)))
@@ -87,7 +103,7 @@ def test_a_check_that_never_resolved_is_out_of_reach_too() -> None:
 def test_every_kind_the_state_names_is_run() -> None:
     seen: list[str] = []
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         seen.append(kind)
         return CheckResult(kind, True, "", "test")
 
@@ -109,13 +125,20 @@ def test_rounds_counts_up_from_where_the_state_stood() -> None:
     assert step(VerifyState(kinds=("lint",), rounds=2))["rounds"] == 3
 
 
-def test_the_prompt_carries_the_report_and_the_forbidden_paths() -> None:
+def test_the_prompt_carries_the_brief_and_the_forbidden_paths() -> None:
+    """The brief and not the report: the long one is what the journal keeps."""
     node = make_repair(test_paths=("tests/", "conftest.py"))
-    state = VerifyState(kinds=("lint",), failing=("lint",), report="## lint\nE501 too long")
+    state = VerifyState(
+        kinds=("lint",),
+        failing=("lint",),
+        report="## lint\nE501 too long\nand a thousand more lines",
+        brief="## lint\nE501 too long",
+    )
 
     prompt = node.prompt(state)
 
     assert "E501 too long" in prompt
+    assert "a thousand more lines" not in prompt
     assert "tests/" in prompt
     assert "conftest.py" in prompt
 
@@ -147,7 +170,7 @@ def test_the_reply_becomes_the_summary_of_the_pass() -> None:
 
     delta = node.apply(VerifyState(), RepairResult(summary="shortened the line", changed=True))
 
-    assert delta == {"report": "shortened the line"}
+    assert delta == {"report": "shortened the line", "brief": "shortened the line"}
 
 
 def test_a_reply_of_the_wrong_type_is_refused() -> None:
@@ -282,7 +305,7 @@ def _run_flow(
     passes = _Passes(outcomes)
     diffs = iter(touched or [])
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         ok = passes.outcome(kind)
         return CheckResult(kind, ok, "" if ok else f"{kind} is unhappy", "test")
 
@@ -818,7 +841,7 @@ def test_an_unavailable_check_beside_a_repairable_one_still_gets_its_rounds(
     """
     passes = _Passes([{"lint": False}, {"lint": True}])
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         if kind == "types":
             return CheckResult(kind, False, "no typechecker here", "unavailable")
         ok = passes.outcome(kind)
@@ -850,7 +873,7 @@ def test_an_unresolvable_check_is_red_and_out_of_reach_not_an_exception() -> Non
     with source "unavailable", which is what makes it out of reach.
     """
 
-    def run(kind: str, _config: Config) -> CheckResult:
+    def run(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         if kind == "coverage":
             raise CheckUnavailableError("GDScript has no coverage tool")
         return CheckResult(kind, True, "", "preset")
@@ -886,10 +909,286 @@ def test_the_guard_holds_when_the_project_root_is_below_the_repository_root(
 def test_an_unready_project_is_out_of_the_repairers_reach() -> None:
     """No agent should run a Godot import; the project, not the code, is unready."""
 
-    def runner(kind: str, _config: Config) -> CheckResult:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         return CheckResult(kind, False, "never been imported", "unready")
 
     delta = make_check(_config(), runner)(VerifyState(kinds=("test",)))
 
     assert delta["failing"] == ("test",)
     assert delta["unfixable"] == ("test",)
+
+
+def test_a_blocked_check_is_not_out_of_reach() -> None:
+    """It closes itself the moment `test` goes green -- giving up on it would end
+    the flow at every ordinary red test."""
+    assert not _out_of_reach(CheckResult("coverage", False, "", BLOCKED))
+
+
+def test_the_node_runs_checks_in_dependency_order(tmp_path: Path) -> None:
+    record: list[str] = []
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        record.append(kind)
+        return CheckResult(kind, True, "", "fake")
+
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
+    check(VerifyState(kinds=("test", "coverage")))
+
+    assert record.index("coverage") > record.index("test")
+
+
+def test_the_report_names_what_did_not_run(tmp_path: Path) -> None:
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, kind != "test", "suite is red", "fake")
+
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
+    delta = check(VerifyState(kinds=("test", "coverage")))
+
+    assert "Nicht gelaufen, weil ein Vorgänger rot war: coverage" in str(delta["report"])
+    # A check that did not run is never a passed check -- and never a defect
+    # the repairer is asked to close either.
+    assert delta["failing"] == ("test", "coverage")
+    assert delta["unfixable"] == ()
+
+
+def test_a_blocked_check_is_named_below_the_findings_not_among_them(tmp_path: Path) -> None:
+    """The repairer's list of defects must hold only what it can touch."""
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, kind != "test", "suite is red", "fake")
+
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
+    report = str(check(VerifyState(kinds=("test", "coverage")))["report"])
+
+    assert report.index("## test") < report.index("Nicht gelaufen")
+    assert "## coverage" not in report
+
+
+def test_a_ring_in_the_configured_order_ends_the_run(tmp_path: Path) -> None:
+    """Not a red check: no repair pass closes a cycle in the configuration."""
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, True, "", "fake")  # pragma: no cover  # never reached
+
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    config = Config(root=tmp_path, test_paths=("tests/",), after={"test": "coverage"})
+    check = make_check(config, runner)
+
+    with pytest.raises(FlowExit) as raised:
+        check(VerifyState(kinds=("test", "coverage")))
+
+    assert raised.value.code == _EXIT_STILL_RED
+    assert "cycle" in str(raised.value)
+
+
+def test_a_report_of_nothing_but_blocked_checks_does_not_open_on_blank_lines() -> None:
+    """`_render` takes any tuple of red results, and the flow is not its only caller."""
+    rendered = _render((CheckResult("coverage", False, "did not run", BLOCKED),))
+
+    assert rendered == "Nicht gelaufen, weil ein Vorgänger rot war: coverage"
+
+
+def test_the_real_runner_may_not_be_handed_in_directly() -> None:
+    """It typechecks and it works -- and spends max_parallel per check, not per run."""
+    with pytest.raises(ValueError, match="process cap"):
+        make_check(_config(), run_check)
+
+
+def test_a_blocked_check_does_not_buy_an_unrepairable_project_five_rounds(
+    tmp_path: Path,
+) -> None:
+    """A Godot project that was never imported: `test` unready, `coverage` blocked.
+
+    The whole flow and not `_out_of_reach_only` alone, because the change this
+    guards against moves the path *through* that predicate: counting the blocked
+    check as repairable makes `failing` a superset of `unfixable`, the run takes
+    the repair edge, and a model is paid five times over a project no edit turns
+    green.
+    """
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, False, "never been imported", UNREADY)
+
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=runner,
+        differ=lambda _root: (),
+        baseline=frozenset(),
+    )
+    model = FakeModel([])
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
+        VerifyState(kinds=("test", "coverage"))
+    )
+
+    assert not model.seen  # not one paid repair round
+    assert result.state.data.rounds == 1
+    assert result.exit_code == 1
+    assert "out of reach" in (result.detail or "")
+
+
+def test_a_blocked_check_beside_a_repairable_one_still_gets_its_rounds(
+    tmp_path: Path,
+) -> None:
+    """The other direction: an ordinary red `test` blocks `coverage` and is repaired."""
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    passes = _Passes([{"test": False}, {"test": True}])
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        ok = passes.outcome(kind)
+        return CheckResult(kind, ok, "" if ok else "suite is red", "test")
+
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=runner,
+        differ=lambda _root: ("src/thing.py",),
+        baseline=frozenset(),
+    )
+    model = FakeModel([Reply(RepairResult("fixed the suite", changed=True), tokens=0)])
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
+        VerifyState(kinds=("test", "coverage"))
+    )
+
+    assert len(model.seen) == 1  # the blocked check did not end the run early
+    assert result.status == "done"
+
+
+def test_short_output_is_untouched() -> None:
+    assert clip("one\ntwo\n") == "one\ntwo\n"
+
+
+def test_output_without_any_line_break_survives() -> None:
+    assert clip("x" * 10_000) == "x" * 10_000
+
+
+def test_empty_output_stays_empty() -> None:
+    assert clip("") == ""
+
+
+def test_long_output_keeps_both_ends() -> None:
+    lines = "\n".join(str(number) for number in range(1000))
+
+    clipped = clip(lines)
+
+    assert clipped.splitlines()[0] == "0"
+    assert clipped.splitlines()[-1] == "999"
+    assert len(clipped.splitlines()) == MODEL_OUTPUT_LINES  # marker included
+
+
+def test_the_clip_says_how_much_it_dropped() -> None:
+    clipped = clip("\n".join(str(number) for number in range(1000)))
+
+    assert "Zeilen ausgelassen" in clipped
+
+
+def test_the_gap_is_named_with_the_exact_number_of_dropped_lines() -> None:
+    """A literal budget, so the arithmetic is checked and not merely restated."""
+    clipped = clip("\n".join(str(number) for number in range(90)), limit=30)
+
+    assert "61 Zeilen ausgelassen" in clipped
+    assert len(clipped.splitlines()) == 30  # the marker is paid for out of the budget
+
+
+def test_two_thirds_of_the_budget_go_to_the_tail() -> None:
+    """pytest writes its summary last, and the summary is the part worth keeping."""
+    clipped = clip("\n".join(str(number) for number in range(90)), limit=30)
+    body = clipped.splitlines()
+    marker = next(index for index, line in enumerate(body) if "ausgelassen" in line)
+
+    assert marker == 9  # nine lines of head, twenty of tail
+    assert body[:marker] == [str(number) for number in range(9)]
+    assert body[marker + 1 :] == [str(number) for number in range(70, 90)]
+
+
+def test_a_clipped_output_keeps_a_trailing_newline_like_an_unclipped_one() -> None:
+    clipped = clip("\n".join(str(number) for number in range(90)) + "\n", limit=30)
+
+    assert clipped.endswith("89\n")
+
+
+def test_a_report_exactly_at_the_budget_is_not_clipped() -> None:
+    lines = "\n".join(str(number) for number in range(30))
+
+    assert clip(lines, limit=30) == lines
+
+
+def test_the_render_leaves_everything_alone_without_a_limit() -> None:
+    """The default is the uncut report: this is the copy the journal keeps."""
+    long_output = "\n".join(str(number) for number in range(1000))
+
+    rendered = _render((CheckResult("test", False, long_output, "pytest"),))
+
+    assert rendered == f"## test (pytest)\n{long_output}"
+
+
+def test_the_render_clips_each_check_but_not_the_blocked_line() -> None:
+    long_output = "\n".join(str(number) for number in range(1000))
+
+    rendered = _render(
+        (
+            CheckResult("test", False, long_output, "pytest"),
+            CheckResult("coverage", False, "did not run", BLOCKED),
+        ),
+        limit=MODEL_OUTPUT_LINES,
+    )
+
+    assert "Zeilen ausgelassen" in rendered
+    assert rendered.endswith("Nicht gelaufen, weil ein Vorgänger rot war: coverage")
+    assert "500" not in rendered
+
+
+def test_the_journal_keeps_the_full_output_while_the_repairer_sees_the_clip(
+    tmp_path: Path,
+) -> None:
+    """Clipped towards the model, complete in the journal -- or a run stops being auditable.
+
+    The whole flow with a real Runner and a real Journal, because that is where
+    the property lives: `make_check` throws the CheckResults away, so whatever
+    the delta does not carry is gone for good.
+    """
+    long_output = "\n".join(f"line {number}" for number in range(1000))
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, False, long_output, "pytest")
+
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=runner,
+        differ=lambda _root: (),
+        baseline=frozenset(),
+        max_rounds=1,
+    )
+    journal = Journal(tmp_path / "run.jsonl")
+    model = FakeModel([Reply(RepairResult("gave up", changed=False), tokens=0)])
+    Runner(graph, journal, model=model).run(VerifyState(kinds=("test",)))
+
+    checks = [entry for entry in journal.entries() if entry.node == "check"]
+    assert checks
+    assert checks[0].delta["report"] == f"## test (pytest)\n{long_output}"
+    assert "ausgelassen" in str(checks[0].delta["brief"])
+    prompt = model.seen[0].prompt
+    assert "ausgelassen" in prompt  # the repairer got the short one
+    assert "line 500" not in prompt
+
+
+def test_the_repairers_prompt_never_carries_the_full_report(tmp_path: Path) -> None:
+    """The one thing the clip is for: the long report must not reach the model."""
+    long_output = "\n".join(f"line {number}" for number in range(1000))
+    step = make_check(
+        Config(root=tmp_path, test_paths=("tests/",)),
+        lambda kind, _config, _alongside: CheckResult(kind, False, long_output, "pytest"),
+    )
+
+    delta = step(VerifyState(kinds=("test",)))
+    state = VerifyState(report=str(delta["report"]), brief=str(delta["brief"]))
+    prompt = make_repair(("tests/",)).prompt(state)
+
+    assert len(prompt.splitlines()) < 250
+    assert "ausgelassen" in prompt

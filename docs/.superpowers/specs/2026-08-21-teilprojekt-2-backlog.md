@@ -58,6 +58,16 @@ Vier Punkte, die während der Ausführung von Teilprojekt 2 gesehen und verschob
 wurden und bis zum Abschlussreview nur im Ausführungsledger standen — der ist
 git-ignoriert und stirbt mit dem Arbeitsbereich.
 
+**ERLEDIGT** (zum Punkt darunter) — umgesetzt in
+[2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md)
+§7. `checks._run` ruft jetzt `process.run`: `Popen` in einer eigenen Gruppe
+(POSIX) beziehungsweise einem Job-Objekt (Windows, über `ctypes`), zwei
+Lesefäden je Prozess statt `communicate()`, Baumtötung bei Fristablauf und ein
+zweites, kurzes Fenster für das Einsammeln. Kommt ein Lesefaden nicht zurück,
+wird er aufgegeben und das Ergebnis sagt, dass die Ausgabe unvollständig ist.
+Der Befund von damals steht unverändert darunter, weil er der Grund für den
+Umbau ist.
+
 **Die Zeitgrenze tötet nur das Kind, nicht die Enkel.** `checks._run` ruft
 `subprocess.run(..., timeout=…)` — die Grenze aus §8 der Spec, Vorgabe 600
 Sekunden. `subprocess.run` beendet bei Zeitüberschreitung **den direkten
@@ -195,6 +205,10 @@ und nichts darüber, was ohnehin schon da ist.
 
 ## Was die Prüfkette über Werkzeuge annimmt
 
+**ERLEDIGT, soweit er zu erledigen war** (zum Punkt darunter) — die Mechanik
+bleibt bewusst, wie sie war (Ausgabe deuten hieße raten); was fehlte, war die
+Warnung, und die steht jetzt im README unter *Before you configure a check*.
+
 **Ein Exit-Code ist das ganze Urteil — und manche Prüfwerkzeuge kennen ihn
 nicht.** `checks._run` liest `returncode`, sonst nichts. Die Prüfungen von space
 sind Claude-Code-Hooks: `coverage_gate.py` meldet seine Befunde über
@@ -211,6 +225,15 @@ Prüfkommando, das aus einem Hook-Skript kommt, ist daraufhin anzusehen, ob es
 seinen Befund im Exit-Code trägt.** Kosten: ein Projekt, das das übersieht,
 bekommt eine grüne Prüfung, die nie etwas geprüft hat.
 
+**ERLEDIGT** (zum Punkt darunter) — umgesetzt in
+[2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md)
+§5 und §6. `lint`, `types` und `test` nehmen drei Gestalten: Zeichenkette,
+Liste, Tabelle mit `commands` und `threaded`. Die damaligen Folgefragen sind
+beantwortet: **alle** Kommandos laufen, auch nach dem ersten roten (der
+Reparateur braucht die vollständige Mängelliste), der Bericht bekommt je
+Kommando eine `$`-Überschrift und bleibt bei genau einem Kommando Zeichen für
+Zeichen der alte, und `threaded` ist damit ein reiner Geschwindigkeitsschalter.
+
 **Eine Prüfart, ein Kommando.** `config._KINDS` erlaubt je Art genau eine
 Zeichenkette. space lintet mit zweien: `gdlint` und `gdformat --check` laufen
 über dieselben Verzeichnisse und sind beide „lint". Die Konfiguration von space
@@ -222,6 +245,15 @@ Zeichenkette, sofort Folgefragen aufmacht: Läuft nach dem ersten roten Kommando
 noch das zweite? Wie sieht der Bericht aus, den der Reparateur bekommt? Die
 Presets tragen die Antwort in Ansätzen (`measure` plus `argv`), aber für
 mehrere gleichrangige Kommandos ist sie nicht gebaut.
+
+**ERLEDIGT** (zum Punkt darunter) — umgesetzt in
+[2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md)
+§3, §4 und §8. Prüfungen laufen in Stufen, nebenläufig nur innerhalb einer
+Stufe; die Kanten kommen aus dem Preset und werden von `[verify.after]`
+überschrieben. Die zweite Frage — was mit einer Prüfung geschieht, deren
+Vorgänger rot ist — ist mit der neuen Quelle `blocked` beantwortet: rot, nicht
+übersprungen, aber nicht außer Reichweite. Und die Doppelmessung ist weg:
+`test` misst mit, wenn `coverage` im selben Lauf angefordert ist.
 
 **Zwischen Prüfungen gibt es keine Reihenfolge.** Spec 9.4 nimmt an, Prüfungen
 seien unabhängig, und lässt sie deshalb nebenläufig laufen. In space ist der
@@ -300,3 +332,125 @@ Liste** — er ist der Grund, warum in space kein grüner `precommit`-Lauf steht
   Projekten haben versucht, einen echten Agenten dazu zu bringen, eine
   Testdatei anzufassen; keiner hat es geschafft. Die Wache ist durch Unit-Tests
   abgedeckt und gegen ein echtes Modell unbewiesen.
+
+# Was der Umbau der Prüfkette hinterlässt
+
+Gesehen, beurteilt, mit Begründung verschoben — dritte Runde, aus dem Umfang
+[2026-08-22-pruefkette-reihenfolge-design.md](2026-08-22-pruefkette-reihenfolge-design.md)
+(Stufen, Prozessgruppe, mehrere Kommandos je Prüfart).
+
+**Ein Journal von vor dem Umbau passt nicht mehr auf seinen `check`-Knoten.**
+`VerifyState` hat zwei Felder dazubekommen — `blocked` und `brief` —, und der
+Zustand geht in den `input_hash` ein, mit dem das Journal seine Einträge
+schlüsselt. Ein Lauf, der vor dem Upgrade begonnen hat, findet nach dem Upgrade
+für seinen `check`-Knoten keinen passenden Eintrag mehr: `replay` leitet nicht
+mehr dasselbe Ende ab, und eine Wiederaufnahme führt den Knoten neu aus und
+wiederholt damit auch die Reparaturrunde dahinter — bezahlte Token für Arbeit,
+die schon getan war. Verschoben, weil die Abhilfe eine Versionierung des
+Zustands wäre (Migration alter Einträge oder ein Schema-Stempel im Journal), und
+das ist eine Entscheidung über das Journalformat, nicht über die Prüfkette. Vor
+0.1.0 sind die Kosten gering: die Läufe, die es gibt, sind unsere eigenen. Was
+fehlt, ist die Meldung — heute sieht ein solcher Fall aus wie ein Knoten, der
+eben nochmal lief, und nicht wie ein unbrauchbar gewordenes Journal.
+
+**Der POSIX-Zweig von `process.py` ist nie ausgeführt worden.** `spawn_kwargs`
+und `terminator` sind über eine gewöhnliche Auswahlfunktion testbar, und die
+Tests wählen beide Plattformen — geprüft ist damit die *Auswahl*. Der Rumpf von
+`_terminate_posix` selbst, also `os.killpg(os.getpgid(pid), SIGKILL)`, trägt ein
+`# pragma: no cover  # POSIX-only` und ist auf dieser Maschine (Windows 11) noch
+nie gelaufen. Verschoben, weil die einzige ehrliche Prüfung eine POSIX-Maschine
+verlangt: ein Kommando, das einen langlebigen Enkel hinterlässt, die Zeitgrenze
+darüber, und danach die Frage, ob der Enkel wirklich tot ist. Kosten des
+Liegenlassens: die Hälfte der Plattformweiche ist Behauptung. **Dies ist der
+oberste Punkt dieser Liste.**
+
+**Das Restfenster bei der PID-Wiederverwendung unter Windows.** Der Baum wird
+über ein Job-Objekt getötet, dem der Prozess suspendiert zugewiesen wird — das
+schließt das Fenster, in dem ein schnelles Kind schon einen Enkel erzeugt haben
+könnte. Der Kehraus über die Eltern-PID-Tabelle daneben hat aber ein eigenes:
+Windows behält eine Eltern-PID im Eintrag, nachdem der Elternprozess gestorben
+ist, und vergibt PIDs neu. `_could_be_a_descendant` fängt den Normalfall ab —
+wer *vor* der Wurzel gestartet ist, kann nicht ihr Nachfahre sein. Ein
+Fremdprozess, der *nach* der Wurzel geboren wird und eine recycelte PID aus
+unserem Baum als Eltern-PID trägt, bleibt ununterscheidbar und würde
+mitgetötet. Verschoben, weil die saubere Antwort Handles statt PIDs über die
+ganze Kette wären und die Wahrscheinlichkeit in der Praxis winzig ist: das
+Fenster ist der Bruchteil einer Sekunde zwischen dem Tod eines Kindes und dem
+Kehraus. Festgehalten, weil ein fremder getöteter Prozess ein Schaden ist, den
+niemand mit ultraloom in Verbindung bringen würde.
+
+**Godot hat kein `coverage`-Preset, und das kostet jedes Projekt eine Zeile.**
+Der Eintrag für `project.godot` ist bewusst entfallen: GDScript-Coverage ist in
+dem Projekt, aus dem der Fall stammt, das Editor-Addon Nano Coverage — es
+instrumentiert die Quellen an Ort und Stelle und schreibt `lcov.info` als
+Nebenprodukt des Suitenlaufs, und die Schwelle darüber erzwingt ein
+projekteigenes Skript. Weder das eine noch das andere ist ein Kommando, das ein
+zweites Godot-Projekt aufrufen könnte, und ein erfundenes hätte nach einer
+Prüfung ausgesehen, ohne eine zu sein. Die Folge: die Aussage „ein
+Godot-Coverage-Bericht folgt immer auf die Suite" ist allgemein wahr, aber
+nirgends allgemein hinterlegt — jedes Godot-Projekt schreibt sein
+`coverage = "test"` selbst in `[verify.after]`, neben sein Kommando unter
+`[verify.coverage].report`. Verschoben, weil die Abhilfe ein Preset wäre, das
+eine Reihenfolge ohne ein Kommando trägt, und damit eine neue Sorte
+Preset-Eintrag. Kosten: eine Wiederholung je Projekt und ein Godot-Projekt, das
+sie vergisst, liest einen Bericht aus dem vorigen Lauf.
+
+**Eine Fehlermeldung nennt ein Kapitel, das in keiner Datei steht.** `_table`
+hat den Parameter `label` genau dafür — die verschachtelte Tabelle wird unter
+ihrem vollen Kapitelnamen abgelehnt, nicht unter ihrem Blatt. Der Aufruf für
+`[verify.coverage]` gibt ihn nicht mit: `coverage = "x"` unter `[verify]`
+scheitert mit `[coverage] must be a table`, und `[coverage]` kommt in der Datei
+nirgends vor. Einzeilige Reparatur, aber sie ändert eine Meldung, an der Tests
+hängen können — deshalb hier und nicht nebenbei in einer Doku-Aufgabe.
+Verwandt und ausdrücklich *kein* Fehler: ein Tippfehler **innerhalb** von
+`[verify.coverage]` (`reprot` statt `report`) wird still geschluckt, weil einen
+unbekannten Schlüssel abzulehnen eine eigene Entscheidung über Vorwärts-
+kompatibilität wäre. Der README benennt beides.
+
+**Was der Umbau behauptet hat, ist gemessen — siehe Ablaufseite.** Der
+`precommit`-Lauf in space ist wiederholt worden; die Zahlen stehen in
+`docs/abläufe/verify-until-green.md` neben den bestehenden Tabellen und nicht
+hier, damit sie eine Quelle haben statt zweier. Kurz: `threaded = true` über die
+zwei gleichrangigen GDScript-Linter bringt Faktor **1,60** (Median 5,94 s gegen
+9,48 s seriell, je drei Messungen), und die eingesparte zweite Suite ist an den
+`report_N/`-Verzeichnissen von gdUnit4 abgelesen. Wer die 1,60 anderswo als
+1,87 wiederfindet, liest einen überholten Zwischenstand: die erste serielle
+Zahl war eine Einzelmessung mit einem Ausreißer von 11,04 s, dessen Ursache
+offen bleibt.
+
+**`checks.py` trägt fünf Aufgaben auf gut 800 Zeilen** (815 bei diesem Stand).
+Presettabelle, Auflösung und Messentscheidung, Godot-Bereitschaftstor,
+Ausführung und Berichtsverschmelzung, Scheduler. Die Nähte sind benannt, aber
+der Schnitt ist teurer als er zunächst aussah. `schedule.py` nähme `run_kinds`,
+`_gated`, `_stages`, `_blocker`, `_run_or_report`, `run_all`, `BLOCKED` und
+`CheckRunner` mit — und dazu, damit das überhaupt übersetzt, `_marker`, `KINDS`,
+`CheckResult`, `UNAVAILABLE` und `CheckUnavailableError`. Der Knoten sitzt bei
+`run_check`: es gehört fachlich zur Ausführung und bliebe in `checks.py`, wird
+aber von `_gated` gerufen, also importierte `schedule.py` aus `checks.py`. Ein
+Re-Export von `run_all` in `checks.py`, damit die heutigen Aufrufer nichts
+merken, schlösse den Zyklus. Wer den Schnitt macht, muss also zuerst über diese
+Richtung entscheiden. `readiness.py` nähme `_unready`, `_import_message`,
+`_preset_godot_binary` und die beiden Godot-Konstanten, also die einzige
+Godot-Sonderkenntnis außerhalb von `PRESETS`. Kosten: `test_module_boundary.py`
+muss die neuen Namen kennen. Eigener Task, kein Merge-Blocker.
+
+**Der eine verbliebene Weg zu Grün über alte Daten.** Ein Projekt mit eigenem
+`[verify].test` **und** `[verify.coverage].report` **und**
+`[verify.after].coverage = "test"`: `_measures_for` ist dann falsch — das
+Testkommando ist fremd, und über fremde Kommandos wird nichts angenommen —,
+aber `after in alongside` ist wahr, also gibt es weder einen `measure`-Schritt
+noch eine Warnung. Läuft `test` grün, ohne zu messen, berichtet `coverage` über
+den vorigen Lauf und kann grün melden; `blocked` schützt hier nicht, weil der
+Vorgänger ja grün ist. Das ist die beschlossene Restlücke des Rulings zu Task 8
+und steht so im Docstring von `_measures_for`. Der Backlog nannte bisher nur die
+umgekehrte Nachlässigkeit — die Warnung, die zu oft käme —, nicht diese.
+
+**`brief` ist fast aus `report` ableitbar und geht trotzdem in den
+`input_hash`.** Fast, nicht ganz: `_render` klippt **je Befund**, während
+`report` der ungeklippte Gesamttext ist — aus dem Gesamttext ließe sich nur noch
+global klippen, und das gäbe eine andere Kürzung. Das Ruling bleibt richtig: der
+Zustand ist, was der Knoten gesehen hat, und eine gekürzte Fassung, die anders
+gekürzt wird, ist ein anderer Zustand. Die Kosten gehören aber danebengeschrieben: jede künftige Änderung an
+`clip` invalidiert zusätzlich sämtliche Journale — nicht nur die Einträge, die
+den Bericht wirklich gelesen haben. Wer `clip` anfasst, weiß dann, was er
+auslöst.

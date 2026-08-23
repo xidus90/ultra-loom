@@ -9,20 +9,27 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from ultraloom.checks import KINDS, UNREADY, CheckResult, CheckUnavailableError, run_check
-from ultraloom.config import Config
+from ultraloom.checks import (
+    BLOCKED,
+    KINDS,
+    UNAVAILABLE,
+    UNREADY,
+    CheckResult,
+    CheckRunner,
+    run_check,
+    run_kinds,
+)
+from ultraloom.config import Config, ConfigError
 from ultraloom.discovery import FlowContext, LoadedFlow
 from ultraloom.graph import END, AgentNode, CodeNode, Graph
 from ultraloom.runner import FlowExit
 from ultraloom.state import Delta
 from ultraloom.worktree import WorktreeError, changed_files
 
-type CheckRunner = Callable[[str, Config], CheckResult]
 type Differ = Callable[[Path], tuple[str, ...]]
 
 _EXIT_TOUCHED_A_TEST = 4
@@ -33,11 +40,39 @@ _EXIT_STILL_RED = 1
 # repair pass for it would be an agent looking for a way around a rule.
 UNFIXABLE: tuple[str, ...] = ("coverage",)
 
-# A check that could not be resolved at all reports itself this way
-# (checks._run_or_report). It is red, but no edit to the project fixes it --
-# space has no GDScript typechecker, and asking an agent to repair a tool that
-# is not installed is asking it to invent one.
-UNAVAILABLE = "unavailable"
+# Lines of one check's output the repairer gets to see. Every line past this is
+# a line paid for in every round of the loop, and a red pytest run is easily
+# two thousand of them.
+MODEL_OUTPUT_LINES = 200
+
+
+def clip(output: str, *, limit: int = MODEL_OUTPUT_LINES) -> str:
+    """Head and tail of a long output, with the gap named.
+
+    Tool-agnostic on purpose: a parser would need to know which tool wrote
+    this, and behind an [exec].prefix, a wrapper script and `uv run` that is
+    not reliably answerable.
+
+    The tail gets two thirds of the budget. pytest writes its summary last, and
+    so does coverage -- the end of a report is where the verdict lives.
+    """
+    lines = output.splitlines()
+    if len(lines) <= limit:
+        # Returned unchanged rather than rejoined: a single very long line has
+        # no lines to drop, and rejoining would silently eat a trailing newline.
+        return output
+
+    tail = limit * 2 // 3
+    # The marker counts against the budget: `limit` is an upper bound on what
+    # the repairer is handed, not on what survived the cut.
+    head = limit - tail - 1
+    dropped = len(lines) - head - tail
+    clipped = "\n".join(
+        [*lines[:head], f"    [... {dropped} Zeilen ausgelassen ...]", *lines[-tail:]]
+    )
+    # splitlines() drops a trailing newline; the short path above keeps one, so
+    # this path keeps one too rather than making the two ends differ.
+    return clipped + "\n" if output.endswith("\n") else clipped
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,44 +81,76 @@ class VerifyState:
 
     kinds: tuple[str, ...] = ()
     report: str = ""
+    # The same report clipped to what a repair round is worth paying for.
+    # Carried beside `report` rather than in place of it: the delta is what the
+    # runner journalises, and the full output exists nowhere else once
+    # `make_check` has returned its counts.
+    brief: str = ""
     failing: tuple[str, ...] = ()
     unfixable: tuple[str, ...] = ()
+    # Which of `failing` never ran because a predecessor was red. A field of its
+    # own rather than a source carried on the result: a check that did not run
+    # is neither repairable nor out of reach, and that third answer has to
+    # survive as far as `_out_of_reach_only` -- which sees the state, not the
+    # results.
+    blocked: tuple[str, ...] = ()
     touched: tuple[str, ...] = ()
     rounds: int = 0
     previous_failing: tuple[str, ...] = ()
 
 
-def make_check(config: Config, runner: CheckRunner = run_check) -> Callable[[VerifyState], Delta]:
+def make_check(config: Config, runner: CheckRunner | None = None) -> Callable[[VerifyState], Delta]:
     """The `check` node, bound to one project's configuration.
 
     The runner is a parameter so the flow's own tests never start a real tool:
-    a test that shells out to ruff measures ruff.
+    a test that shells out to ruff measures ruff. It stays None by default and
+    is passed on as None, because `run_kinds` builds the run's one process cap
+    around its own default runner -- naming `run_check` here would hand every
+    check a cap of its own. Handing `run_check` in is refused rather than left
+    to the docstring: it typechecks, it works, and it silently spends
+    `max_parallel` processes per check instead of per run.
     """
+    if runner is run_check:
+        raise ValueError(
+            "pass runner=None for the real checks: run_check handed in directly "
+            "bypasses the run's process cap, because run_kinds builds that cap "
+            "around its own default runner"
+        )
 
     def check(state: VerifyState) -> Delta:
         if not state.kinds:
-            # Without this the pool maps over nothing, `failing` comes back
-            # empty, the first edge out of this node holds and the run reports
-            # success -- having started no checker at all. A green answer
-            # nobody checked for is the one failure this flow must never
-            # produce, so it is refused here as well as in `_kinds_from`:
+            # Kept here although `run_kinds` also refuses an empty list: its
+            # ValueError speaks about a scheduler call, and this is a statement
+            # about the state -- it names no check, so nothing was verified. A
+            # green answer nobody checked for is the one failure this flow must
+            # never produce, so it is refused here as well as in `_kinds_from`:
             # `assemble` is callable without going through `build`.
             raise FlowExit(
                 _EXIT_STILL_RED,
                 "no checks to run: the state names none, so nothing was verified",
             )
 
-        # Concurrent for the same reason checks.run_all is: subprocess.run
-        # releases the GIL while it waits. Not run_all itself, because that one
-        # runs every kind and this node runs the kinds the caller asked for.
-        with ThreadPoolExecutor(max_workers=max(1, len(state.kinds))) as pool:
-            results = tuple(pool.map(lambda kind: _result_for(kind, config, runner), state.kinds))
+        # checks.run_kinds and not a pool of our own: the ordering between
+        # checks lives there, and a second scheduler here would run this flow --
+        # the one the ordering was written for -- unordered. The translation of
+        # CheckUnavailableError travels with it; it stood here as well only
+        # because there were two pools.
+        try:
+            results = run_kinds(state.kinds, config, runner)
+        except ConfigError as error:
+            # Not a red check but the end of the run: a cycle in the check order
+            # is a statement the configuration makes about itself, and no repair
+            # pass the flow could start would close it. Rounds of an agent
+            # editing source against it would all be wasted.
+            raise FlowExit(_EXIT_STILL_RED, str(error)) from error
 
         red = tuple(result for result in results if not result.ok)
         return {
             "failing": tuple(result.kind for result in red),
             "unfixable": tuple(result.kind for result in red if _out_of_reach(result)),
+            "blocked": tuple(result.kind for result in red if result.source == BLOCKED),
             "report": _render(red),
+            "brief": _render(red, limit=MODEL_OUTPUT_LINES),
             "rounds": state.rounds + 1,
             # What the previous pass found, saved before `failing` is
             # overwritten: an edge condition sees one state, so "the same
@@ -94,39 +161,64 @@ def make_check(config: Config, runner: CheckRunner = run_check) -> Callable[[Ver
     return check
 
 
-def _result_for(kind: str, config: Config, runner: CheckRunner) -> CheckResult:
-    """One check, with "cannot be resolved" turned into the red result it is.
-
-    checks.run_all does the same translation, and this node needs it for the
-    same reason: an unresolvable check escaping as an exception takes the whole
-    round down with it, discarding every check that already answered. In a
-    Godot project that is not an edge case -- there is no GDScript typechecker
-    and no coverage preset, so a raise here ended every run before the suite
-    had started.
-    """
-    try:
-        return runner(kind, config)
-    except CheckUnavailableError as error:
-        return CheckResult(kind, False, str(error), UNAVAILABLE)
-
-
 def _out_of_reach(result: CheckResult) -> bool:
     """Whether a red check is one no repair pass could close.
 
     UNREADY (checks._unready) joins UNAVAILABLE here: a Godot project that was
     never imported is red for a reason no edit to the source removes, and the
     handle is an editor run -- which an agent must not start.
+
+    BLOCKED deliberately does not: a check that did not run because its
+    predecessor was red closes itself the moment that predecessor goes green,
+    and calling it out of reach would end the flow at every ordinary red test.
+    Asked first, and before UNFIXABLE at that: a blocked `coverage` is not a
+    coverage gap that would have to be written away, it is a check that never
+    ran, and the kind alone cannot tell the two apart.
     """
+    if result.source == BLOCKED:
+        return False
     return result.kind in UNFIXABLE or result.source in (UNAVAILABLE, UNREADY)
 
 
-def _render(red: tuple[CheckResult, ...]) -> str:
+def _render(red: tuple[CheckResult, ...], *, limit: int | None = None) -> str:
     """The failing checks, for a human and for a model.
 
     Only the failing ones: a green check's output is noise in a terminal and
     paid-for noise in a prompt.
+
+    A blocked check is named below the findings and never among them: it is
+    nothing the repairer can touch, and a defect list holding it would spend a
+    round on a check that has no defect. Named all the same, so a report with a
+    green lint, a green types and a red test does not read as though coverage
+    had been checked.
+
+    `limit` clips each finding's output; without one nothing is cut. The
+    default is the uncut report on purpose: this is what the journal records,
+    and the CheckResults are gone the moment `make_check` returns, so a report
+    shortened here is a run nobody can read afterwards. Only the copy meant for
+    the repairer passes a limit.
+
+    A blocked check's line is never clipped in either case: it is one line
+    naming what did not run, and it is the whole reason the report is honest.
     """
-    return "\n\n".join(f"## {result.kind} ({result.source})\n{result.output}" for result in red)
+    blocked = tuple(result.kind for result in red if result.source == BLOCKED)
+    findings = tuple(result for result in red if result.source != BLOCKED)
+    rendered = "\n\n".join(
+        f"## {result.kind} ({result.source})\n"
+        f"{result.output if limit is None else clip(result.output, limit=limit)}"
+        for result in findings
+    )
+    if not blocked:
+        return rendered
+    line = f"Nicht gelaufen, weil ein Vorgänger rot war: {', '.join(blocked)}"
+    # Concatenated conditionally rather than always. `make_check` never reaches
+    # the second arm -- a blocked check needs a red predecessor in the same
+    # pass, so there is always a finding above the line, transitive chains
+    # included: the root of every chain is a real one. It is here because
+    # `_render` takes any tuple of red results, and a report opening on two
+    # blank lines would read as a lost heading. The direct test is what holds
+    # this arm honest; coverage does not measure the arms of a ternary.
+    return f"{rendered}\n\n{line}" if rendered else line
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,11 +290,14 @@ def make_repair(test_paths: tuple[str, ...]) -> AgentNode[VerifyState]:
         # `failing` and `unfixable` still hold the old round's values while
         # `report` already holds the summary -- and the guard is the node that
         # sees it that way.
-        return {"report": reply.summary}
+        # Both fields, because the next `check` pass overwrites both: leaving
+        # `brief` on the old round's findings would hand a stale report to the
+        # next prompt if that pass ever fails to run.
+        return {"report": reply.summary, "brief": reply.summary}
 
     return AgentNode(
         "repair",
-        prompt=lambda state: REPAIR_PROMPT.format(report=state.report, forbidden=forbidden),
+        prompt=lambda state: REPAIR_PROMPT.format(report=state.brief, forbidden=forbidden),
         schema=RepairResult,
         apply=apply,
         tools="edit",
@@ -299,8 +394,17 @@ def _out_of_reach_only(state: VerifyState) -> bool:
     the normal case, not the exception, in a project that permanently lacks a
     tool -- space has no GDScript typechecker, so `types` is unavailable there
     on every single run.
+
+    Blocked checks are left out of the question entirely, because they answer
+    it with nothing: a check that never ran is neither a defect the repairer
+    can close nor one that is out of reach. Counting them as repairable is what
+    a Godot project that was never imported would have paid for -- `test` red
+    and unready, `coverage` blocked behind it, and five agent rounds spent on a
+    project no edit turns green. Leaving them out cannot make the set empty in
+    practice either: the root of every blocking chain is a real finding.
     """
-    return bool(state.failing) and set(state.failing) <= set(state.unfixable)
+    reachable = tuple(kind for kind in state.failing if kind not in state.blocked)
+    return bool(reachable) and set(reachable) <= set(state.unfixable)
 
 
 def _why_red(state: VerifyState, max_rounds: int) -> str:
@@ -335,7 +439,7 @@ def _stagnated(state: VerifyState) -> bool:
 def assemble(
     config: Config,
     root: Path,
-    check_runner: CheckRunner = run_check,
+    check_runner: CheckRunner | None = None,
     differ: Differ = changed_files,
     max_rounds: int = 5,
     baseline: frozenset[str] | None = None,

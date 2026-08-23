@@ -7,6 +7,7 @@ boundary still profit from the language presets.
 
 from __future__ import annotations
 
+import os
 import shlex
 import tomllib
 from collections.abc import Mapping
@@ -17,6 +18,10 @@ from typing import Any
 CONFIG_NAME = ".ultraloom/config.toml"
 
 _KINDS = ("lint", "types", "test")
+
+# Everything the table form of a check kind understands. Also what
+# [verify.coverage] must *not* carry, which is why it is named once.
+_TABLE_KEYS = ("commands", "threaded")
 
 # The check kinds a profile may name. Deliberately a copy of checks.KINDS and
 # not an import: config sits below checks, and test_module_boundary keeps it
@@ -29,6 +34,12 @@ _CHECK_KINDS = ("lint", "types", "test", "coverage")
 DEFAULT_TIMEOUT = 600
 
 
+def _default_parallelism() -> int:
+    # process_cpu_count honours a CPU affinity mask, which a build agent may
+    # well set; cpu_count would promise cores this process cannot use.
+    return os.process_cpu_count() or 1
+
+
 class ConfigError(ValueError):
     """Raised for a config file that cannot be read or means two things."""
 
@@ -38,7 +49,8 @@ class Config:
     """What a project says about how it is checked."""
 
     root: Path
-    commands: Mapping[str, str] = field(default_factory=dict)
+    commands: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    threaded: frozenset[str] = frozenset()
     exec_prefix: tuple[str, ...] = ()
     coverage_report: str | None = None
     coverage_threshold: int = 100
@@ -46,7 +58,33 @@ class Config:
     test_paths: tuple[str, ...] = ()
     timeout: int = DEFAULT_TIMEOUT
     godot_import: bool = True
+    # The cap on processes running at once, over the whole run: run_kinds
+    # builds one semaphore and hands it down through the stages and the kinds
+    # to the process itself, which is the only level that acquires it. A caller
+    # that runs a single check on its own gets a cap of its own instead.
+    max_parallel: int = field(default_factory=_default_parallelism)
+    after: Mapping[str, str] = field(default_factory=dict)
     profiles: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """No check kind may carry a command that runs nothing, and the cap is real.
+
+        Not only load_config's business: whoever builds a Config by hand gets
+        the same assurance. An argv that is blank leaves nothing but the
+        [exec].prefix, and a prefix that exits 0 reports a check nobody
+        configured as passed -- the one failure in this system that actually
+        does damage.
+
+        A cap of zero is the quiet version of the same thing: run_kinds makes a
+        BoundedSemaphore of it, and the first acquire against zero blocks in the
+        pool forever -- no timeout, no message, a run that checks nothing and
+        never comes back.
+        """
+        for kind, commands in self.commands.items():
+            if not commands or any(not command.strip() for command in commands):
+                raise ConfigError(f"check {kind!r} has an empty command")
+        if self.max_parallel <= 0:
+            raise ConfigError(f"max_parallel must be greater than zero, not {self.max_parallel}")
 
 
 def load_config(root: Path) -> Config:
@@ -68,14 +106,25 @@ def load_config(root: Path) -> Config:
     coverage = _table(verify, "coverage", path)
     agent = _table(raw, "agent", path)
 
-    commands: dict[str, str] = {}
+    # [verify.coverage] has the shape of the new table form without being one:
+    # coverage is configured through `report`, and swallowing `commands` here
+    # would leave the check on its preset with nothing saying why.
+    unhonoured = tuple(key for key in _TABLE_KEYS if key in coverage)
+    if unhonoured:
+        raise ConfigError(
+            f"{path}: [verify.coverage] does not take "
+            f"{', '.join(repr(key) for key in unhonoured)}; "
+            f"name the command as [verify.coverage].report"
+        )
+
+    commands: dict[str, tuple[str, ...]] = {}
+    threaded: set[str] = set()
     for kind in _KINDS:
         if kind not in verify:
             continue
-        value = verify[kind]
-        if not isinstance(value, str):
-            raise ConfigError(f"{path}: [verify].{kind} must be a string")
-        commands[kind] = value
+        commands[kind], is_threaded = _commands_for(kind, verify[kind], path)
+        if is_threaded:
+            threaded.add(kind)
 
     raw_tests = verify.get("tests", [])
     if not isinstance(raw_tests, list) or not all(isinstance(item, str) for item in raw_tests):
@@ -95,6 +144,16 @@ def load_config(root: Path) -> Config:
     # rather than silently read as "on".
     if not isinstance(godot_import, bool):
         raise ConfigError(f"{path}: [verify].godot_import must be true or false")
+
+    # Spelling the default here too would give it two sources that can drift
+    # apart unnoticed -- a file that omits the key would take the copy in this
+    # line, never the field's. Absent means absent; the field decides.
+    raw_max_parallel = verify.get("max_parallel")
+    max_parallel = (
+        _default_parallelism() if raw_max_parallel is None else _parallelism(raw_max_parallel, path)
+    )
+
+    after = _after_from(_table(verify, "after", path, "verify.after"), path)
 
     profiles: dict[str, tuple[str, ...]] = {}
     for name, kinds in _table(verify, "profiles", path).items():
@@ -128,6 +187,7 @@ def load_config(root: Path) -> Config:
     return Config(
         root=root,
         commands=commands,
+        threaded=frozenset(threaded),
         exec_prefix=tuple(shlex.split(prefix)),
         coverage_report=report,
         coverage_threshold=threshold,
@@ -135,12 +195,114 @@ def load_config(root: Path) -> Config:
         test_paths=tuple(raw_tests),
         timeout=timeout,
         godot_import=godot_import,
+        max_parallel=max_parallel,
+        after=after,
         profiles=profiles,
     )
 
 
-def _table(raw: Mapping[str, Any], name: str, path: Path) -> Mapping[str, Any]:
+def _parallelism(value: object, path: Path) -> int:
+    """What the file says about the cap, or a refusal."""
+    # Booleans are ints in TOML, the same trap the timeout key has.
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ConfigError(f"{path}: [verify].max_parallel must be an integer")
+    if value <= 0:
+        raise ConfigError(f"{path}: [verify].max_parallel must be greater than zero")
+    return value
+
+
+def _after_from(raw: Mapping[str, Any], path: Path) -> Mapping[str, str]:
+    """The dependency edges, validated so a bad one cannot become a run that hangs."""
+    edges: dict[str, str] = {}
+    for kind, predecessor in raw.items():
+        if not isinstance(predecessor, str):
+            raise ConfigError(f"{path}: [verify.after].{kind} must be a string")
+        for name in (kind, predecessor):
+            if name not in _CHECK_KINDS:
+                raise ConfigError(f"{path}: [verify.after] names unknown check {name!r}")
+        edges[kind] = predecessor
+
+    # Each kind names at most one predecessor, so following the chain from every
+    # kind is enough: a cycle is a walk that returns to something already seen.
+    # Refused here rather than in the scheduler, where it would be a run that
+    # waits for itself and never ends.
+    for kind in edges:
+        # Kept as a path rather than a set so the refusal can name the edges
+        # that form the ring; a single node leaves the reader to find them.
+        walked = [kind]
+        current = kind
+        while current in edges:
+            current = edges[current]
+            if current in walked:
+                ring = " -> ".join([*walked[walked.index(current) :], current])
+                raise ConfigError(f"{path}: [verify.after] has a cycle: {ring}")
+            walked.append(current)
+    return edges
+
+
+def _commands_for(kind: str, value: object, path: Path) -> tuple[tuple[str, ...], bool]:
+    """One kind's commands, from any of its three shapes.
+
+    A string is one command, a list is several, a table is several plus the
+    switches. TOML itself rules out the string-and-table collision: a key
+    cannot be both, and the parser refuses the file before it reaches here.
+    """
+    if isinstance(value, str):
+        return _checked((value,), kind, path), False
+    if isinstance(value, list):
+        return _checked(tuple(value), kind, path), False
+    if isinstance(value, dict):
+        # A typo such as `thread = true` would otherwise leave the check
+        # unthreaded with nothing to read the mistake off.
+        unknown = sorted(set(value) - set(_TABLE_KEYS))
+        if unknown:
+            raise ConfigError(
+                f"{path}: [verify.{kind}] does not know "
+                f"{', '.join(repr(key) for key in unknown)}; "
+                f"it takes {', '.join(repr(key) for key in _TABLE_KEYS)}"
+            )
+        raw = value.get("commands")
+        if raw is None:
+            raise ConfigError(f"{path}: [verify.{kind}] must name `commands`")
+        if not isinstance(raw, list):
+            raise ConfigError(f"{path}: [verify.{kind}].commands must be a list of strings")
+        is_threaded = value.get("threaded", False)
+        # Booleans are ints in TOML, so `threaded = 1` is refused rather than
+        # read as "on" -- the same trap the timeout and godot_import keys have.
+        if not isinstance(is_threaded, bool):
+            raise ConfigError(f"{path}: [verify.{kind}].threaded must be true or false")
+        return _checked(tuple(raw), kind, path), is_threaded
+    raise ConfigError(f"{path}: [verify.{kind}] must be a string, a list of strings, or a table")
+
+
+def _checked(commands: tuple[object, ...], kind: str, path: Path) -> tuple[str, ...]:
+    """Every command is a non-blank string, checked before any prefix is prepended.
+
+    With an [exec].prefix configured, a blank command line leaves the bare
+    prefix, and a prefix that exits 0 turns a check nobody configured into a
+    green line -- the one failure in this system that actually does damage.
+    """
+    if not commands:
+        raise ConfigError(f"{path}: [verify.{kind}] names an empty list of commands")
+    for command in commands:
+        if not isinstance(command, str):
+            raise ConfigError(f"{path}: [verify.{kind}] must hold strings")
+        if not command.strip():
+            raise ConfigError(f"{path}: [verify.{kind}] holds an empty command")
+    # The isinstance check above is per item; str() only tells mypy that.
+    return tuple(str(command) for command in commands)
+
+
+def _table(
+    raw: Mapping[str, Any], name: str, path: Path, label: str | None = None
+) -> Mapping[str, Any]:
+    """One nested table, or a refusal that names it as the file spells it.
+
+    A nested table's key is only its leaf, so `label` carries the full heading
+    -- otherwise `after = "test"` under [verify] is refused as `[after]`, which
+    appears nowhere in the file.
+    """
     value = raw.get(name, {})
     if not isinstance(value, dict):
-        raise ConfigError(f"{path}: [{name}] must be a table")
+        raise ConfigError(f"{path}: [{label or name}] must be a table")
     return value

@@ -390,7 +390,14 @@ def test_check_all_reports_the_resolvable_and_the_unavailable_alike(
 def test_check_all_waits_for_the_checks_at_the_same_time(tmp_path: Path) -> None:
     """The reason `all` exists: one startup cost, and the waiting overlaps."""
     slow = python_command("import time; time.sleep(0.5)")
-    write_config(tmp_path, f"[verify]\nlint = '{slow}'\ntypes = '{slow}'\ntest = '{slow}'\n")
+    # Spelled out rather than inherited: max_parallel defaults to the machine's
+    # cpu count and caps the *processes*, so on a one- or two-core runner these
+    # three sleeps would be serialised by the cap and the bound below would fail
+    # for a reason that has nothing to do with what is being tested.
+    write_config(
+        tmp_path,
+        f"[verify]\nmax_parallel = 3\nlint = '{slow}'\ntypes = '{slow}'\ntest = '{slow}'\n",
+    )
     started = time.perf_counter()
 
     main(["check", "all", "--root", str(tmp_path)])
@@ -433,7 +440,7 @@ def test_the_agent_extra_is_used_when_it_is_installed(
 
     module = ModuleType("ultraloom.model.agent_sdk")
     # A stand-in for the optional extra, which this subproject does not ship.
-    module.AgentSdkModel = StandInModel  # type: ignore[attr-defined]
+    module.AgentSdkModel = StandInModel  # type: ignore[attr-defined]  # a stub module grows its attributes
     monkeypatch.setitem(sys.modules, "ultraloom.model.agent_sdk", module)
     write_flow(tmp_path, "needs_model", A_MODEL_FLOW)
 
@@ -821,3 +828,58 @@ def test_an_empty_recorded_baseline_holds_no_path(tmp_path: Path) -> None:
     """
     assert _decode_baseline("") == frozenset()
     assert _decode_baseline("a.py\n\ntests/b.py") == frozenset({"a.py", "tests/b.py"})
+
+
+def test_check_all_refuses_a_ring_in_the_effective_check_order(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """load_config takes the single edge; the preset closes the ring behind it."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    config = tmp_path / ".ultraloom" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text('[verify.after]\ntest = "coverage"\n', encoding="utf-8")
+
+    code = main(["check", "all", "--root", str(tmp_path)])
+
+    assert code == 1
+    assert "has a cycle" in capsys.readouterr().err
+
+
+def test_check_all_reports_a_blocked_check_as_failed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Never green, never silent: the line is there and the exit code is red."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    write_config(
+        tmp_path,
+        f"[verify]\ntest = '{python_command('raise SystemExit(1)')}'\n\n"
+        '[verify.after]\ncoverage = "test"\n',
+    )
+
+    code = main(["check", "all", "--root", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "coverage: failed [blocked]" in out
+    assert "läuft nicht, weil `test` rot war" in out
+
+
+def test_check_prints_the_heading_of_every_command_of_one_kind(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """_report passes the output through, so a multi-command report arrives whole."""
+    # The markers are computed, never spelled out in the command line: a marker
+    # that appears in argv would already be matched by the heading, and the
+    # assertion would pass over a _report that dropped the output entirely.
+    first = python_command("print(chr(102) + str(11 * 2 + 1))")
+    second = python_command("print(chr(115) + str(11 * 2 + 2)); raise SystemExit(1)")
+    write_config(tmp_path, f"[verify]\nlint = ['{first}', '{second}']\n")
+
+    code = main(["check", "lint", "--root", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "lint: failed" in out
+    assert "f23" in out, "the first command's own output must survive"
+    assert "s24" in out, "and so must the second's"
+    assert "(failed)" in out, "the heading carries the verdict of its own command"

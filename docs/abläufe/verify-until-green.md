@@ -39,7 +39,7 @@ kein Ausgang ist.
 
 | Knoten | Art | `max_visits` | Was er tut |
 | --- | --- | --- | --- |
-| `check` | code | `max_rounds + 1` | Führt die gewählten Prüfungen nebenläufig aus, sammelt die roten, erhöht den Rundenzähler und merkt sich, was die vorige Runde gefunden hatte. |
+| `check` | code | `max_rounds + 1` | Führt die gewählten Prüfungen in Stufen aus — nebenläufig nur innerhalb einer Stufe —, sammelt die roten, erhöht den Rundenzähler und merkt sich, was die vorige Runde gefunden hatte. |
 | `repair` | agent | `max_rounds + 1` | Bekommt den Bericht der roten Prüfungen und repariert die Quellen. Werkzeugprofil `edit`, Effort `high`. |
 | `guard` | code | `max_rounds + 1` | Liest den Arbeitsbaum über `git status` und bricht ab, wenn der Reparateur geschützte Pfade angefasst hat. |
 | `report_red` | code | 1 | Beendet den Lauf rot und sagt, warum. |
@@ -64,9 +64,18 @@ dem er rot ist.
 | `report` | `str` | Der gerenderte Bericht der roten Prüfungen — nach `repair` stattdessen dessen Zusammenfassung. |
 | `failing` | `tuple[str, ...]` | Die Arten, die in der letzten Runde rot waren. |
 | `unfixable` | `tuple[str, ...]` | Davon die, die keine Reparatur schließen kann. |
+| `blocked` | `tuple[str, ...]` | Davon die, die gar nicht gelaufen sind, weil ihr Vorgänger rot war. Weder reparierbar noch außer Reichweite — und diese dritte Antwort muss bis zur Abbruchentscheidung durchhalten. |
+| `brief` | `str` | Derselbe Bericht, gekürzt auf das, was der Reparateur zu sehen bekommt. |
 | `touched` | `tuple[str, ...]` | Was `git status` nach dem Reparaturlauf als geändert meldet. |
 | `rounds` | `int` | Wie oft `check` gelaufen ist. |
 | `previous_failing` | `tuple[str, ...]` | Was die vorige Runde gefunden hat. Eine Kantenbedingung sieht nur einen Zustand, und „dieselben Prüfungen schon wieder" ist sonst nicht beantwortbar. |
+
+`report` und `brief` tragen denselben Befund in zwei Längen. Der Prompt des
+Reparateurs bekommt `brief`: je Prüfung höchstens 200 Zeilen, Kopf und Fuß
+erhalten und eine Zeile dazwischen, die sagt, wie viel fehlt. Der Fuß wiegt
+schwerer als der Kopf, weil pytest seine Zusammenfassung ans Ende schreibt. Ins
+Journal geht `report` mit der **vollständigen** Ausgabe — gekürzt wird nur, was
+Token kostet, nie das, was einen Lauf im Nachhinein auswertbar macht.
 
 Zwischen `repair` und dem nächsten `check` liest der Zustand absichtlich
 gemischt: `failing` und `unfixable` tragen noch die Werte der alten Runde,
@@ -100,6 +109,32 @@ Vorher endete dort jeder Lauf sofort mit Exit 1; jetzt bekommen die übrigen
 Prüfungen ihre Runden, und der Ablauf ruft bis zu `max_rounds` mal das Modell,
 wo vorher gar keiner kam. Das ist der gewollte Tausch — wer ihn nicht will,
 lässt die unverfügbare Art über `--checks` weg.
+
+Die Quelle `"blocked"` gehört ausdrücklich **nicht** dazu. Eine blockierte
+Prüfung ist keine, die niemand schließen kann — sie schließt sich selbst, sobald
+ihr Vorgänger grün ist. Wäre sie außer Reichweite, gäbe der Ablauf bei jedem
+gewöhnlichen roten Test sofort auf. Und weil `coverage` in `UNFIXABLE` steht,
+wird die Quelle **vor** der Art gefragt: ein blockiertes `coverage` ist keine
+Deckungslücke, sondern eine Prüfung, die nicht lief.
+
+Der Reparateur sieht sie deshalb auch nicht in der Mängelliste, sondern
+darunter, in einer eigenen Zeile:
+
+```
+Nicht gelaufen, weil ein Vorgänger rot war: coverage
+```
+
+Genannt, damit ein Bericht mit grünem `lint`, grünem `types` und rotem `test`
+sich nicht liest, als wäre die Abdeckung geprüft worden. Getrennt, damit klar
+ist, dass hier nichts zu reparieren ist: der Griff ist der rote Vorgänger, und
+sobald der grün ist, läuft die blockierte Prüfung von selbst wieder mit.
+
+Für die Abbruchentscheidung zählt eine blockierte Prüfung deshalb gar nicht mit:
+„außer Reichweite" heißt genau dann, wenn *jede rote, nicht blockierte* Prüfung
+außer Reichweite liegt. Ohne diese Ausnahme kostete ein nie importiertes
+Godot-Projekt fünf bezahlte Modellrunden — `test` rot mit `unready`, `coverage`
+dahinter blockiert, zusammen kein Teilmengenverhältnis mehr und am Ende die
+falsche Diagnose „still red after N repair rounds".
 
 ## Was ein Godot-Projekt vorher braucht
 
@@ -268,8 +303,10 @@ Aus `.ultraloom/config.toml`:
 | Schlüssel | Wirkung |
 | --- | --- |
 | `[verify].tests` | Die Pfade, die der Reparateur nicht anfassen darf. **Pflicht** — ohne sie startet der Ablauf nicht. |
-| `[verify].lint`, `.types`, `.test` | Die Kommandos der jeweiligen Prüfung. Fehlen sie, greifen die Sprachpresets. |
-| `[verify].timeout` | Sekunden pro Prüfkommando. |
+| `[verify].lint`, `.types`, `.test` | Die Kommandos der jeweiligen Prüfung, in einer von drei Gestalten: Zeichenkette (eines), Liste (mehrere, nacheinander) oder Tabelle mit `commands` und `threaded` (mehrere, wahlweise nebenläufig). Alle laufen, auch nach dem ersten roten. Fehlen sie, greifen die Sprachpresets. |
+| `[verify].timeout` | Sekunden pro **Prüfkommando** — nicht pro Prüfart und nicht pro Stufe. |
+| `[verify.after]` | Reihenfolge zwischen Prüfarten: bildet eine Art auf den einen Vorgänger ab, den sie liest. Überschreibt die Vorgabe des Presets. Ein Godot-Projekt schreibt hier `coverage = "test"` selbst, weil es kein GDScript-Coverage-Preset gibt. |
+| `[verify].max_parallel` | Deckel auf die gleichzeitig laufenden Prüfprozesse über den ganzen Lauf. Vorgabe `os.process_cpu_count()`. |
 | `[verify].godot_import` | Standard `true`. Auf `false` gesetzt, entfällt die Import-Vorbedingung für `test` und `coverage` — für ein Godot-Projekt, dessen eigenes Prüfkommando den Import fährt oder das nicht über eine Engine testet. Siehe *Was ein Godot-Projekt vorher braucht*. |
 | `[verify.profiles].<name>` | Benannte Listen von Prüfarten, die `--checks <name>` auswählen kann. |
 | `[verify.coverage].report` | Das Kommando der Coverage-Prüfung. Es geht **jedem** anderen Weg vor: gesetzt, gewinnt es auch gegen ein `coverage`-Kommando aus `.ultraloom/checks/` und gegen das Sprachpreset — ohne Warnung. |
@@ -294,9 +331,10 @@ Parametern aufbauen wie der ursprüngliche Lauf.
 | Ausgang | Exit-Code | Wann |
 | --- | --- | --- |
 | grün | 0 | `check` findet keine rote Prüfung — oder, unter `ultraloom replay`, das Journal eines Laufs, der so endete. Ein `replay` prüft nichts nach; er leitet das aufgezeichnete Ende neu ab. |
-| rot, außer Reichweite | 1 | Es ist nichts Reparierbares mehr übrig: jede rote Prüfung ist unreparierbar. Eine unreparierbare *neben* reparierbaren beendet den Lauf **nicht** — sonst erreichte ein Projekt, dessen Coverage-Prüfung über die Tests misst, bei einem einzigen roten Test nie eine Reparaturrunde. |
+| rot, außer Reichweite | 1 | Es ist nichts Reparierbares mehr übrig: jede rote, **nicht blockierte** Prüfung ist unreparierbar. Eine blockierte zählt nicht mit — sie schließt sich, sobald ihr Vorgänger grün ist. Eine unreparierbare *neben* reparierbaren beendet den Lauf **nicht** — sonst erreichte ein Projekt, dessen Coverage-Prüfung über die Tests misst, bei einem einzigen roten Test nie eine Reparaturrunde. |
 | rot, Runden aufgebraucht | 1 | `rounds > max_rounds`. |
 | rot, stagniert | 1 | Dieselben Prüfungen sind wieder rot, und der Reparaturlauf dazwischen hat keine Datei geändert. |
+| rot, Ring in der Reihenfolge | 1 | `[verify.after]` und die Presets ergeben zusammen einen Kreis. Kein roter Befund, sondern das Ende des Laufs: eine Reparaturrunde gegen den Quelltext schließt keinen Ring in der Konfiguration. Die Meldung nennt den Pfad. |
 | rot, keine Prüfung | 1 | Der Zustand benennt keine Prüfart. Ein grünes Ergebnis, nach dem niemand gesehen hat, ist der eine Fehler, den dieser Ablauf nie erzeugen darf. |
 | abgebrochen, Tests angefasst | 4 | Der Reparateur hat einen geschützten Pfad geändert, oder der Arbeitsbaum ist nicht lesbar. |
 
@@ -412,7 +450,9 @@ danach dazugekommen ist.
   senken, aber ein Verbot im Prompt ist eine Bitte; `guard` ist die Mechanik.
 - Der volle `precommit`-Lauf auf sauberem Baum braucht rund 9 s, fast alles
   davon die zweimal laufende Testsuite (einmal unter `test`, einmal unter
-  `coverage`). Das ist der in Spec 9.4 bewusst bezahlte Preis.
+  `coverage`). Das war der in Spec 9.4 bewusst bezahlte Preis — er ist seit den
+  Stufen nicht mehr fällig: `test` misst mit, `coverage` berichtet in der Stufe
+  danach, und die Suite läuft einmal.
 - Beim ersten Versuch, den Fehler für Lauf 0002 einzubauen (falsche
   Rückgabeannotation `-> int` an `_decode`), stürzte mypy 2.3.1 reproduzierbar
   mit „INTERNAL ERROR" ab und meldete die echten Fehler nur zum Teil. Das ist
@@ -423,8 +463,11 @@ danach dazugekommen ist.
 
 ## Die Läufe nach der Reparatur
 
-Dieselben Lagen noch einmal, mit Grundlinie, mit `set(failing) <= set(unfixable)`
-als Abbruchbedingung und mit der vollständigen roten Meldung.
+Dieselben Lagen noch einmal, mit Grundlinie und mit der vollständigen roten
+Meldung. Abbruchbedingung war damals `set(failing) <= set(unfixable)`; die
+Quelle `blocked` gab es noch nicht, und heute zählt die Bedingung blockierte
+Prüfungen ausdrücklich nicht mit (siehe *Abbruchbedingungen und Exit-Codes*).
+Die Zahlen sind das Protokoll jener Läufe, nicht der heutige Stand.
 
 | Lauf | Lage | Exit | Runden | Token | Laufzeit |
 | --- | --- | --- | --- | --- | --- |
@@ -506,10 +549,18 @@ entfernte; die zweite Runde war grün.
 
 ### Die Grundlinie hält sich auch in einem fremden Baum
 
-Der erste Engine-Start in einem frischen Worktree legt `.godot/` an und ändert
-dabei `project.godot` und jede `*.import`-Datei — fünfzehn Pfade, darunter ein
-geschützter. Ohne die Grundlinie hätte hier jeder Lauf mit Exit 4 geendet und
-den Agenten für die Arbeit des Godot-Editors beschuldigt.
+Der erste Engine-Start in einem frischen Worktree legt `.godot/` an und schreibt
+dabei `project.godot` und jede `*.import`-Datei neu — am 23.08. gemessen
+**vierzehn Pfade**, darunter mit `project.godot` ein geschützter. (Hier stand
+zuerst „fünfzehn"; die Zahl war nie nachgezählt, und die Zählung unten ergibt
+vierzehn.) Ohne die Grundlinie hätte hier jeder Lauf mit Exit 4 geendet und den
+Agenten für die Arbeit des Godot-Editors beschuldigt.
+
+„Neu schreiben" ist dabei nicht „ändern", und der Unterschied ist für die
+Grundlinie gleichgültig, für einen Leser aber nicht: von den vierzehn Pfaden
+trägt genau einer — `project.godot` — einen Inhaltsunterschied. Die zwölf
+`*.import` sind hinterher byteweise dieselben, `git status` führt sie trotzdem
+als geändert. Warum, steht unten unter *Der Zustand danach*.
 
 ### Was nicht mitwandert: der Exit-Code als Urteil
 
@@ -527,8 +578,21 @@ Zweitens misst space seine Abdeckung als *Nebenprodukt des Suitenlaufs*. Die
 Prüfungen laufen nebenläufig (Spec 9.4), also liest das Coverage-Tor den
 Bericht, den die Suite erst acht Minuten später schreibt. Das Python-Preset löst
 das mit einem `measure`-Schritt, der die Suite ein zweites Mal fährt; für eine
-Godot-Suite ist das keine Option. Eine Reihenfolge zwischen Prüfungen kennt der
-Ablauf heute nicht — das ist die offene Stelle, die space hinterlässt.
+Godot-Suite ist das keine Option. Genau das war die offene Stelle, die space
+hinterlassen hat — sie ist inzwischen geschlossen: der Knoten `check` ruft den
+gemeinsamen Scheduler `checks.run_kinds` und hat keinen eigenen Thread-Pool
+mehr. Prüfungen laufen in Stufen, nebenläufig nur innerhalb einer Stufe, und
+eine Prüfung, deren Vorgänger rot war, läuft nicht — sie kommt rot mit der
+Quelle `"blocked"` zurück. Im Bericht steht sie **unter** den Befunden und nie
+zwischen ihnen:
+
+```
+Nicht gelaufen, weil ein Vorgänger rot war: coverage
+```
+
+Unter ihnen, weil sie kein Mangel ist, den der Reparateur anfassen kann.
+Genannt, weil ein Bericht mit grünem `lint`, grünem `types` und rotem `test`
+sich sonst läse, als wäre die Abdeckung geprüft worden.
 
 ### Führt das SDK die Hooks des Projekts zusätzlich aus?
 
@@ -552,3 +616,149 @@ MCP-Server des Benutzers anbietet. Er rief `mcp__context-mode__ctx_execute` auf,
 um sein Ergebnis mit einem eigenen gdlint-Lauf nachzuprüfen, und wurde von
 `permission_mode: "dontAsk"` abgewiesen — die Sperre hält, aber die Werkzeuge
 stehen im Prompt und kosten eine Werkzeugrunde.
+
+## Die Läufe mit Stufen: space, 23.08.2026
+
+Die offene Stelle von oben — das Coverage-Tor liest einen Bericht, den die Suite
+erst später schreibt — ist gemessen zu. Derselbe Worktree, dieselbe
+Konfiguration bis auf zwei Schlüssel: `[verify.lint]` als Tabelle mit `gdlint`
+**und** `gdformat --check`, und `[verify.after] coverage = "test"`.
+
+| Lauf | Aufruf | Exit | Runden | Token | Laufzeit |
+| --- | --- | --- | --- | --- | --- |
+| `check all` | alle vier Prüfarten | 1 | — | 0 | 484 s |
+| 0001 | `--checks precommit`, Baum wie vorgefunden | 1 | 1 | 0 | 728 s |
+| 0002 | `--checks precommit`, Fehler in der Quelle | 1 | abgebrochen | 0 | 519 s |
+| 0003 | `--checks precommit`, derselbe Fehler | 1 | 2 | 5482 | 1099 s |
+
+Lauf 0002 steht hier, obwohl er nichts über die Stufen sagt: die Prüfkette lief
+vollständig durch, dann fiel der `repair`-Knoten nach 3,42 s am Agent-SDK. Warum,
+steht unten unter *Drei Befunde*.
+
+`check all` ist der eigentliche Nachweis: `coverage` lief in der Stufe **nach**
+`test`, mit `source="config"`, und fand den LCOV-Bericht, den die Suite
+unmittelbar davor geschrieben hatte. Die Zeichenkette „no coverage report" kommt
+in 1,2 MB Ausgabe null Mal vor. Rot war `coverage` trotzdem — mit 41 echten
+ungedeckten Zeilen, denselben, die space' eigenes `coverage_gate.py` ausweist;
+die Gegenprobe zeigt sie damit als vorbestehend und nicht als Artefakt der
+Umstellung.
+
+**Die Suite lief dabei einmal, und das ist für `check all` gezählt.** gdUnit4
+schreibt je Sitzung ein Startbanner ins Protokoll; im Protokoll des `check all`
+steht `GdUnit4 Comandline Tool` genau einmal, `GdUnit4 session starting` genau
+einmal und das Engine-Banner genau einmal — in einem Lauf, der `test` und
+`coverage` zusammen anforderte. Drei unabhängige Marken, je genau eine. Vor den
+Stufen wären es zwei gewesen.
+
+Für die vier übrigen `check`-Besuche des Tages ist dieselbe Aussage **eine
+Inferenz**, keine Zählung: gdUnit4 legt je Lauf ein `reports/report_N/` an, und
+am Ende des Tages standen dort fünf Verzeichnisse mit lückenlos aufsteigenden
+Zeitstempeln, die sich der Reihe nach den fünf Besuchen zuordnen lassen. Die
+Zuordnung ist grob: die Stempel sind die Schreibzeitpunkte der `results.xml`,
+also **Suitenenden**, keine Laufgrenzen. Der Abstand `report_4` → `report_5`
+beträgt rund 600 s, die zweite `check`-Runde von Lauf 0003 laut Knotentabelle
+490,9 s — die Differenz von gut hundert Sekunden ist der Reparaturschritt
+dazwischen und der Vorlauf der Engine, aber nachgerechnet ist sie nicht.
+
+Dass fünf Verzeichnisse fünf Suitenläufe bedeuten, gilt außerdem nur, wenn
+`reports/` vorher leer war, und das ist nicht festgehalten worden; der Worktree
+war frisch und hatte vor dem Import nicht einmal `.godot/`, was dafür spricht,
+aber es beweist es nicht. Wer es sauber will, leert `reports/` vor der Messung.
+
+`threaded = true` über die zwei Lint-Kommandos, je drei Messungen: Median
+**5,94 s** (Spanne 5,84–6,10, also 4,4 %) gegen **9,48 s** seriell (9,37–9,71,
+3,6 %), Faktor **1,60**. Zuerst stand hier 1,87 aus je einer Einzelmessung; die
+serielle war mit 11,04 s ein Ausreißer, dessen Ursache offen ist — sie lief
+chronologisch **nach** der nebenläufigen, ein kalter Werkzeug-Cache scheidet
+also aus. Genau dafür sind Einzelmessungen untauglich. `gdformat --check` lief
+zum ersten Mal überhaupt unter ultraloom und ist grün über 277 Dateien.
+
+### Was Lauf 0003 an der Mechanik zeigte
+
+Ein absichtlich invertierter Einzeiler in `core/market_pricing.gd` ließ 22
+Testfälle fallen. Runde 1: `failing = ['test', 'coverage']`,
+`blocked = ['coverage']` — die blockierte Prüfung beendete den Lauf **nicht**,
+der Reparateur wurde gerufen. Der Bericht an das Modell war auf **203 Zeilen**
+gekürzt, das Journal trägt die vollen **8540**; Faktor 42, und die 203 Zeilen
+genügten dem Modell, um in einer Runde auf die eine Zeile zu schließen (5482
+Token, 108 s, Effort `high`). Runde 2: `test` grün, `coverage` nicht mehr
+blockiert, sondern gelaufen und rot mit den 41 vorbestehenden Zeilen — als
+`unfixable` geführt, also endet der Lauf ehrlich rot. Der eingebaute Fehler ist
+nach dem Lauf zurückgenommen; space' Baum trägt ihn nicht.
+
+Bemerkenswert an der Reparatur: das Modell schrieb
+`SCARCITY_MAX - (MAX-MIN)*ratio`, wo vor dem eingebauten Fehler
+`SCARCITY_MIN + (MAX-MIN)*(1.0-ratio)` stand — algebraisch dasselbe, textlich
+etwas anderes. Es hat die Absicht rekonstruiert, und die Begründung im Journal
+nennt die Quellen, aus denen es sie nahm: die eigene Doku der Funktion, den
+Zweig `reference <= 0.0` und die Formel im Wiki.
+
+Die Grundlinie hielt: die **vierzehn** Pfade aus dem Godot-Import
+(`project.godot` — geschützt —, zwölf `*.import`, eine `.uid`) blieben draußen.
+
+### Der Zustand danach
+
+Der eingebaute Fehler ist zurückgenommen, und `core/market_pricing.gd` steht in
+keiner Statusausgabe mehr. Was im Baum bleibt, ist die umgezogene
+`.ultraloom/config.toml`, die Journale unter `.ultraloom/runs/` und das, was der
+Godot-Import hinterlassen hat.
+
+Bei Letzterem lohnt der genaue Blick, weil `git status` hier mehr behauptet, als
+`git diff` zeigt: dreizehn Dateien stehen als `` M`` da, `git diff --stat` nennt
+nur `project.godot`. Die Prüfung Datei für Datei:
+
+```
+$ git ls-files -s ui/theme/icons/cargo.svg.import   → ff28cb2e…
+$ git hash-object ui/theme/icons/cargo.svg.import   → ff28cb2e…
+$ git hash-object --path <dieselbe Datei>           → ff28cb2e…
+$ git diff -- ui/theme/icons/cargo.svg.import       → leer
+```
+
+**Gesichert:** gleicher Blob im Index wie im Arbeitsbaum, roh wie gefiltert, für
+alle zwölf `*.import`; gleicher Dateimodus; `git diff` leer. Nur `project.godot`
+trägt wirklich einen Inhaltsunterschied. Godot hat die zwölf Dateien beim Import
+mit **identischem Inhalt** neu geschrieben — angefasst, nicht geändert.
+
+**Offen:** warum `git status` sie trotzdem führt. Es meldet sie auf Stat-Ebene
+(neue mtime, neue Größe) und legt den Eintrag nicht bei, obwohl der
+Inhaltsvergleich gleich ausginge; `git update-index --refresh` sagt „needs
+update" und ändert nichts daran. Ein Verdacht ist die Zeilenenden-Umwandlung —
+`core.autocrlf = true`, und git warnt bei jedem Zugriff, es werde LF durch CRLF
+ersetzen. Erklären tut das den Fall aber **nicht**: derselbe Filter liefert beim
+Hash-Vergleich gerade Gleichheit. Es bleibt eine Vermutung, und sie ist hier
+nicht weiterverfolgt worden.
+
+Für die Grundlinie ist beides gleichgültig — sie liest `git status` und nimmt
+die Pfade damit ohnehin heraus. Für einen Leser ist es der Unterschied zwischen
+„der Import hat vierzehn Dateien geändert" und „der Import hat vierzehn Dateien
+angefasst, von denen eine anders ist".
+
+### Drei Befunde
+
+Der erste ist eine Eigenschaft, die man kennen muss; die beiden anderen sind
+Arbeit, die an ultraloom offen ist.
+
+**`precommit` erreicht in space den Reparateur nie, solange `coverage` rot ist.**
+Lauf 0001 endete nach einem einzigen `check` mit 0 Token: `coverage` ist per Art
+unreparierbar, und wenn es die einzige rote Prüfung ist, greift die Kante nach
+`report_red` sofort. Das ist derselbe Befund wie bei ultraloom' eigenem Lauf
+0003 — er wiegt in space nur schwerer, weil die Abdeckung dort dauerhaft unter
+der Schwelle liegt. Wer die Reparatur erreichen will, lässt `coverage` weg.
+
+**ultraloom reicht `cli_path` nicht durch.** Auf einer Maschine, auf der nur
+der npm-Shim `claude.CMD` im `PATH` steht, weigert sich das Agent-SDK, ihn zu
+starten, und jeder Agent-Knoten fällt nach 3,42 s — mit einer Meldung, die eine
+Option nennt, die ultraloom gar nicht anbietet. Genau daran starb Lauf 0002. Bis
+es einen Schlüssel dafür gibt, hilft nur, das Verzeichnis einer nativen
+`claude.exe` vorn in den `PATH` zu schieben.
+
+**`guard` beschuldigt den Reparateur der Schreibvorgänge des Ablaufs.** In Lauf
+0003 meldete er `touched = ['.ultraloom/runs/0003.flow',
+'.ultraloom/runs/0003.jsonl']` — Dateien, die ultraloom selbst während des Laufs
+schreibt. Folgenlos war das nur, weil `.ultraloom/runs/` in keiner
+`[verify].tests`-Liste steht. Ein Projekt, das `.ultraloom/` dort einträgt — und
+das liegt nahe, dort stehen schließlich die Schwellen —, bekäme bei **jedem**
+Lauf Exit 4 und die Meldung, der Reparateur habe geschützte Dateien angefasst.
+`touched` ist damit heute nicht das, was es zu sein behauptet; `.ultraloom/runs/`
+gehört aus dem `git status` von `guard` herausgefiltert, so wie die Grundlinie
+den Import herausfiltert.

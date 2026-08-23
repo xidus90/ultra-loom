@@ -2,24 +2,31 @@
 
 import json
 import shlex
-import subprocess
 import sys
 import time
 from pathlib import Path
+from threading import Semaphore
 
 import pytest
 
+from ultraloom import checks, process
 from ultraloom.checks import (
+    BLOCKED,
     KINDS,
+    PRESETS,
+    UNREADY,
+    CheckResult,
+    CheckRunner,
     CheckUnavailableError,
     Command,
-    _decode,
+    Preset,
     _run_command,
     resolve_check,
     run_all,
     run_check,
+    run_kinds,
 )
-from ultraloom.config import Config, load_config
+from ultraloom.config import Config, ConfigError, load_config
 
 # The interpreter path goes into a TOML string that is later split with shlex
 # in POSIX mode, where a Windows backslash is an escape character. Forward
@@ -65,7 +72,7 @@ def test_config_beats_everything(tmp_path: Path) -> None:
 
     command = resolve_check("lint", load_config(tmp_path))
 
-    assert command.argv == ("my-own-linter", "--strict")
+    assert command.argvs[0] == ("my-own-linter", "--strict")
     assert command.source == "config"
 
 
@@ -78,8 +85,8 @@ def test_a_convention_script_beats_the_preset(tmp_path: Path) -> None:
     command = resolve_check("lint", load_config(tmp_path))
 
     assert command.source == "script"
-    assert str(script) in " ".join(command.argv)
-    assert command.argv[0] == sys.executable
+    assert str(script) in " ".join(command.argvs[0])
+    assert command.argvs[0][0] == sys.executable
 
 
 def test_a_script_in_another_language_is_run_directly(tmp_path: Path) -> None:
@@ -89,7 +96,7 @@ def test_a_script_in_another_language_is_run_directly(tmp_path: Path) -> None:
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text("#!/bin/sh\n", encoding="utf-8")
 
-    assert resolve_check("lint", load_config(tmp_path)).argv == (str(script),)
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == (str(script),)
 
 
 def test_an_empty_checks_directory_falls_through_to_the_preset(tmp_path: Path) -> None:
@@ -105,20 +112,20 @@ def test_the_python_preset_is_found_from_pyproject(tmp_path: Path) -> None:
     command = resolve_check("types", load_config(tmp_path))
 
     assert command.source == "preset"
-    assert command.argv[:2] == ("uvx", "mypy")
+    assert command.argvs[0][:2] == ("uvx", "mypy")
 
 
 def test_the_node_preset_is_found_from_package_json(tmp_path: Path) -> None:
     node_project(tmp_path)
 
-    assert resolve_check("types", load_config(tmp_path)).argv == ("tsc", "--noEmit")
-    assert resolve_check("lint", load_config(tmp_path)).argv == ("eslint", ".")
+    assert resolve_check("types", load_config(tmp_path)).argvs[0] == ("tsc", "--noEmit")
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == ("eslint", ".")
 
 
 def test_the_godot_preset_is_found_from_project_godot(tmp_path: Path) -> None:
     godot_project(tmp_path)
 
-    assert resolve_check("lint", load_config(tmp_path)).argv == ("uvx", "gdlint", ".")
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == ("uvx", "gdlint", ".")
 
 
 def test_gdscript_has_no_typechecker_and_says_so(tmp_path: Path) -> None:
@@ -147,7 +154,7 @@ def test_the_exec_prefix_is_put_in_front_of_a_preset(tmp_path: Path) -> None:
 
     command = resolve_check("lint", load_config(tmp_path))
 
-    assert command.argv == ("docker", "compose", "exec", "-T", "frontend", "eslint", ".")
+    assert command.argvs[0] == ("docker", "compose", "exec", "-T", "frontend", "eslint", ".")
 
 
 def test_the_exec_prefix_is_put_in_front_of_a_configured_command(tmp_path: Path) -> None:
@@ -157,7 +164,7 @@ def test_the_exec_prefix_is_put_in_front_of_a_configured_command(tmp_path: Path)
         '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = "biome check"\n',
     )
 
-    assert resolve_check("lint", load_config(tmp_path)).argv == (
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == (
         "docker",
         "compose",
         "exec",
@@ -227,21 +234,18 @@ def test_run_all_skips_a_check_it_cannot_resolve_and_says_which(tmp_path: Path) 
     assert all("could not tell" in result.output for result in unavailable)
 
 
-def test_an_empty_configured_command_is_refused(tmp_path: Path) -> None:
-    """A blank config line must never reach subprocess as an empty argv."""
-    python_project(tmp_path)
-    write_config(tmp_path, '[verify]\nlint = ""\n')
-
-    with pytest.raises(CheckUnavailableError, match="empty command"):
-        resolve_check("lint", load_config(tmp_path))
-
-
-def test_an_empty_configured_command_does_not_take_the_chain_down(tmp_path: Path) -> None:
-    verify_config(tmp_path, lint="", types=py("pass"))
+def test_an_unresolvable_command_does_not_take_the_chain_down(tmp_path: Path) -> None:
+    """A blank [verify] command never reaches here now -- load_config refuses the
+    file. A blank coverage report is the one empty command left to the resolver,
+    and it must be reported rather than stop every other check.
+    """
+    types = json.dumps(py("pass"))
+    body = f"[verify]\ntypes = {types}\n[verify.coverage]\nreport = '   '\n"
+    write_config(tmp_path, body)
 
     results = {result.kind: result for result in run_all(load_config(tmp_path))}
 
-    assert results["lint"].source == "unavailable"
+    assert results["coverage"].source == "unavailable"
     assert results["types"].ok is True
 
 
@@ -254,7 +258,7 @@ def test_an_unexpected_failure_in_one_check_is_reported_not_raised(
     def explode(*args: object, **kwargs: object) -> object:
         raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "tool wrote binary")
 
-    monkeypatch.setattr(subprocess, "run", explode)
+    monkeypatch.setattr(process, "run", explode)
     results = {result.kind: result for result in run_all(load_config(tmp_path))}
 
     assert set(results) == set(KINDS), "the other checks must still be reported"
@@ -279,7 +283,15 @@ def test_run_all_actually_overlaps_the_waiting(tmp_path: Path) -> None:
     start-up cost, which on a loaded runner is the same order as the sleep.
     """
     slow = py("import time; time.sleep(0.4)")
-    verify_config(tmp_path, lint=slow, types=slow, test=slow)
+    # The cap is on processes and defaults to the machine's cpu count, so on a
+    # one- or two-core runner the three checks would queue behind it and the
+    # comparison below would measure the cap rather than the overlap.
+    write_config(
+        tmp_path,
+        "[verify]\nmax_parallel = 3\n"
+        + "\n".join(f"{kind} = {json.dumps(slow)}" for kind in ("lint", "types", "test"))
+        + "\n",
+    )
     config = load_config(tmp_path)
 
     started = time.perf_counter()
@@ -293,22 +305,6 @@ def test_run_all_actually_overlaps_the_waiting(tmp_path: Path) -> None:
     assert three < 2 * one + 0.3, (
         f"one check took {one:.2f}s, three concurrent took {three:.2f}s; they did not overlap"
     )
-
-
-def test_an_empty_configured_command_is_refused_even_with_an_exec_prefix(tmp_path: Path) -> None:
-    """Otherwise the bare prefix runs, and a prefix that exits 0 reports green."""
-    python_project(tmp_path)
-    write_config(
-        tmp_path,
-        '[exec]\nprefix = "docker compose exec -T web"\n[verify]\nlint = ""\n',
-    )
-    config = load_config(tmp_path)
-    # Without this the test proves nothing: with an empty prefix the argv is
-    # empty either way, and the guard's position stops being observable.
-    assert config.exec_prefix, "the prefix must reach the resolver for this to be a test"
-
-    with pytest.raises(CheckUnavailableError, match="empty command"):
-        resolve_check("lint", config)
 
 
 def test_a_directory_that_matches_the_script_glob_is_not_a_script(tmp_path: Path) -> None:
@@ -330,8 +326,8 @@ def test_the_python_coverage_preset_measures_before_it_reports(tmp_path: Path) -
 
     command = resolve_check("coverage", load_config(tmp_path))
 
-    assert command.measure == ("uv", "run", "coverage", "run", "-m", "pytest")
-    assert command.argv == ("uv", "run", "coverage", "report")
+    assert command.measure[:4] == ("uv", "run", "coverage", "run")
+    assert command.argvs[0][:4] == ("uv", "run", "coverage", "report")
 
 
 def test_the_exec_prefix_is_put_in_front_of_the_measuring_step_too(tmp_path: Path) -> None:
@@ -342,22 +338,20 @@ def test_the_exec_prefix_is_put_in_front_of_the_measuring_step_too(tmp_path: Pat
     command = resolve_check("coverage", load_config(tmp_path))
 
     assert command.measure[:5] == ("docker", "compose", "exec", "-T", "app")
-    assert command.argv[:5] == ("docker", "compose", "exec", "-T", "app")
+    assert command.argvs[0][:5] == ("docker", "compose", "exec", "-T", "app")
 
 
 def test_a_measuring_step_runs_before_the_check_itself(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ultraloom.checks import PRESETS
-
     python_project(tmp_path)
     marker = tmp_path / "measured.txt"
     monkeypatch.setitem(
         PRESETS["pyproject.toml"],
         "coverage",
-        (
-            tuple(shlex.split(py(f"open({str(marker)!r}, 'w').write('yes')"))),
+        Preset(
             tuple(shlex.split(py("import sys; print(open('measured.txt').read())"))),
+            measure=tuple(shlex.split(py(f"open({str(marker)!r}, 'w').write('yes')"))),
         ),
     )
 
@@ -371,16 +365,14 @@ def test_a_failed_measuring_step_fails_the_check_and_stops_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The report would otherwise run on stale data and call it green."""
-    from ultraloom.checks import PRESETS
-
     python_project(tmp_path)
     ran = tmp_path / "reported.txt"
     monkeypatch.setitem(
         PRESETS["pyproject.toml"],
         "coverage",
-        (
-            tuple(shlex.split(py("import sys; print('the tests failed'); sys.exit(1)"))),
+        Preset(
             tuple(shlex.split(py(f"open({str(ran)!r}, 'w').write('x')"))),
+            measure=tuple(shlex.split(py("import sys; print('the tests failed'); sys.exit(1)"))),
         ),
     )
 
@@ -435,7 +427,7 @@ def _argv(command: str) -> tuple[str, ...]:
 
 
 def test_a_command_that_overruns_is_a_red_result(tmp_path: Path) -> None:
-    config = Config(root=tmp_path, commands={"lint": _sleep_command(5)}, timeout=1)
+    config = Config(root=tmp_path, commands={"lint": (_sleep_command(5),)}, timeout=1)
 
     result = run_check("lint", config)
 
@@ -445,7 +437,7 @@ def test_a_command_that_overruns_is_a_red_result(tmp_path: Path) -> None:
 
 
 def test_a_command_within_the_limit_is_untouched(tmp_path: Path) -> None:
-    config = Config(root=tmp_path, commands={"lint": _sleep_command(0)}, timeout=30)
+    config = Config(root=tmp_path, commands={"lint": (_sleep_command(0),)}, timeout=30)
 
     assert run_check("lint", config).ok
 
@@ -454,7 +446,7 @@ def test_the_measuring_step_gets_the_limit_too(tmp_path: Path) -> None:
     # The measure step is a second process, so a shared budget would make its
     # limit depend on how long the first one took.
     command = Command(
-        "coverage", _argv(_sleep_command(0)), "test", measure=_argv(_sleep_command(5))
+        "coverage", (_argv(_sleep_command(0)),), "test", measure=_argv(_sleep_command(5))
     )
     config = Config(root=tmp_path, timeout=1)
 
@@ -464,16 +456,26 @@ def test_the_measuring_step_gets_the_limit_too(tmp_path: Path) -> None:
     assert "timed out after 1s" in result.output
 
 
-def test_partial_output_survives_every_shape_the_exception_can_carry() -> None:
-    """text=True makes it str in practice, but the exception promises less.
+def test_a_truncated_capture_is_never_a_passed_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exit code 0 over a prefix of the output is not evidence of anything.
 
-    A wrong assumption here would turn a timeout report into a TypeError, so
-    the two shapes the type allows but this call never produces are covered
-    directly rather than through a process that cannot produce them.
+    Faked rather than provoked: a reader is abandoned only when a descendant
+    outlives its parent *and* the command still exits by itself, which no real
+    command can be made to do reliably.
     """
-    assert _decode(None) == ""
-    assert _decode(b"half a line\xff") == "half a line\ufffd"
-    assert _decode("half a line") == "half a line"
+    truncated = process.Completed(
+        returncode=0, stdout="ran 3 of ", stderr="", output_abandoned=True
+    )
+    monkeypatch.setattr(process, "run", lambda *args, **kwargs: truncated)
+    config = Config(root=tmp_path, commands={"lint": (_sleep_command(0),)}, timeout=30)
+
+    result = run_check("lint", config)
+
+    assert not result.ok
+    assert "output incomplete" in result.output
+    assert "ran 3 of" in result.output
 
 
 def test_a_configured_coverage_report_is_the_coverage_command(tmp_path: Path) -> None:
@@ -487,7 +489,7 @@ def test_a_configured_coverage_report_is_the_coverage_command(tmp_path: Path) ->
 
     command = resolve_check("coverage", config)
 
-    assert command.argv == ("uv", "run", "--script", "gate.py")
+    assert command.argvs[0] == ("uv", "run", "--script", "gate.py")
     assert command.source == "config"
     assert command.measure == ()
 
@@ -660,3 +662,698 @@ def test_a_script_project_gets_no_invented_binary_either(tmp_path: Path) -> None
 
     assert "godot --headless" not in output
     assert "--headless --path . --import" in output
+
+
+def test_a_timed_out_check_names_its_partial_output(tmp_path: Path) -> None:
+    """The timeout costs its limit even when a grandchild keeps the pipe open.
+
+    The shape every real check command has: `uv run pytest` is a chain of at
+    least two processes. subprocess.run kills the direct child and then waits
+    for the pipes, which the surviving grandchild still holds -- so the run
+    hangs for as long as the grandchild lives, and the partial output arrives
+    only after it dies.
+    """
+    python_project(tmp_path)
+    linger = py("import time; time.sleep(20)")
+    config = Config(
+        root=tmp_path,
+        commands={
+            "lint": (
+                py(
+                    "import shlex, subprocess, sys, time; "
+                    "print('half done', flush=True); "
+                    f"subprocess.Popen(shlex.split({linger!r})); "
+                    "time.sleep(20)"
+                ),
+            )
+        },
+        timeout=1,
+    )
+
+    started = time.monotonic()
+    result = run_check("lint", config)
+    elapsed = time.monotonic() - started
+
+    assert not result.ok
+    assert "timed out after 1s" in result.output
+    assert "half done" in result.output
+    assert elapsed < 12, "the run waited for the grandchild instead of for its own limit"
+
+
+def test_a_configured_kind_resolves_all_its_commands(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, commands={"lint": ("first .", "second .")})
+    command = resolve_check("lint", config)
+    assert command.argvs == (("first", "."), ("second", "."))
+
+
+def test_every_command_gets_the_exec_prefix(tmp_path: Path) -> None:
+    config = Config(
+        root=tmp_path,
+        commands={"lint": ("first", "second")},
+        exec_prefix=("docker", "compose", "exec", "-T", "app"),
+    )
+    command = resolve_check("lint", config)
+    assert all(argv[:5] == ("docker", "compose", "exec", "-T", "app") for argv in command.argvs)
+
+
+def test_the_threaded_switch_reaches_the_command(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, commands={"lint": ("a", "b")}, threaded=frozenset({"lint"}))
+    assert resolve_check("lint", config).threaded
+
+
+def test_every_command_runs_even_after_a_red_one(tmp_path: Path) -> None:
+    """A half list of findings costs the repairer a whole extra round."""
+    python_project(tmp_path)
+    config = Config(
+        root=tmp_path,
+        commands={
+            "lint": (
+                py("import sys; print('first says no'); sys.exit(1)"),
+                py("print('second still ran')"),
+            )
+        },
+    )
+
+    result = run_check("lint", config)
+
+    assert not result.ok
+    assert "first says no" in result.output
+    assert "second still ran" in result.output
+
+
+def test_several_commands_are_labelled_in_the_report(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (py("print('a')"), py("print('b')"))})
+
+    output = run_check("lint", config).output
+
+    assert output.count("$ ") == 2, "each command names itself, or the report cannot be read"
+
+
+def test_a_single_command_keeps_the_report_it_always_had(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (py("print('only')"),)})
+    assert run_check("lint", config).output == "only\n"
+
+
+def test_a_threaded_kind_runs_its_commands_at_the_same_time(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    sleeper = py("import time; time.sleep(2)")
+    config = Config(
+        root=tmp_path,
+        commands={"lint": (sleeper, sleeper)},
+        threaded=frozenset({"lint"}),
+        max_parallel=4,
+    )
+
+    started = time.monotonic()
+    run_check("lint", config)
+    elapsed = time.monotonic() - started
+
+    # Two two-second sleeps: sequential is 4s, concurrent is 2s. The bound sits
+    # between them with room for a loaded machine, which is why it is 3.5 and
+    # not 2.5. Generous on purpose: a wall-clock bound is what a loaded machine
+    # turns red for no reason. max_parallel is set here because the cap is what
+    # decides whether the two commands may overlap at all -- left at a smaller
+    # value the test would measure the cap and not the threading.
+    assert elapsed < 3.5, f"the two commands took {elapsed:.1f}s; they did not overlap"
+
+
+def test_the_report_order_is_the_configured_one_even_when_threaded(tmp_path: Path) -> None:
+    """The order commands finish in is noise; a report that reorders cannot be diffed."""
+    python_project(tmp_path)
+    config = Config(
+        root=tmp_path,
+        commands={
+            "lint": (
+                py("import time; time.sleep(1); print('slow first')"),
+                py("print('fast second')"),
+            )
+        },
+        threaded=frozenset({"lint"}),
+        max_parallel=4,
+    )
+
+    output = run_check("lint", config).output
+
+    assert output.index("slow first") < output.index("fast second")
+
+
+def test_a_warning_rides_in_front_of_the_report_without_being_a_verdict(tmp_path: Path) -> None:
+    """Spec 8: reading something no command in this run produced is worth saying,
+    but it is never the reason a check is red."""
+    python_project(tmp_path)
+    command = Command("lint", (_argv(py("print('clean')")),), "config", warning="stale data")
+
+    result = _run_command(command, Config(root=tmp_path))
+
+    assert result.ok
+    assert result.output == "stale data\nclean\n"
+
+
+class _CountingGate(Semaphore):
+    """A cap that records how often it was taken."""
+
+    def __init__(self) -> None:
+        super().__init__(4)
+        self.acquired = 0
+
+    def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool:
+        self.acquired += 1
+        return super().acquire(blocking, timeout)
+
+    # Semaphore binds __enter__ to acquire at class creation, so an override of
+    # acquire alone is never seen by a `with` statement.
+    def __enter__(self, blocking: bool = True, timeout: float | None = None) -> bool:
+        return self.acquire(blocking, timeout)
+
+
+def test_a_cap_handed_in_is_the_one_that_is_used(tmp_path: Path) -> None:
+    """Task 9 hands one cap down through stages and kinds; a call that quietly
+    made its own would let every level spend the whole budget again."""
+    python_project(tmp_path)
+    command = Command("lint", (_argv(py("print('a')")), _argv(py("print('b')"))), "config")
+    gate = _CountingGate()
+
+    _run_command(command, Config(root=tmp_path), gate)
+
+    assert gate.acquired == 2
+
+
+def test_a_red_command_names_itself_in_the_heading(tmp_path: Path) -> None:
+    """A command that fails without a word would otherwise leave a red check
+    whose report holds nothing but the green command's findings."""
+    python_project(tmp_path)
+    config = Config(
+        root=tmp_path,
+        commands={"lint": (py("print('a')"), py("import sys; sys.exit(1)"))},
+    )
+
+    result = run_check("lint", config)
+
+    assert not result.ok
+    assert "(failed)" in result.output
+
+
+def test_a_check_with_no_command_at_all_is_refused(tmp_path: Path) -> None:
+    """all(()) is True: nothing run would otherwise be a passed check."""
+    with pytest.raises(CheckUnavailableError, match="no command"):
+        Command("lint", (), "config")
+
+
+def test_the_warning_survives_a_failing_measure_step(tmp_path: Path) -> None:
+    """The path where the output needs the explanation most is the one that
+    used to drop it."""
+    python_project(tmp_path)
+    command = Command(
+        "coverage",
+        (_argv(py("print('report')")),),
+        "preset",
+        measure=_argv(py("import sys; print('measure broke'); sys.exit(1)")),
+        warning="stale data",
+    )
+
+    result = _run_command(command, Config(root=tmp_path))
+
+    assert not result.ok
+    assert result.output.startswith("stale data\n")
+    assert "measure broke" in result.output
+
+
+def test_the_merged_report_ends_in_a_newline_like_a_single_one(tmp_path: Path) -> None:
+    """Two shapes of report would make every reader downstream handle both."""
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (py("print('a')"), py("print('b')"))})
+
+    assert run_check("lint", config).output.endswith("\n")
+
+
+def test_the_python_test_preset_can_measure_when_asked() -> None:
+    """`measuring` is the second face of `test`: the same suite, counting as it goes.
+
+    Carried here, read by the scheduler later -- nothing in this task acts on it.
+    """
+    assert PRESETS["pyproject.toml"]["test"].measuring[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_the_python_coverage_preset_waits_for_test() -> None:
+    assert PRESETS["pyproject.toml"]["coverage"].after == "test"
+
+
+def test_the_python_coverage_preset_can_still_measure_alone() -> None:
+    assert PRESETS["pyproject.toml"]["coverage"].measure[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_godot_has_no_coverage_preset_at_all(tmp_path: Path) -> None:
+    """There is no general GDScript coverage command to name, so none is invented.
+
+    Space measures with the Nano Coverage editor addon, which writes lcov.info
+    as a by-product of the suite, and enforces the threshold from a script of
+    its own. Neither half is a command another Godot project could run.
+    """
+    assert "coverage" not in PRESETS["project.godot"]
+
+    godot_project(tmp_path)
+    with pytest.raises(CheckUnavailableError, match="known limitation"):
+        resolve_check("coverage", load_config(tmp_path))
+
+
+def test_the_node_preset_stays_one_stage() -> None:
+    assert PRESETS["package.json"]["coverage"].after == ""
+
+
+def test_the_presets_ask_their_tools_to_be_terse() -> None:
+    """Every token of a check report is a token the repairer pays for, every round."""
+    assert "--output-format=concise" in PRESETS["pyproject.toml"]["lint"].argv
+    assert "--tb=short" in PRESETS["pyproject.toml"]["test"].argv
+    assert "--skip-covered" in PRESETS["pyproject.toml"]["coverage"].argv
+    assert "--no-error-summary" in PRESETS["pyproject.toml"]["types"].argv
+
+
+def test_the_coverage_preset_still_names_the_missing_lines() -> None:
+    """The one place where terseness would hide what the repairer needs.
+
+    `--skip-covered` drops the files at 100%; without `-m` what is left names
+    the file at 83% and not the line that is missing, and looking it up costs a
+    whole round. `show_missing` is off by default, so the project cannot be
+    assumed to have set it.
+    """
+    assert "-m" in PRESETS["pyproject.toml"]["coverage"].argv
+
+
+def test_both_pytest_modes_are_asked_for_the_same_terseness() -> None:
+    """`test` and test-under-measurement must report in the same shape.
+
+    A flag that reached only one of them would make the two modes incomparable,
+    which is the whole reason the scheduler may swap one for the other.
+    """
+    presets = PRESETS["pyproject.toml"]
+    terse = ("-q", "--tb=short", "--no-header")
+    assert presets["test"].argv[-len(terse) :] == terse
+    assert presets["test"].measuring[-len(terse) :] == terse
+    assert presets["coverage"].measure[-len(terse) :] == terse
+
+
+def test_a_preset_resolves_to_one_command(tmp_path: Path) -> None:
+    python_project(tmp_path)
+
+    command = resolve_check("lint", load_config(tmp_path))
+
+    assert command.source == "preset"
+    assert len(command.argvs) == 1
+
+
+def test_test_measures_when_coverage_runs_too(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    command = resolve_check(
+        "test", Config(root=tmp_path), alongside=frozenset({"test", "coverage"})
+    )
+    assert command.argvs[0][:4] == ("uv", "run", "coverage", "run")
+
+
+def test_test_alone_stays_the_fast_path(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    command = resolve_check("test", Config(root=tmp_path), alongside=frozenset({"test"}))
+    assert command.argvs[0][:3] == ("uv", "run", "pytest")
+
+
+def test_coverage_drops_its_own_measuring_when_test_measures_for_it(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    command = resolve_check(
+        "coverage", Config(root=tmp_path), alongside=frozenset({"test", "coverage"})
+    )
+    assert command.measure == (), "the suite must not run twice in one pass"
+
+
+def test_coverage_alone_measures_for_itself(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    command = resolve_check("coverage", Config(root=tmp_path), alongside=frozenset({"coverage"}))
+    assert command.measure[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_the_empty_default_behaves_like_running_alone(tmp_path: Path) -> None:
+    """Every existing caller keeps the behaviour it had."""
+    python_project(tmp_path)
+    assert resolve_check("coverage", Config(root=tmp_path)).measure[:4] == (
+        "uv",
+        "run",
+        "coverage",
+        "run",
+    )
+
+
+def test_a_configured_test_command_never_counts_as_measuring(tmp_path: Path) -> None:
+    """ultraloom cannot know whether a foreign test command measures, so it does not guess."""
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"test": ("my-own-suite",)})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert command.measure[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_a_test_script_never_counts_as_measuring(tmp_path: Path) -> None:
+    """Same reason as a configured command: a project's own script may measure nothing."""
+    python_project(tmp_path)
+    scripts = tmp_path / ".ultraloom" / "checks"
+    scripts.mkdir(parents=True)
+    (scripts / "test.bat").write_text("echo hi\n", encoding="utf-8")
+    command = resolve_check(
+        "coverage", Config(root=tmp_path), alongside=frozenset({"test", "coverage"})
+    )
+    assert command.measure[:4] == ("uv", "run", "coverage", "run")
+
+
+def test_a_configured_report_warns_when_what_it_reads_never_ran(tmp_path: Path) -> None:
+    """A report with no measuring step of its own, and no measurer in this pass."""
+    godot_project(tmp_path)
+    config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"coverage"}))
+    assert "lief in diesem Lauf nicht" in command.warning
+
+
+def test_a_predecessor_that_runs_silences_the_warning(tmp_path: Path) -> None:
+    """GDScript's `test` has no measuring mode, and ultraloom still does not warn.
+
+    Whether a run of `test` left anything behind is what ultraloom structurally
+    cannot know. Warning about it would put the line on every Godot run, and a
+    warning that always comes stops being read.
+    """
+    godot_project(tmp_path)
+    config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert command.warning == ""
+
+
+def test_a_plain_ordering_edge_never_warns(tmp_path: Path) -> None:
+    """`[verify.after]` orders all four kinds; `test` after `types` carries no data."""
+    python_project(tmp_path)
+    config = Config(root=tmp_path, after={"test": "types"})
+    command = resolve_check("test", config, alongside=frozenset({"types", "test"}))
+    assert command.warning == ""
+
+
+def test_measuring_is_not_switched_on_for_a_dependant_that_cannot_run(tmp_path: Path) -> None:
+    """Measuring for a check that leaves the pass unresolved would be work for nobody."""
+    python_project(tmp_path)
+    # An empty report command: `coverage` depends on `test` and is unavailable.
+    config = Config(root=tmp_path, coverage_report="")
+    with pytest.raises(CheckUnavailableError):
+        resolve_check("coverage", config)
+    command = resolve_check("test", config, alongside=frozenset({"test", "coverage"}))
+    assert command.argvs[0][:3] == ("uv", "run", "pytest")
+
+
+def test_a_configured_report_is_quiet_when_test_measures_for_it(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    config = Config(root=tmp_path, coverage_report="coverage report", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert command.warning == ""
+
+
+def test_a_report_in_a_project_of_no_known_language_warns_too(tmp_path: Path) -> None:
+    """No marker file, so the predecessor can only come from the project's own [verify.after]."""
+    config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"coverage"}))
+    assert "lief in diesem Lauf nicht" in command.warning
+
+
+def test_run_check_takes_the_pass_along(tmp_path: Path) -> None:
+    """The warning reaches the report, not just the Command."""
+    config = Config(
+        root=tmp_path,
+        coverage_report=py("print('report')"),
+        after={"coverage": "test"},
+    )
+    result = run_check("coverage", config, frozenset({"coverage"}))
+    assert result.output.startswith("Achtung:")
+    assert result.ok
+
+
+def test_no_known_language_means_no_language_measurer(tmp_path: Path) -> None:
+    """Without a marker there is no preset to ask whether the predecessor measures."""
+    config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
+    command = resolve_check("coverage", config, alongside=frozenset({"test", "coverage"}))
+    assert command.measure == ()
+    assert command.warning == ""
+
+
+def _fake(record: list[str], red: set[str] | None = None) -> CheckRunner:
+    """A runner that records what it was asked to run and never starts a process."""
+    failing = red or set()
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        record.append(kind)
+        return CheckResult(kind, kind not in failing, "", "fake")
+
+    return runner
+
+
+def test_coverage_runs_after_test(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    record: list[str] = []
+
+    run_kinds(("lint", "types", "test", "coverage"), Config(root=tmp_path), _fake(record))
+
+    assert record.index("coverage") > record.index("test")
+
+
+def test_a_red_predecessor_blocks_its_dependant(tmp_path: Path) -> None:
+    python_project(tmp_path)
+
+    results = run_kinds(("test", "coverage"), Config(root=tmp_path), _fake([], red={"test"}))
+
+    coverage = next(result for result in results if result.kind == "coverage")
+    assert not coverage.ok
+    assert coverage.source == BLOCKED
+    assert "test" in coverage.output
+
+
+def test_a_blocked_check_never_starts_its_tool(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    record: list[str] = []
+
+    run_kinds(("test", "coverage"), Config(root=tmp_path), _fake(record, red={"test"}))
+
+    assert "coverage" not in record
+
+
+def test_blocking_is_transitive(tmp_path: Path) -> None:
+    write_config(tmp_path, '[verify.after]\ncoverage = "test"\ntest = "lint"\n')
+    python_project(tmp_path)
+
+    results = run_kinds(
+        ("lint", "test", "coverage"), load_config(tmp_path), _fake([], red={"lint"})
+    )
+
+    assert [result.source for result in results if result.kind != "lint"] == [BLOCKED, BLOCKED]
+
+
+def test_an_unavailable_predecessor_blocks_too(tmp_path: Path) -> None:
+    """Red is red: a missing tool leaves nothing for the dependant to read either."""
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        if kind == "test":
+            raise CheckUnavailableError("no suite here")
+        return CheckResult(kind, True, "", "fake")
+
+    python_project(tmp_path)
+
+    results = run_kinds(("test", "coverage"), Config(root=tmp_path), runner)
+
+    assert [result.source for result in results] == ["unavailable", BLOCKED]
+
+
+def test_an_unready_predecessor_blocks_too(tmp_path: Path) -> None:
+    """The stale-report coupling in _measures_for: `coverage` already dropped its
+    own measuring step because `test` was asked for, so a `test` that never ran
+    must not leave `coverage` reading whatever an earlier run wrote."""
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return CheckResult(kind, kind != "test", "never imported", UNREADY)
+
+    python_project(tmp_path)
+
+    results = run_kinds(("test", "coverage"), Config(root=tmp_path), runner)
+
+    assert [result.source for result in results] == [UNREADY, BLOCKED]
+
+
+def test_a_kind_whose_predecessor_was_not_asked_for_runs_at_once(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    record: list[str] = []
+
+    run_kinds(("coverage",), Config(root=tmp_path), _fake(record))
+
+    assert record == ["coverage"]
+
+
+def test_an_after_edge_onto_a_kind_outside_the_run_is_dropped(tmp_path: Path) -> None:
+    """The last way [verify.after] could hang: waiting for something never asked for."""
+    write_config(tmp_path, '[verify.after]\ncoverage = "test"\n')
+    python_project(tmp_path)
+    record: list[str] = []
+
+    results = run_kinds(("lint", "coverage"), load_config(tmp_path), _fake(record))
+
+    assert record == ["lint", "coverage"] or record == ["coverage", "lint"]
+    assert all(result.ok for result in results)
+
+
+def test_the_results_keep_the_order_they_were_asked_in(tmp_path: Path) -> None:
+    python_project(tmp_path)
+
+    results = run_kinds(("coverage", "lint", "test"), Config(root=tmp_path), _fake([]))
+
+    assert [result.kind for result in results] == ["coverage", "lint", "test"]
+
+
+def test_every_check_learns_who_else_is_running(tmp_path: Path) -> None:
+    seen: list[frozenset[str]] = []
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        seen.append(alongside)
+        return CheckResult(kind, True, "", "fake")
+
+    python_project(tmp_path)
+    run_kinds(("test", "coverage"), Config(root=tmp_path), runner)
+
+    assert all(group == frozenset({"test", "coverage"}) for group in seen)
+
+
+def test_a_check_that_blows_up_does_not_discard_the_others(tmp_path: Path) -> None:
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        if kind == "lint":
+            raise RuntimeError("boom")
+        return CheckResult(kind, True, "", "fake")
+
+    python_project(tmp_path)
+
+    results = run_kinds(("lint", "types"), Config(root=tmp_path), runner)
+
+    assert [result.source for result in results] == ["error", "fake"]
+
+
+def test_a_run_that_checks_nothing_is_refused(tmp_path: Path) -> None:
+    """An empty run would report `all(())` -- a pass over nothing."""
+    with pytest.raises(ValueError, match="at least one check"):
+        run_kinds((), Config(root=tmp_path))
+
+
+def test_one_cap_covers_the_whole_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_parallel is a cap per run, not per check kind.
+
+    Each kind used to build its own, so four kinds under max_parallel = 2 could
+    be eight processes at once.
+    """
+    seen: list[Semaphore | None] = []
+
+    def spy(
+        kind: str,
+        config: Config,
+        alongside: frozenset[str] = frozenset(),
+        gate: Semaphore | None = None,
+    ) -> CheckResult:
+        seen.append(gate)
+        return CheckResult(kind, True, "", "fake")
+
+    python_project(tmp_path)
+    monkeypatch.setattr(checks, "run_check", spy)
+    run_kinds(("lint", "types", "test", "coverage"), Config(root=tmp_path))
+
+    assert len(seen) == 4
+    assert all(gate is seen[0] for gate in seen)
+    assert seen[0] is not None
+
+
+def test_run_check_hands_the_cap_it_was_given_down(tmp_path: Path) -> None:
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (py("print('a')"), py("print('b')"))})
+    gate = _CountingGate()
+
+    run_check("lint", config, frozenset({"lint"}), gate)
+
+    assert gate.acquired == 2
+
+
+def test_run_all_still_runs_every_kind(tmp_path: Path) -> None:
+    python_project(tmp_path)
+
+    assert tuple(result.kind for result in run_all(Config(root=tmp_path))) == KINDS
+
+
+def test_a_ring_between_the_project_and_the_preset_is_refused(tmp_path: Path) -> None:
+    """Half a ring from [verify.after], half from the preset.
+
+    `test = "coverage"` is one edge and no ring, so the config loader takes it.
+    Python's preset adds `coverage after test`, and the effective order closes.
+    Walked rather than checked at load time, the scheduler used to recurse until
+    the interpreter gave up -- a traceback where a refusal belongs.
+    """
+    write_config(tmp_path, '[verify.after]\ntest = "coverage"\n')
+    python_project(tmp_path)
+
+    with pytest.raises(ConfigError, match="cycle: test -> coverage -> test"):
+        run_kinds(("test", "coverage"), load_config(tmp_path), _fake([]))
+
+
+def test_a_ring_whose_other_half_was_not_asked_for_is_not_a_ring(tmp_path: Path) -> None:
+    """Only an edge into this run can hold anything up."""
+    write_config(tmp_path, '[verify.after]\ntest = "coverage"\n')
+    python_project(tmp_path)
+    record: list[str] = []
+
+    run_kinds(("test",), load_config(tmp_path), _fake(record))
+
+    assert record == ["test"]
+
+
+def test_a_kind_asked_for_twice_runs_once(tmp_path: Path) -> None:
+    """Two `test` entries would put two suites on the same .coverage file at once."""
+    python_project(tmp_path)
+    record: list[str] = []
+
+    results = run_kinds(("test", "test", "lint"), Config(root=tmp_path), _fake(record))
+
+    assert record.count("test") == 1
+    assert [result.kind for result in results] == ["test", "lint"]
+
+
+def test_a_result_is_filed_under_the_kind_that_was_asked_for(tmp_path: Path) -> None:
+    """An injected runner that answers about something else must not end the run
+    in a KeyError -- Task 10 injects exactly such runners."""
+
+    def runner(kind: str, config: Config, alongside: frozenset[str]) -> CheckResult:
+        return CheckResult("something-else", True, "", "fake")
+
+    python_project(tmp_path)
+
+    results = run_kinds(("lint",), Config(root=tmp_path), runner)
+
+    assert [result.kind for result in results] == ["something-else"]
+
+
+def test_one_cap_over_nested_pools_does_not_deadlock(tmp_path: Path) -> None:
+    """The structural property behind `_run_command`'s contract.
+
+    max_parallel = 1, a threaded kind with two commands inside a stage that also
+    holds other kinds: three thread pools deep, one permit. It only stays free
+    of deadlock because the cap is acquired at the process and nowhere else --
+    a pool that held a permit while waiting for the work below it to take one
+    would stop here forever. Real processes on purpose; a fake runner would
+    never touch the cap that is under test.
+    """
+    python_project(tmp_path)
+    config = Config(
+        root=tmp_path,
+        commands={
+            "lint": (py("print('lint a')"), py("print('lint b')")),
+            "types": (py("print('types')"),),
+            "test": (py("print('test')"),),
+        },
+        threaded=frozenset({"lint"}),
+        max_parallel=1,
+    )
+
+    results = run_kinds(("lint", "types", "test"), config)
+
+    assert [result.kind for result in results] == ["lint", "types", "test"]
+    assert all(result.ok for result in results), [result.output for result in results]
