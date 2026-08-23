@@ -653,12 +653,17 @@ Stufen wären es zwei gewesen.
 Für die vier übrigen `check`-Besuche des Tages ist dieselbe Aussage **eine
 Inferenz**, keine Zählung: gdUnit4 legt je Lauf ein `reports/report_N/` an, und
 am Ende des Tages standen dort fünf Verzeichnisse mit lückenlos aufsteigenden
-Zeitstempeln, die sich mit den fünf Besuchen decken — der Abstand
-`report_4` → `report_5` etwa mit der zweiten Runde aus der Knotentabelle von
-Lauf 0003. Dass fünf Verzeichnisse fünf Suitenläufe bedeuten, gilt allerdings
-nur, wenn `reports/` vorher leer war, und das ist nicht festgehalten worden;
-der Worktree war frisch und hatte vor dem Import nicht einmal `.godot/`, was
-dafür spricht, aber es beweist es nicht.
+Zeitstempeln, die sich der Reihe nach den fünf Besuchen zuordnen lassen. Die
+Zuordnung ist grob: die Stempel sind die Schreibzeitpunkte der `results.xml`,
+also **Suitenenden**, keine Laufgrenzen. Der Abstand `report_4` → `report_5`
+beträgt rund 600 s, die zweite `check`-Runde von Lauf 0003 laut Knotentabelle
+490,9 s — die Differenz von gut hundert Sekunden ist der Reparaturschritt
+dazwischen und der Vorlauf der Engine, aber nachgerechnet ist sie nicht.
+
+Dass fünf Verzeichnisse fünf Suitenläufe bedeuten, gilt außerdem nur, wenn
+`reports/` vorher leer war, und das ist nicht festgehalten worden; der Worktree
+war frisch und hatte vor dem Import nicht einmal `.godot/`, was dafür spricht,
+aber es beweist es nicht. Wer es sauber will, leert `reports/` vor der Messung.
 
 `threaded = true` über die zwei Lint-Kommandos, je drei Messungen: Median
 **5,94 s** (Spanne 5,84–6,10, also 4,4 %) gegen **9,48 s** seriell (9,37–9,71,
@@ -700,25 +705,33 @@ Godot-Import hinterlassen hat.
 
 Bei Letzterem lohnt der genaue Blick, weil `git status` hier mehr behauptet, als
 `git diff` zeigt: dreizehn Dateien stehen als `` M`` da, `git diff --stat` nennt
-nur `project.godot`. Kein Widerspruch, sondern ein bekannter Windows-Fall — die
-Prüfung Datei für Datei:
+nur `project.godot`. Die Prüfung Datei für Datei:
 
 ```
 $ git ls-files -s ui/theme/icons/cargo.svg.import   → ff28cb2e…
 $ git hash-object ui/theme/icons/cargo.svg.import   → ff28cb2e…
-$ git update-index --refresh
-ui/theme/icons/cargo.svg.import: needs update       (und bleibt es)
+$ git hash-object --path <dieselbe Datei>           → ff28cb2e…
+$ git diff -- ui/theme/icons/cargo.svg.import       → leer
 ```
 
-Gleicher Blob im Index wie im Arbeitsbaum, für alle zwölf `*.import`; nur
-`project.godot` trägt wirklich einen Inhaltsunterschied. Godot hat die zwölf
-Dateien mit **identischem Inhalt** neu geschrieben. Ihr Stat-Eintrag im Index ist
-damit veraltet, und `core.autocrlf = true` verhindert, dass ein Refresh das
-beilegt: git erwartet im Arbeitsbaum CRLF, findet LF, und die Einträge bleiben
-dauerhaft „stat-dirty". Für die Grundlinie ist das gleichgültig — sie liest
-`git status` und nimmt sie damit ohnehin heraus. Für einen Leser ist es der
-Unterschied zwischen „der Import hat vierzehn Dateien geändert" und „der Import
-hat vierzehn Dateien angefasst, von denen eine anders ist".
+**Gesichert:** gleicher Blob im Index wie im Arbeitsbaum, roh wie gefiltert, für
+alle zwölf `*.import`; gleicher Dateimodus; `git diff` leer. Nur `project.godot`
+trägt wirklich einen Inhaltsunterschied. Godot hat die zwölf Dateien beim Import
+mit **identischem Inhalt** neu geschrieben — angefasst, nicht geändert.
+
+**Offen:** warum `git status` sie trotzdem führt. Es meldet sie auf Stat-Ebene
+(neue mtime, neue Größe) und legt den Eintrag nicht bei, obwohl der
+Inhaltsvergleich gleich ausginge; `git update-index --refresh` sagt „needs
+update" und ändert nichts daran. Ein Verdacht ist die Zeilenenden-Umwandlung —
+`core.autocrlf = true`, und git warnt bei jedem Zugriff, es werde LF durch CRLF
+ersetzen. Erklären tut das den Fall aber **nicht**: derselbe Filter liefert beim
+Hash-Vergleich gerade Gleichheit. Es bleibt eine Vermutung, und sie ist hier
+nicht weiterverfolgt worden.
+
+Für die Grundlinie ist beides gleichgültig — sie liest `git status` und nimmt
+die Pfade damit ohnehin heraus. Für einen Leser ist es der Unterschied zwischen
+„der Import hat vierzehn Dateien geändert" und „der Import hat vierzehn Dateien
+angefasst, von denen eine anders ist".
 
 ### Drei Befunde
 
