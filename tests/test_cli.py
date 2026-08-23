@@ -440,7 +440,7 @@ def test_the_agent_extra_is_used_when_it_is_installed(
 
     module = ModuleType("ultraloom.model.agent_sdk")
     # A stand-in for the optional extra, which this subproject does not ship.
-    module.AgentSdkModel = StandInModel  # type: ignore[attr-defined]
+    module.AgentSdkModel = StandInModel  # type: ignore[attr-defined]  # a stub module grows its attributes
     monkeypatch.setitem(sys.modules, "ultraloom.model.agent_sdk", module)
     write_flow(tmp_path, "needs_model", A_MODEL_FLOW)
 

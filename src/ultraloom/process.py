@@ -21,12 +21,25 @@ descendants for the processes Windows refuses to put in it. Both are chosen by
 `terminator`, which is a plain function so the choice can be tested on a machine
 that can only execute one of the two.
 
-Nothing in here may leave a process running. Every path out of `run` -- a clean
-exit that left a descendant holding the pipe, a timeout, an exception on the way
-to the wait -- goes through a kill and a *bounded* reap; only a clean exit with
-nothing left behind needs none, because there is nothing left to kill. A process
-this module started suspended and then walked away from would sit there until
-the machine is rebooted, holding two pipes, one such process per check command.
+Every path out of `run` -- a clean exit that left a descendant holding the pipe,
+a timeout, an exception on the way to the wait -- goes through a kill and a
+*bounded* reap; only a clean exit with nothing left behind needs none, because
+there is nothing left to kill. A process this module started suspended and then
+walked away from would sit there until the machine is rebooted, holding two
+pipes, one such process per check command.
+
+The intent is that nothing in here leaves a process running, but on Windows that
+is not absolute, and the limit belongs where it can be found. The sweep beside
+the job walks the (pid, parent pid) table, so it only reaches what is still
+joined to the root by a chain of *living* processes. Windows keeps no
+grandparent link: when an intermediate process exits, its children's recorded
+parent pid points at a pid that is gone, and the walk stops there. That shape is
+not exotic -- the `python.exe` of a uv-managed virtual environment is a
+trampoline that re-executes the real interpreter as a child of its own, and a
+command that ends cleanly takes that link with it. On a machine where the job
+does not hold the grandchild either (IsProcessInJob measures which ones those
+are), a broken chain means the descendant survives both mechanisms. See
+`_descendants`.
 """
 
 from __future__ import annotations
@@ -144,13 +157,23 @@ def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
 
         abandoned = out.abandoned or err.abandoned
         if abandoned and not timed_out:
-            # The command exited inside its limit and a reader is *still* stuck
-            # in read1(): a descendant inherited the pipe and outlived it.
-            # Nothing else will ever close that write end -- the two daemon
-            # readers would sit there for the life of this process, holding
-            # both pipe ends, and the descendant would run on. Asked only after
-            # the join, because before it a live reader means nothing: a thread
-            # that has not yet noticed EOF is not a thread that is stuck.
+            # The command exited inside its limit and a reader did not come
+            # back. Two ways to get here, and the kill answers the first: a
+            # reader still stuck in read1() means a descendant inherited the
+            # pipe and outlived the command, nothing else will ever close that
+            # write end, and the two daemon readers would sit there for the life
+            # of this process holding both pipe ends while the descendant runs
+            # on. The second is a reader that died of an exception (`failed`);
+            # then there may be nothing left to kill at all, and this costs a
+            # kill on an empty tree rather than being wrong.
+            #
+            # Asked only after the join, because before it a live reader means
+            # nothing: a thread that has not yet noticed EOF is not stuck.
+            #
+            # The deadline is passed on although the join above has just spent
+            # it, so the reap inside is bounded at roughly zero. That is fine
+            # here and only here: the direct child has already exited, so there
+            # is nothing to reap -- what this call is for is the tree behind it.
             _kill_tree(process, deadline=deadline)
 
         return Completed(
@@ -313,6 +336,11 @@ def _terminate_windows(process: subprocess.Popen[bytes]) -> None:
     cmd.exe and a uv-managed CPython pass their job on to their children, the
     Store build does not, and terminating the job then leaves the grandchild
     running with the pipe still in its hand.
+
+    That is the hole the sweep was written for, not the only one there is: the
+    sweep can follow only a chain of living processes (see `_descendants`). On a
+    machine where the job does not hold a grandchild *and* the chain to it is
+    broken, neither half reaches it.
     """
     handle = getattr(process, "_ultraloom_job", None)
     if handle is None:
@@ -334,6 +362,15 @@ def _descendants(root: int, parents: Iterable[tuple[int, int]]) -> list[int]:
     the parent has died and hands the pid out again, so the table can contain a
     cycle -- A recorded as B's child while B is recorded as A's. Without it the
     walk would never end, and `run` would never return.
+
+    The known limit of this walk: it needs the chain to be *alive*. Windows
+    records only a parent pid, never a grandparent, so a process whose parent has
+    already exited is no longer reachable from the root -- the pair (its pid, a
+    dead pid) joins nothing. A venv trampoline that hands off to the real
+    interpreter and then dies leaves exactly that gap, and there is nothing here
+    that can bridge it. Handles held from the moment of spawn would, which is
+    what the backlog's pid-reuse entry already asks for; until then the sweep is
+    a good mechanism with a hole in it rather than a guarantee.
     """
     children: dict[int, list[int]] = {}
     for child, parent in parents:

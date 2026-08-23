@@ -772,8 +772,10 @@ def test_a_threaded_kind_runs_its_commands_at_the_same_time(tmp_path: Path) -> N
 
     # Two two-second sleeps: sequential is 4s, concurrent is 2s. The bound sits
     # between them with room for a loaded machine, which is why it is 3.5 and
-    # not 2.5. Generous on purpose -- one of the suite's handful of wall-clock
-    # tests, all of which name max_parallel for the same reason.
+    # not 2.5. Generous on purpose: a wall-clock bound is what a loaded machine
+    # turns red for no reason. max_parallel is set here because the cap is what
+    # decides whether the two commands may overlap at all -- left at a smaller
+    # value the test would measure the cap and not the threading.
     assert elapsed < 3.5, f"the two commands took {elapsed:.1f}s; they did not overlap"
 
 

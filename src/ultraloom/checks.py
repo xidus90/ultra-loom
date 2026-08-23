@@ -327,8 +327,17 @@ def _measures_for(kind: str, marker: str | None, config: Config, alongside: froz
     coverage report over data nobody wrote. The refusal runs one way only --
     about *another* check's command. What this check's own configured command
     measures is not asked either, so a project that measures inside its own
-    `[verify.coverage].report` still keeps its `measure` empty. That direction
-    is the safe one: it can cost a warning, never a report over nothing.
+    `[verify.coverage].report` still keeps its `measure` empty.
+
+    Usually that costs no more than a warning. Not always: with a configured
+    `[verify].test`, a configured `[verify.coverage].report` and
+    `[verify.after].coverage = "test"`, this returns False, but the caller's
+    `after in alongside` is true -- so there is neither a measuring step nor a
+    warning, and a green `test` that did not measure leaves `coverage`
+    reporting on the previous run. `blocked` does not catch it, because the
+    predecessor is green. That is the one accepted way to green over stale data;
+    it is written up in the backlog under "Der eine verbliebene Weg zu Grün über
+    alte Daten".
 
     `kind in alongside` means *requested*, not *finished*, and nothing here can
     upgrade it: this runs while the pass is being planned, before any command

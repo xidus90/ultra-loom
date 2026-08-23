@@ -6,9 +6,10 @@ Dieses Dokument ist der Vertrag für den Umfang, der zwischen Teilprojekt 2 und
 Teilprojekt 3 steht. Taucht beim Bauen eine Streitfrage auf, gilt, was hier
 steht — nicht die Erinnerung und nicht die Auslegung durch ein Modell.
 
-> **Nachtrag (Task 7).** Die Abschnitte 8 und 9 sind in der Ausführung von
-> diesem Vertrag abgewichen: Godot hat kein `coverage`-Preset bekommen, und die
-> Tabelle der knappen Modi nennt eine Flagge nicht, die im Code steht. Beide
+> **Nachtrag (Task 7).** Die Abschnitte 4, 8 und 9 sind in der Ausführung von
+> diesem Vertrag abgewichen: Abschnitt 4 verspricht einen Rückfall, den es in
+> einem Fall nicht gibt, Godot hat kein `coverage`-Preset bekommen, und die
+> Tabelle der knappen Modi nennt eine Flagge nicht, die im Code steht. Alle drei
 > Stellen sind unten markiert.
 
 ---
@@ -112,6 +113,9 @@ Laufzeit. Ebenso ein `after`-Eintrag, der eine unbekannte Prüfart nennt.
 
 ## 4. Wer misst — die `alongside`-Regel
 
+*Abgewichen: der `measure`-Rückfall am Ende dieses Abschnitts greift nicht
+immer — siehe die Markierung dort.*
+
 Stufen allein bringen Python nichts: `coverage report` nach `test` zu stellen
 hilft nur, wenn `test` gemessen hat, und `uv run pytest` misst nichts. Damit die
 Abhängigkeit etwas wert ist, muss `test` **in diesem Lauf** unter Coverage
@@ -170,6 +174,12 @@ schlägt Preset. `measuring` und `after` sind Preset-Eigenschaften. Ein Projekt,
 das `test` selbst konfiguriert, hat kein `measuring` — dann greift für
 `coverage` der `measure`-Rückfall, weil ultraloom nicht wissen kann, ob das
 fremde Testkommando misst. Kein Raten.
+
+*Abgewichen: der Rückfall greift nicht, wenn das Projekt auch `coverage` selbst
+konfiguriert. Ein konfiguriertes Kommando hat kein `measure`, und weil `test` im
+Lauf angefordert ist, bleibt auch die Warnung aus — `coverage` berichtet dann
+still über die Daten des vorigen Laufs. Nachgetragen im Backlog unter „Der eine
+verbliebene Weg zu Grün über alte Daten" und im Docstring von `_measures_for`.*
 
 **Stille Präzedenz, benannt statt versteckt:** Wer `resolve_check` einzeln ruft,
 bekommt eine korrekte, aber möglicherweise langsamere Auflösung als der

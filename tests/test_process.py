@@ -472,7 +472,7 @@ def _remember_spawned(monkeypatch: pytest.MonkeyPatch) -> list[subprocess.Popen[
     def remembering(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
         # A pass-through wrapper: the overloads cannot describe *args, and the
         # bytes-mode Popen is the only one run() ever asks for.
-        process: subprocess.Popen[bytes] = real_popen(*args, **kwargs)  # type: ignore[call-overload]
+        process: subprocess.Popen[bytes] = real_popen(*args, **kwargs)  # type: ignore[call-overload]  # see above
         spawned.append(process)
         return process
 

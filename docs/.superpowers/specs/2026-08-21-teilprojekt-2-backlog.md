@@ -418,13 +418,18 @@ zwei gleichrangigen GDScript-Linter bringt Faktor **1,60** (Median 5,94 s gegen
 Zahl war eine Einzelmessung mit einem Ausreißer von 11,04 s, dessen Ursache
 offen bleibt.
 
-**`checks.py` trägt fünf Aufgaben auf 795 Zeilen.** Presettabelle, Auflösung und
-Messentscheidung, Godot-Bereitschaftstor, Ausführung und Berichtsverschmelzung,
-Scheduler. Die Nähte sind schon benannt und tragen: `schedule.py` nähme
-`run_kinds`, `_gated`, `_stages`, `_blocker`, `_run_or_report`, `run_all`,
-`BLOCKED` und `CheckRunner` mit — das hängt nur an `_predecessor_of`,
-`ConfigError` und dem `CheckRunner`-Protokoll, und das Protokoll ist genau der
-Schnitt. `readiness.py` nähme `_unready`, `_import_message`,
+**`checks.py` trägt fünf Aufgaben auf gut 800 Zeilen** (815 bei diesem Stand).
+Presettabelle, Auflösung und Messentscheidung, Godot-Bereitschaftstor,
+Ausführung und Berichtsverschmelzung, Scheduler. Die Nähte sind benannt, aber
+der Schnitt ist teurer als er zunächst aussah. `schedule.py` nähme `run_kinds`,
+`_gated`, `_stages`, `_blocker`, `_run_or_report`, `run_all`, `BLOCKED` und
+`CheckRunner` mit — und dazu, damit das überhaupt übersetzt, `_marker`, `KINDS`,
+`CheckResult`, `UNAVAILABLE` und `CheckUnavailableError`. Der Knoten sitzt bei
+`run_check`: es gehört fachlich zur Ausführung und bliebe in `checks.py`, wird
+aber von `_gated` gerufen, also importierte `schedule.py` aus `checks.py`. Ein
+Re-Export von `run_all` in `checks.py`, damit die heutigen Aufrufer nichts
+merken, schlösse den Zyklus. Wer den Schnitt macht, muss also zuerst über diese
+Richtung entscheiden. `readiness.py` nähme `_unready`, `_import_message`,
 `_preset_godot_binary` und die beiden Godot-Konstanten, also die einzige
 Godot-Sonderkenntnis außerhalb von `PRESETS`. Kosten: `test_module_boundary.py`
 muss die neuen Namen kennen. Eigener Task, kein Merge-Blocker.
@@ -440,10 +445,12 @@ Vorgänger ja grün ist. Das ist die beschlossene Restlücke des Rulings zu Task
 und steht so im Docstring von `_measures_for`. Der Backlog nannte bisher nur die
 umgekehrte Nachlässigkeit — die Warnung, die zu oft käme —, nicht diese.
 
-**`brief` ist vollständig aus `report` ableitbar und geht trotzdem in den
-`input_hash`.** Das Ruling bleibt richtig: der Zustand ist, was der Knoten
-gesehen hat, und eine gekürzte Fassung, die anders gekürzt wird, ist ein anderer
-Zustand. Die Kosten gehören aber danebengeschrieben: jede künftige Änderung an
+**`brief` ist fast aus `report` ableitbar und geht trotzdem in den
+`input_hash`.** Fast, nicht ganz: `_render` klippt **je Befund**, während
+`report` der ungeklippte Gesamttext ist — aus dem Gesamttext ließe sich nur noch
+global klippen, und das gäbe eine andere Kürzung. Das Ruling bleibt richtig: der
+Zustand ist, was der Knoten gesehen hat, und eine gekürzte Fassung, die anders
+gekürzt wird, ist ein anderer Zustand. Die Kosten gehören aber danebengeschrieben: jede künftige Änderung an
 `clip` invalidiert zusätzlich sämtliche Journale — nicht nur die Einträge, die
 den Bericht wirklich gelesen haben. Wer `clip` anfasst, weiß dann, was er
 auslöst.
