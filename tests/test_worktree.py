@@ -161,3 +161,32 @@ def test_the_run_directory_is_only_dropped_below_the_given_root(tmp_path: Path) 
     (package / "own.py").write_text("x = 1\n", encoding="utf-8")
 
     assert changed_files(package) == ("own.py",)
+
+
+def test_a_root_git_ignores_is_an_error_not_an_empty_answer(tmp_path: Path) -> None:
+    """The silent case: a directory git answers about, but never answers *with*.
+
+    A copy of a project below an ignored path is still inside the repository,
+    so every git call succeeds and the prefix arithmetic is right -- but
+    `status` never lists an ignored file, so the answer is empty however much
+    changed. Read as "nothing changed", it turns the guard off and the run
+    reports success.
+    """
+    repo = _repo(tmp_path)
+    (repo / ".gitignore").write_text("copies/\n", encoding="utf-8")
+    inside = repo / "copies" / "project"
+    inside.mkdir(parents=True)
+    (inside / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    with pytest.raises(WorktreeError, match="ignore"):
+        changed_files(inside)
+
+
+def test_a_root_below_an_unignored_directory_is_answered(tmp_path: Path) -> None:
+    """The neighbouring case that must keep working: a monorepo package."""
+    repo = _repo(tmp_path)
+    package = repo / "package"
+    package.mkdir()
+    (package / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert changed_files(package) == ("a.py",)

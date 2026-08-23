@@ -842,8 +842,21 @@ neben dem Repo, ein Ordner unter einem ignorierten Pfad —, dann greifen alle
 `git`-Aufrufe auf das umgebende Repository durch. `changed_files` liefert dort
 immer die leere Menge, `guard` meldet folgerichtig `touched = []`, und der Lauf
 sieht aus wie ein bestandener. Er ist keiner: die Testsperre ist in einem
-solchen Baum wirkungslos, und niemand erfährt es. Der Ablauf prüft bislang nicht,
-ob sein `root` überhaupt ein eigener Arbeitsbaum ist.
+solchen Baum wirkungslos, und niemand erfährt es.
+
+**Geschlossen.** `changed_files` fragt vor der eigentlichen Frage, ob git den
+`root` ignoriert, und weist ihn dann ab, statt eine leere Antwort zu geben. Die
+Prüfung steht *vor* dem `status`-Aufruf und nicht hinter seinem Ergebnis: eine
+Änderung anderswo im Repository trüge den Aufruf sonst daran vorbei, und die
+Relokation ließe am Ende wieder eine leere Antwort übrig — diesmal eine
+ungeprüfte. Ein Paket in einem Monorepo bleibt beantwortbar, es ist ja nicht
+ignoriert.
+
+Was das CLI beim Nehmen der Grundlinie tut, bleibt wie es war: es liest einen
+unlesbaren Baum als leere Grundlinie, weil ein Ablauf, dem das wichtig ist, an
+seiner eigenen Stelle hinschaut. Genau das tut `guard` jetzt. Derselbe Lauf, der
+vorher grün meldete, endet im ignorierten Baum mit Exit 4 und der Meldung, die
+sagt, was zu tun ist — nachgefahren am lebenden Objekt, nicht nur im Unit-Test.
 
 ### Kleinkram
 

@@ -44,6 +44,13 @@ def changed_files(root: Path) -> tuple[str, ...]:
     this answer is silently off. Anything outside `root` is dropped for the
     same reason: it is not this project's change.
 
+    A root git *ignores* is refused rather than answered. Such a directory is
+    still inside the repository, so every call here succeeds and the arithmetic
+    below is right -- but `status` never lists an ignored file, so the answer
+    is empty however much changed. A copy of a project parked below an ignored
+    path is the ordinary way to end up there, and read as "nothing changed" it
+    switches the guard off while every run keeps reporting success.
+
     What `RUN_DIR` holds is dropped as well, and for a reason of its own: those
     files are ultraloom's, not the project's. Every run writes its journal and
     its marker while the repair agent works, so a guard reading this answer
@@ -53,6 +60,11 @@ def changed_files(root: Path) -> tuple[str, ...]:
     stays visible: `config.toml` holds the thresholds a check is measured
     against, and an agent editing that one is exactly what the guard is for.
     """
+    # Before the question rather than after the answer: an ignored root is
+    # wrong whatever comes back, and a change *elsewhere* in the repository
+    # would otherwise carry the call past this point and be dropped by the
+    # relocation below -- an empty answer again, and this time an unchecked one.
+    _refuse_if_ignored(root)
     output = _status(root)
     paths = _parse_status(output)
     if not paths:
@@ -66,10 +78,10 @@ def changed_files(root: Path) -> tuple[str, ...]:
     return tuple(path for path in paths if not path.startswith(RUN_DIR + "/"))
 
 
-def _git(root: Path, *arguments: str) -> str:
-    """One git call below `root`, with both ways of having no answer refused."""
+def _run(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    """One git call below `root`, for the callers that read the return code."""
     try:
-        result = subprocess.run(
+        return subprocess.run(
             ("git", *arguments),
             cwd=root,
             capture_output=True,
@@ -80,8 +92,30 @@ def _git(root: Path, *arguments: str) -> str:
         )
     except OSError as error:
         # A directory that is not there never reaches a return code: the spawn
-        # itself fails. Same answer as a non-zero one -- see below.
+        # itself fails. Same answer as a non-zero one -- see `_git`.
         raise WorktreeError(f"cannot inspect the working tree in {root}: {error}") from error
+
+
+def _refuse_if_ignored(root: Path) -> None:
+    """Refuse a root git answers about but never answers with.
+
+    `check-ignore` exits 1 for a path it does not ignore, which is the ordinary
+    case and no failure at all -- so this call reads the return code itself
+    rather than going through `_git`. Every other code is read as "not
+    ignored" on purpose: the calls that follow refuse a directory git cannot
+    answer about anyway, and turning the difference between exit 1 and exit 128
+    into a second way of failing here would only make that refusal less clear.
+    """
+    if _run(root, "check-ignore", "-q", ".").returncode == 0:
+        raise WorktreeError(
+            f"git ignores {root}, so it can never report a change there -- "
+            "run ultraloom in a working tree of its own"
+        )
+
+
+def _git(root: Path, *arguments: str) -> str:
+    """One git call below `root`, with both ways of having no answer refused."""
+    result = _run(root, *arguments)
     if result.returncode != 0:
         # A caller that cannot see the working tree must not carry on as if it
         # had seen an empty one. Reading an unanswerable question as "nothing
