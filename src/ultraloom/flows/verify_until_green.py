@@ -470,12 +470,11 @@ def assemble(
 
     `baseline` is the commit the *run* started on together with what its
     working tree already showed, and it is what `guard` measures against. It is
-    passed in rather than taken here
-    whenever the caller knows it: `build` reads it out of the run's recorded
-    options, so a resumed run keeps the baseline of its first start. Taking a
-    fresh one on resume would hand the repairer an alibi -- everything it had
-    already changed before the pause would be in the new baseline, including a
-    test file.
+    passed in rather than taken here whenever the caller knows it: `build`
+    reads it out of the run's recorded options, so a resumed run keeps the
+    baseline of its first start. Taking a fresh one on resume would hand the
+    repairer an alibi -- everything it had already changed before the pause
+    would be in the new baseline, including a test file.
 
     Reading it here is the fallback for a caller that has none, which is
     `assemble` used directly and `build` on a run that recorded nothing. `head`
