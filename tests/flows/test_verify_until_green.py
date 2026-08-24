@@ -1355,3 +1355,64 @@ def test_the_repairers_prompt_never_carries_the_full_report(tmp_path: Path) -> N
 
     assert len(prompt.splitlines()) < 250
     assert "ausgelassen" in prompt
+
+
+class _ModelThatActs:
+    """A model that does something to the tree before it answers.
+
+    The repairer is a black box to the flow, so the only way to test a repairer
+    that commits is to let the model's turn have the same side effect a real
+    agent's tool calls would have.
+    """
+
+    def __init__(self, reply: Reply, act: Callable[[], None]) -> None:
+        self._reply = reply
+        self._act = act
+        self.seen: list[object] = []
+
+    def ask(self, request: object) -> Reply:
+        """Act on the tree, then hand back the prepared reply."""
+        self.seen.append(request)
+        self._act()
+        return self._reply
+
+
+def test_a_repairer_that_commits_a_test_file_does_not_get_past_the_real_guard(
+    tmp_path: Path,
+) -> None:
+    """No injected differ: the wiring between the flow and git is the point."""
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text("assert False\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=tmp_path, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "first"),
+        cwd=tmp_path,
+        check=True,
+    )
+
+    def runner(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
+        return CheckResult(kind, False, f"{kind} is unhappy", "test")
+
+    def repair_then_commit() -> None:
+        (tmp_path / "tests" / "test_a.py").write_text("assert True\n", encoding="utf-8")
+        subprocess.run(("git", "add", "-A"), cwd=tmp_path, check=True)
+        subprocess.run(
+            ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "sneaky"),
+            cwd=tmp_path,
+            check=True,
+        )
+
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=runner,
+        max_rounds=2,
+    )
+    model = _ModelThatActs(Reply(RepairResult("done", changed=True), tokens=0), repair_then_commit)
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
+        VerifyState(kinds=("test",))
+    )
+
+    assert result.exit_code == 4
+    assert "tests/test_a.py" in (result.detail or "")
