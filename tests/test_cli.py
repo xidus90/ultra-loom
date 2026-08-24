@@ -765,7 +765,7 @@ def test_a_run_records_the_commit_it_started_on(tmp_path: Path) -> None:
 
 
 def test_a_marker_without_a_baseline_commit_records_no_baseline(tmp_path: Path) -> None:
-    """A run started before this rule existed. Half a baseline is no baseline."""
+    """A run started before this rule existed. The commit decides, and it is missing."""
     marker = _marker(tmp_path)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text('plain\nbaseline="tests/a.py"\n', encoding="utf-8")
@@ -773,6 +773,25 @@ def test_a_marker_without_a_baseline_commit_records_no_baseline(tmp_path: Path) 
     recorded = _recorded_run(tmp_path, "0001")
 
     assert recorded == ("plain", {}, None)
+
+
+def test_a_marker_with_a_commit_and_no_dirty_paths_is_a_baseline(tmp_path: Path) -> None:
+    """The commit decides alone, so the two halves are not symmetric.
+
+    `_remember_run` always writes both lines -- on a clean tree the `baseline=`
+    one is empty rather than absent -- so this marker is a hand-written or
+    hand-edited one. It is read all the same: the commit is a reference point
+    the guard can measure against, and an absent dirty set means the same as an
+    empty one. Nothing else covers this arm; `dirty or ""` is no branch to
+    coverage.py.
+    """
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('plain\nbaseline_commit="abc123"\n', encoding="utf-8")
+
+    recorded = _recorded_run(tmp_path, "0001")
+
+    assert recorded == ("plain", {}, Baseline("abc123", frozenset()))
 
 
 def test_resume_refuses_a_run_that_recorded_no_baseline(

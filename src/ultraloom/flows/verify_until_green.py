@@ -478,8 +478,11 @@ def assemble(
 
     Reading it here is the fallback for a caller that has none, which is
     `assemble` used directly and `build` on a run that recorded nothing. `head`
-    is a parameter for the same reason `differ` is: so a test can say "git has
-    no commit here" without arranging a directory that happens to have none.
+    is a parameter so a test can count how often the baseline's commit is read
+    -- once per graph, never once per round -- and can say "git has no commit
+    here" without arranging a directory that happens to have none. Not the same
+    reason `differ` is one: the fallback below reads the tree through
+    `changed_files` directly and never asks `differ` at all.
     """
     if baseline is None:
         try:

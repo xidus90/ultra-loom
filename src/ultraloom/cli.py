@@ -354,9 +354,12 @@ def _recorded_run(root: Path, run_id: str) -> tuple[str, dict[str, str], Baselin
 
     dirty = options.pop(_BASELINE, None)
     commit = options.pop(_BASELINE_COMMIT, None)
-    # Both or neither. A marker holding only the path set was written before
-    # the commit existed, and reading it as a baseline would measure the run
-    # against a tree the repairer has already had its hands on.
+    # The commit decides alone. A marker holding only the path set was written
+    # before the commit existed, and reading it as a baseline would measure the
+    # run against a tree the repairer has already had its hands on -- so it is
+    # no baseline at all. The other way round is not the same case: a missing
+    # path set is an empty one, and the commit it comes with is a reference
+    # point the guard can measure against.
     baseline = None if commit is None else Baseline(commit, _decode_baseline(dirty or ""))
     return flow_name.strip(), options, baseline
 
