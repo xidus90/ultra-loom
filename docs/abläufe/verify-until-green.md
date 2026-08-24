@@ -41,7 +41,7 @@ kein Ausgang ist.
 | --- | --- | --- | --- |
 | `check` | code | `max_rounds + 1` | Führt die gewählten Prüfungen in Stufen aus — nebenläufig nur innerhalb einer Stufe —, sammelt die roten, erhöht den Rundenzähler und merkt sich, was die vorige Runde gefunden hatte. |
 | `repair` | agent | `max_rounds + 1` | Bekommt den Bericht der roten Prüfungen und repariert die Quellen. Werkzeugprofil `edit`, Effort `high`. |
-| `guard` | code | `max_rounds + 1` | Liest den Arbeitsbaum über `git status` und bricht ab, wenn der Reparateur geschützte Pfade angefasst hat. |
+| `guard` | code | `max_rounds + 1` | Misst gegen den Commit, auf dem der Lauf begann — `git diff` gegen ihn, vereinigt mit `git status` — und bricht ab, wenn der Reparateur geschützte Pfade angefasst hat. |
 | `report_red` | code | 1 | Beendet den Lauf rot und sagt, warum. |
 
 Jede Obergrenze auf dem Zyklus ist `max_rounds + 1`, die von `check`
@@ -66,7 +66,7 @@ dem er rot ist.
 | `unfixable` | `tuple[str, ...]` | Davon die, die keine Reparatur schließen kann. |
 | `blocked` | `tuple[str, ...]` | Davon die, die gar nicht gelaufen sind, weil ihr Vorgänger rot war. Weder reparierbar noch außer Reichweite — und diese dritte Antwort muss bis zur Abbruchentscheidung durchhalten. |
 | `brief` | `str` | Derselbe Bericht, gekürzt auf das, was der Reparateur zu sehen bekommt. |
-| `touched` | `tuple[str, ...]` | Was `git status` nach dem Reparaturlauf als geändert meldet. |
+| `touched` | `tuple[str, ...]` | Was sich nach dem Reparaturlauf gegenüber dem Basis-Commit unterscheidet, abzüglich dessen, was schon vorher schmutzig war. |
 | `rounds` | `int` | Wie oft `check` gelaufen ist. |
 | `previous_failing` | `tuple[str, ...]` | Was die vorige Runde gefunden hat. Eine Kantenbedingung sieht nur einen Zustand, und „dieselben Prüfungen schon wieder" ist sonst nicht beantwortbar. |
 
@@ -83,8 +83,8 @@ während `report` bereits die Zusammenfassung des Reparateurs hält. `guard` ist
 der Knoten, der ihn so sieht.
 
 `changed` — die Behauptung des Modells, es habe etwas geändert — wandert bewusst
-*nicht* in den Zustand. Die Wahrheit darüber steht im Arbeitsbaum, und das Wort
-des Modells ist daneben nichts wert.
+*nicht* in den Zustand. Die Wahrheit darüber steht im Unterschied zum
+Basis-Commit, und das Wort des Modells ist daneben nichts wert.
 
 ## Unreparierbar
 
@@ -220,11 +220,41 @@ stellt vier Regeln auf:
 
 ## Die Wache
 
-`guard` liest `git status --porcelain -z -uall` unter der Projektwurzel — nicht
-`diff`, denn ein Reparateur darf Dateien anlegen, und eine unverfolgte Datei ist
-für `diff` unsichtbar. Eine Umbenennung meldet git als *zwei* Felder, von denen
-nur das erste das Drei-Zeichen-Präfix trägt; schnitte man auch vom zweiten drei
-Zeichen ab, liefe ein beiseite umbenannter Test an der Wache vorbei.
+`guard` misst gegen den **Commit, auf dem der Lauf begonnen hat** — nicht gegen
+den Arbeitsbaum allein. `changed_since(root, base)` vereinigt dazu zwei Fragen,
+weil keine von beiden allein antwortet:
+
+- `git diff --name-only -z --no-renames <base>` vergleicht den Baum von `base`
+  gegen den auf der Platte und sieht damit alles an verfolgten Dateien —
+  Committetes wie Ungestagtes —, ist aber blind für eine unverfolgte Datei;
+- `git status --porcelain -z -uall` sieht die unverfolgte Datei, liest eine
+  committete Änderung aber als sauberen Baum.
+
+Die zweite Blindheit ist der Grund für die erste Frage: ein Reparateur, der
+seine Änderung committet, hinterlässt einen sauberen Baum, und eine Wache, die
+nur den Baum liest, sähe nichts und ließe die bearbeitete Testdatei durch. Gegen
+einen Commit gemessen ist ein Commit so sichtbar wie eine ungestagte Änderung —
+und `reset`, `rebase` und `amend` verstecken ebenfalls nichts, weil der Diff
+Inhalte vergleicht und keine Historien.
+
+`--no-renames`, damit eine Umbenennung als alter *und* als neuer Pfad
+zurückkommt; sonst meldete git das Paar als einen Eintrag, und ein beiseite
+geschobener Test wäre ein Pfad, den die Wache nie gegen ihre Liste hält.
+
+`-z` steht an **beiden** Fragen, und aus demselben Grund: `core.quotePath` ist
+standardmäßig an, also gibt git jeden Pfad mit einem Nicht-ASCII-Byte
+C-zitiert zurück — `"tests/test_gr\303\274n.py"`. Dessen erstes Segment heißt
+`"tests` und nicht `tests`, damit trifft ihn kein konfigurierter Pfad, er
+überlebt weder den Präfix-Schnitt noch den `RUN_DIR`-Ausschluss, und die Wache
+lässt ihn durch. Das galt eine Zeit lang nur für den Status; der Diff fragte
+ohne `-z` und hatte damit genau diese Lücke, obwohl `docs/abläufe/` im eigenen
+Baum liegt und Umlaute in Pfaden also nicht exotisch sind.
+
+Beim Status steht zusätzlich `-uall`, weil die Vorgabe ein ganzes unverfolgtes
+Verzeichnis zu einem Eintrag zusammenzieht, der auf keine Datei zeigt. Und eine
+Umbenennung meldet `status` als *zwei* Felder, von denen nur das erste das
+Drei-Zeichen-Präfix trägt; schnitte man auch vom zweiten drei Zeichen ab, liefe
+ein beiseite umbenannter Test an der Wache vorbei.
 
 Pfade werden segmentweise verglichen (`PurePosixPath`), damit `tests/` nicht
 `testsuite/thing.py` einfängt, und die Groß-/Kleinschreibung wird exakt
@@ -236,19 +266,27 @@ kein Porcelain-Schalter ändert das. Sind beide dasselbe Verzeichnis, fällt der
 Unterschied nicht auf — in einem Monorepo mit `--root paket` aber antwortet git
 `paket/tests/test_x.py`, während `[verify].tests` `tests/` sagt: kein
 konfigurierter Pfad trifft je, und die Testsperre wäre ohne eine einzige Meldung
-aus. `changed_files` schneidet deshalb den Präfix aus
-`git rev-parse --show-prefix` ab und lässt alles weg, was außerhalb der
-Projektwurzel liegt.
+aus. Beide Antworten laufen deshalb durch dieselbe Umrechnung: sie schneidet
+den Präfix aus `git rev-parse --show-prefix` ab und lässt alles weg, was
+außerhalb der Projektwurzel liegt. Weggelassen wird auch alles unter
+`.ultraloom/runs/` — Journal und Marker schreibt ultraloom selbst, während der
+Agent arbeitet, und sie ihm anzulasten beendete jeden Lauf eines Projekts, das
+`.ultraloom/` unter seinen geschützten Pfaden führt.
 
-Ist der Arbeitsbaum nicht lesbar — git bricht ab oder lässt sich gar nicht
-starten —, endet der Lauf. Eine unbeantwortbare Frage als „nichts geändert" zu
-lesen, hebelte genau die Regel aus, für die dieser Knoten da ist.
+Kann die Wache nicht antworten, endet der Lauf. Es gibt dafür zwei Wege: der
+Arbeitsbaum ist nicht lesbar — git bricht ab oder lässt sich gar nicht starten —
+oder git löst den Basis-Commit nicht auf — etwa in einem fortgesetzten Lauf,
+dessen Startcommit inzwischen weggeworfen wurde. Eine unbeantwortbare Frage als
+„nichts geändert" zu lesen, hebelte genau die Regel aus, für die dieser Knoten
+da ist.
 
 ### Die Grundlinie
 
 Die Grundlinie wird **einmal pro Lauf** aufgenommen, beim Start, und als
-`baseline` an `guard` durchgereicht. Der Knoten zieht sie ab, bevor er
-irgendeinen Pfad bewertet.
+`baseline` an `guard` durchgereicht. Sie hat zwei Hälften, und keine vertritt
+die andere: `commit` ist das, *wogegen* gemessen wird, und `dirty` ist das, was
+der Arbeitsbaum beim Start schon zeigte. Die zweite Hälfte zieht der Knoten ab,
+bevor er irgendeinen Pfad bewertet.
 
 Der Grund: `guard` beantwortet die Frage „was hat der Reparatur-Agent getan",
 nicht „was ist an diesem Baum schmutzig". Ohne Grundlinie beantwortet er die
@@ -264,17 +302,24 @@ wurde; ein Fehlalarm kostet jeden Lauf auf einem nicht makellosen Arbeitsbaum,
 und das sind die meisten.
 
 Die Grundlinie speist auch `touched` und damit die Stagnationserkennung: was
-schon vorher schmutzig war, zählt nicht als Änderung dieses Laufs. Ist der Baum
-gar nicht lesbar, bleibt die Grundlinie leer statt den Lauf zu beenden — ein
-grüner Lauf erreicht die Wache nie, und ein Projekt abzulehnen, weil es nicht
-unter Versionskontrolle steht, ist nicht die Entscheidung dieses Ablaufs. Die
-Wache selbst meldet den unlesbaren Baum an ihrer eigenen Stelle, mit Exit 4.
+schon vorher schmutzig war, zählt nicht als Änderung dieses Laufs.
+
+Gibt git keinen Commit her — kein Repository, ein Repository ohne Commit, oder
+eine Wurzel, die git ignoriert —, dann **beginnt der Lauf gar nicht erst**.
+`assemble` wirft einen `ValueError`, und zwar bevor die erste Reparaturrunde
+läuft; die CLI meldet ihn als Ladefehler des Ablaufs mit Exit 1. Eine Wache, die
+gegen nichts misst, sagt zu allem ja, und Nein-Sagen ist die ganze Aufgabe
+dieses Ablaufs. Die halbe Grundlinie — nur `dirty`, ohne Commit — wird deshalb
+gar nicht erst gebildet: sie läse sich an jeder späteren Stelle wie eine ganze.
 
 ### Die Grundlinie gehört zum Lauf, nicht zum Prozess
 
-Sie steht deshalb im `.flow`-Marker des Laufs, neben `checks` und `max_rounds`:
-`ultraloom run` nimmt sie auf und schreibt sie, `ultraloom resume` und
-`ultraloom replay` lesen sie von dort und nehmen **keine neue**.
+Sie steht deshalb im `.flow`-Marker des Laufs, neben `checks` und `max_rounds`,
+in zwei Zeilen: `baseline_commit` für den Commit und `baseline` für die schon
+schmutzigen Pfade. `ultraloom run` nimmt sie auf und schreibt sie,
+`ultraloom resume` und `ultraloom replay` lesen sie von dort und nehmen
+**keine neue**. Beide Hälften gelten nur zusammen: ein Marker mit Pfaden, aber
+ohne Commit, stammt aus der Zeit davor und wird nicht als Grundlinie gelesen.
 
 Ohne das wäre die Sperre bei jedem fortgesetzten Lauf offen. `resume` baut den
 Ablauf über denselben Weg wie `run`; würde dabei der Arbeitsbaum erneut gelesen,
@@ -283,10 +328,13 @@ angefasste Testdatei eingeschlossen —, in der neuen Grundlinie und wäre für 
 Wache unsichtbar. Die Frage „was war schon schmutzig, bevor *dieser Lauf*
 begann" hat genau eine richtige Antwort, und die entsteht einmal, beim Start.
 
-Ein Marker aus der Zeit vor der Grundlinie trägt keine; ein solcher Lauf liest
-sich als „nichts aufgezeichnet" und nimmt beim Fortsetzen eine frische. Das ist
-etwas anderes als eine aufgezeichnete leere Grundlinie, die „der Baum war
-sauber" bedeutet.
+Ein Marker ohne Basis-Commit — ein Lauf von vor dieser Änderung oder einer, den
+git nicht datieren konnte — lässt sich nicht fortsetzen: `resume` und `replay`
+lehnen ihn mit Exit 1 ab und verweisen auf einen neuen `run`. Jetzt eine frische
+Grundlinie zu nehmen hieße, gegen den Baum zu messen, den der Reparateur
+inzwischen bearbeitet hat; alles, was er schon geändert hat, wäre entschuldigt.
+Eine aufgezeichnete leere `dirty`-Hälfte ist davon zu unterscheiden — sie
+bedeutet „der Baum war sauber" und ist eine vollständige Antwort.
 
 Der Marker trägt seine Werte deshalb JSON-kodiert: eine Grundlinie ist eine
 Liste von Pfaden, also ein Wert mit Zeilenumbrüchen, und der muss auf seiner
@@ -336,7 +384,8 @@ Parametern aufbauen wie der ursprüngliche Lauf.
 | rot, stagniert | 1 | Dieselben Prüfungen sind wieder rot, und der Reparaturlauf dazwischen hat keine Datei geändert. |
 | rot, Ring in der Reihenfolge | 1 | `[verify.after]` und die Presets ergeben zusammen einen Kreis. Kein roter Befund, sondern das Ende des Laufs: eine Reparaturrunde gegen den Quelltext schließt keinen Ring in der Konfiguration. Die Meldung nennt den Pfad. |
 | rot, keine Prüfung | 1 | Der Zustand benennt keine Prüfart. Ein grünes Ergebnis, nach dem niemand gesehen hat, ist der eine Fehler, den dieser Ablauf nie erzeugen darf. |
-| abgebrochen, Tests angefasst | 4 | Der Reparateur hat einen geschützten Pfad geändert, oder der Arbeitsbaum ist nicht lesbar. |
+| abgelehnt, kein Basis-Commit | 1 | git gibt für die Projektwurzel keinen Commit her — kein Repository, ein Repository ohne Commit, oder eine von git ignorierte Wurzel. Der Lauf wird abgelehnt, **bevor** die erste Reparaturrunde läuft. Ein fortzusetzender Lauf, dessen Marker keinen Basis-Commit trägt, wird aus demselben Grund abgelehnt. |
+| abgebrochen, Tests angefasst | 4 | Der Reparateur hat einen geschützten Pfad geändert, oder die Wache kann nicht antworten: der Arbeitsbaum ist nicht lesbar, oder git löst den Basis-Commit nicht mehr auf. |
 
 `ultraloom resume` gibt es für diesen Ablauf nicht: er kennt kein Gate, also
 wartet nie einer seiner Läufe auf eine Antwort. Ein `resume` über ein
@@ -432,16 +481,22 @@ Rest der Datei, in der ein blanker `pyproject.toml` als `"preset"` festgehalten
 ist. `git diff` bestätigt das — die einzige Änderung an
 `tests/test_checks.py` war die vorher von Hand eingebaute.
 
-`guard` liest `git status` über den ganzen Arbeitsbaum und hat keine Grundlinie
-vom Laufbeginn. Er kann deshalb nicht unterscheiden, was der Reparateur geändert
-hat und was schon vorher geändert war. Dasselbe zeigte sich harmloser in Lauf
-0002, wo `touched` die von Hand angelegte `.ultraloom/config.toml` enthielt.
-In der Praxis heißt das: **ein Lauf auf einem schmutzigen Arbeitsbaum, in dem
-ein geschützter Pfad geändert ist, endet immer mit Exit 4** — auch wenn der
-Reparateur sich vorbildlich verhalten hat. Die Sperre ist damit nach der
-sicheren Seite hin falsch, aber sie ist falsch. Wer sie schärfen will, nimmt
-`changed_files` vor dem ersten `repair` als Grundlinie auf und meldet nur, was
-danach dazugekommen ist.
+`guard` las damals `git status` über den ganzen Arbeitsbaum und hatte keine
+Grundlinie vom Laufbeginn. Er konnte deshalb nicht unterscheiden, was der
+Reparateur geändert hatte und was schon vorher geändert war. Dasselbe zeigte
+sich harmloser in Lauf 0002, wo `touched` die von Hand angelegte
+`.ultraloom/config.toml` enthielt. In der Praxis hieß das: **ein Lauf auf einem
+schmutzigen Arbeitsbaum, in dem ein geschützter Pfad geändert ist, endete immer
+mit Exit 4** — auch wenn der Reparateur sich vorbildlich verhalten hatte. Die
+Sperre war damit nach der sicheren Seite hin falsch, aber sie war falsch. Wer
+sie schärfen will, nimmt `changed_files` vor dem ersten `repair` als Grundlinie
+auf und meldet nur, was danach dazugekommen ist.
+
+**Geschlossen.** Genau die hier vorgeschlagene Schärfung wurde gebaut: die
+Grundlinie wird vor dem ersten `repair` aufgenommen und abgezogen. Sie hat
+seither eine zweite Hälfte bekommen — den Commit, gegen den gemessen wird —,
+weil eine Wache, die nur den Arbeitsbaum liest, einen Reparateur nicht sieht,
+der seine Änderung committet. Siehe *Die Wache*.
 
 ### Kleinkram
 
@@ -769,14 +824,15 @@ das liegt nahe, dort stehen schließlich die Schwellen —, bekäme bei **jedem*
 Lauf Exit 4 und die Meldung, der Reparateur habe geschützte Dateien angefasst.
 `touched` war damit nicht das, was es zu sein behauptete.
 
-**Geschlossen.** `worktree.changed_files` lässt weg, was unter
-`.ultraloom/runs/` liegt — an der einen Stelle, die sowohl die Grundlinie als
-auch `guard` lesen, und erst nachdem die Pfade auf `root` bezogen sind, weil nur
-diese Schreibweise passt. Der Rest von `.ultraloom/` bleibt sichtbar:
-`config.toml` trägt die Schwellen, gegen die geprüft wird, und wer daran ändert,
-ist genau der Fall, für den `guard` da ist. Drei Tests in `test_worktree.py`
-halten die Grenze, einer in `tests/flows/` fährt den gemeldeten Fall mit dem
-echten `differ` und `.ultraloom/` unter den geschützten Pfaden.
+**Geschlossen.** `worktree._relocate` lässt weg, was unter `.ultraloom/runs/`
+liegt — an der einen Stelle, durch die beide Antworten laufen: `changed_files`,
+aus dem die Grundlinie entsteht, und `changed_since`, das `guard` liest. Und
+erst nachdem die Pfade auf `root` bezogen sind, weil nur diese Schreibweise
+passt. Der Rest von `.ultraloom/` bleibt sichtbar: `config.toml` trägt die
+Schwellen, gegen die geprüft wird, und wer daran ändert, ist genau der Fall,
+für den `guard` da ist. Drei Tests in `test_worktree.py` halten die Grenze,
+einer in `tests/flows/` fährt den gemeldeten Fall mit dem echten `differ` und
+`.ultraloom/` unter den geschützten Pfaden.
 
 ## Der Lauf, der das Preset erwischte: ultraloom, 23.08.2026
 
@@ -852,11 +908,12 @@ Relokation ließe am Ende wieder eine leere Antwort übrig — diesmal eine
 ungeprüfte. Ein Paket in einem Monorepo bleibt beantwortbar, es ist ja nicht
 ignoriert.
 
-Was das CLI beim Nehmen der Grundlinie tut, bleibt wie es war: es liest einen
-unlesbaren Baum als leere Grundlinie, weil ein Ablauf, dem das wichtig ist, an
-seiner eigenen Stelle hinschaut. Genau das tut `guard` jetzt. Derselbe Lauf, der
-vorher grün meldete, endet im ignorierten Baum mit Exit 4 und der Meldung, die
-sagt, was zu tun ist — nachgefahren am lebenden Objekt, nicht nur im Unit-Test.
+Das CLI gab damals für einen unlesbaren Baum eine leere Grundlinie zurück, weil
+ein Ablauf, dem das wichtig ist, an seiner eigenen Stelle hinschaut. Seit die
+Grundlinie einen Commit trägt, gibt es hier gar keine mehr: `_baseline` liefert
+`None`, und `verify-until-green` lehnt den Lauf ab, statt ihn zu starten. Der
+Lauf, der vorher grün meldete, kommt im ignorierten Baum heute nicht mehr bis
+zur ersten Reparaturrunde.
 
 ### Kleinkram
 

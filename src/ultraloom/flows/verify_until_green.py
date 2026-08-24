@@ -24,13 +24,13 @@ from ultraloom.checks import (
     run_kinds,
 )
 from ultraloom.config import Config, ConfigError
-from ultraloom.discovery import FlowContext, LoadedFlow
+from ultraloom.discovery import Baseline, FlowContext, LoadedFlow
 from ultraloom.graph import END, AgentNode, CodeNode, Graph
 from ultraloom.runner import FlowExit
 from ultraloom.state import Delta
-from ultraloom.worktree import WorktreeError, changed_files
+from ultraloom.worktree import WorktreeError, changed_files, changed_since, head_commit
 
-type Differ = Callable[[Path], tuple[str, ...]]
+type Differ = Callable[[Path, str], tuple[str, ...]]
 
 _EXIT_TOUCHED_A_TEST = 4
 _EXIT_STILL_RED = 1
@@ -329,8 +329,8 @@ def _is_protected(path: str, test_paths: tuple[str, ...]) -> bool:
 def make_guard(
     root: Path,
     test_paths: tuple[str, ...],
-    differ: Differ = changed_files,
-    baseline: frozenset[str] = frozenset(),
+    differ: Differ = changed_since,
+    baseline: Baseline | None = None,
 ) -> Callable[[VerifyState], Delta]:
     """The `guard` node: what the repairer did, measured against what it may do.
 
@@ -339,12 +339,20 @@ def make_guard(
     knows. Reading the working tree afterwards also catches a change made by a
     detour the profile never named.
 
-    `baseline` is what the working tree already looked like when the run
-    started. Everything in it is subtracted before a path is judged, because
-    this node answers "what did the repair agent do", not "what is dirty in
-    this tree" -- and without the baseline it answers the second question and
-    hands that answer over as if it were the first. The first real run ended on
-    exactly that: exit 4 naming a test file the agent had never opened.
+    Measured against the *commit* the run started on, not against the working
+    tree as it stands: a repairer that commits its edit leaves a clean tree
+    behind, and a guard reading only the tree would see nothing and wave the
+    edited test file through. Against a commit, a commit is as visible as an
+    unstaged change -- and `reset`, `rebase` and `amend` hide nothing either,
+    because the diff compares contents and not histories.
+
+    `baseline` is that commit, plus what the working tree already looked like
+    when the run started. Everything dirty in it is subtracted before a path is
+    judged, because this node answers "what did the repair agent do", not "what
+    is dirty in this tree" -- and without the baseline it answers the second
+    question and hands that answer over as if it were the first. The first real
+    run ended on exactly that: exit 4 naming a test file the agent had never
+    opened.
 
     The price runs the other way: a file that was already dirty and that the
     agent then edits as well stays invisible here. That is the right way round.
@@ -357,16 +365,25 @@ def make_guard(
     """
     if not test_paths:
         raise ValueError("guard needs test_paths to protect; configure [verify].tests")
+    if baseline is None:
+        raise ValueError(
+            "guard needs a baseline: without a commit to measure against it "
+            "cannot tell a repair from what the tree already looked like"
+        )
 
     def guard(_state: VerifyState) -> Delta:
         try:
-            reported = differ(root)
+            reported = differ(root, baseline.commit)
         except WorktreeError as error:
-            # A guard that cannot see the working tree must stop the run.
+            # A guard that cannot answer must stop the run, and there are
+            # now two ways of not answering: an unreadable working tree, and
+            # a baseline commit git cannot resolve -- a run resumed after
+            # the commit it started on was thrown away. Neither may be read
+            # as "nothing changed".
             raise FlowExit(_EXIT_TOUCHED_A_TEST, str(error)) from error
         # Subtracted before anything else, so `touched` -- which feeds the
         # stagnation check -- also counts only what this run produced.
-        touched = tuple(path for path in reported if path not in baseline)
+        touched = tuple(path for path in reported if path not in baseline.dirty)
         forbidden = tuple(path for path in touched if _is_protected(path, test_paths))
         if forbidden:
             raise FlowExit(
@@ -440,9 +457,10 @@ def assemble(
     config: Config,
     root: Path,
     check_runner: CheckRunner | None = None,
-    differ: Differ = changed_files,
+    differ: Differ = changed_since,
     max_rounds: int = 5,
-    baseline: frozenset[str] | None = None,
+    baseline: Baseline | None = None,
+    head: Callable[[Path], str] = head_commit,
 ) -> Graph[VerifyState]:
     """The graph, with everything it talks to passed in.
 
@@ -450,29 +468,35 @@ def assemble(
     scripted working tree in front of a real Runner: a flow is worth testing as
     a flow, not as four functions that were each fine on their own.
 
-    `baseline` is what the working tree looked like when the *run* started, and
-    it is what `guard` measures against. It is passed in rather than taken here
-    whenever the caller knows it: `build` reads it out of the run's recorded
-    options, so a resumed run keeps the baseline of its first start. Taking a
-    fresh one on resume would hand the repairer an alibi -- everything it had
-    already changed before the pause would be in the new baseline, including a
-    test file.
+    `baseline` is the commit the *run* started on together with what its
+    working tree already showed, and it is what `guard` measures against. It is
+    passed in rather than taken here whenever the caller knows it: `build`
+    reads it out of the run's recorded options, so a resumed run keeps the
+    baseline of its first start. Taking a fresh one on resume would hand the
+    repairer an alibi -- everything it had already changed before the pause
+    would be in the new baseline, including a test file.
 
     Reading it here is the fallback for a caller that has none, which is
-    `assemble` used directly and `build` on a run that recorded nothing.
+    `assemble` used directly and `build` on a run that recorded nothing. `head`
+    is a parameter so a test can count how often the baseline's commit is read
+    -- once per graph, never once per round -- and can say "git has no commit
+    here" without arranging a directory that happens to have none. Not the same
+    reason `differ` is one: the fallback below reads the tree through
+    `changed_files` directly and never asks `differ` at all.
     """
     if baseline is None:
         try:
-            baseline = frozenset(differ(root))
-        except WorktreeError:
-            # Only this error, not every FlowExit an injected differ might
-            # raise: an unreadable tree is the guard's finding to report, at its
-            # own turn and with its own message, while anything else a differ
-            # raises is a real failure and must not be swallowed here. Dying of
-            # it here would also kill the green case, which never reaches the
-            # guard at all -- and refusing to check a project because it is not
-            # under version control is not this flow's call to make.
-            baseline = frozenset()
+            baseline = Baseline(head(root), frozenset(changed_files(root)))
+        except WorktreeError as error:
+            # Refused, not fallen back on: a guard measuring against nothing is
+            # a guard that says yes to everything, and saying no is this flow's
+            # whole job. Raised here rather than in `build`, so a direct caller
+            # takes the same refusal the command line does -- and it lands
+            # before the first repair round rather than after it.
+            raise ValueError(
+                "verify-until-green needs a commit to measure the repairer "
+                f"against, and git gives none for {root}: {error}"
+            ) from error
 
     def report_red(state: VerifyState) -> Delta:
         raise FlowExit(_EXIT_STILL_RED, _why_red(state, max_rounds))

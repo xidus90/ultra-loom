@@ -16,7 +16,9 @@ from ultraloom.cli import (
     main,
     next_run_id,
 )
+from ultraloom.discovery import Baseline
 from ultraloom.model.port import Reply
+from ultraloom.worktree import head_commit
 
 A_FLOW = '''
 """A flow that finishes on its own."""
@@ -107,6 +109,22 @@ initial = Data()
 '''
 
 
+def init_repo(root: Path) -> None:
+    """A repository with one commit, which is what a baseline needs to exist.
+
+    `git init` alone leaves HEAD naming a branch that has no commit yet, and
+    a run started there records no baseline at all.
+    """
+    subprocess.run(("git", "init", "-q"), cwd=root, check=True)
+    (root / "seed.py").write_text("x = 0\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=root, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "first"),
+        cwd=root,
+        check=True,
+    )
+
+
 def write_flow(root: Path, name: str, body: str) -> None:
     target = root / ".ultraloom" / "flows" / f"{name}.py"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -184,6 +202,7 @@ def test_run_reports_a_pause_and_the_question(
 def test_resume_with_an_answer_finishes_the_run(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    init_repo(tmp_path)
     write_flow(tmp_path, "gated", A_GATED_FLOW)
     main(["run", "gated", "--root", str(tmp_path)])
     capsys.readouterr()
@@ -248,6 +267,7 @@ def test_show_of_an_unknown_run_id_fails(
 def test_replay_reaches_the_same_end_without_running_a_node(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    init_repo(tmp_path)
     write_flow(tmp_path, "smoke", A_FLOW)
     main(["run", "smoke", "--root", str(tmp_path)])
     before = (tmp_path / ".ultraloom" / "runs" / "0001.jsonl").read_text(encoding="utf-8")
@@ -265,6 +285,7 @@ def test_replay_of_a_paused_run_reports_that_it_never_finished(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The gate has no `ok` entry yet, so there is nothing to re-derive."""
+    init_repo(tmp_path)
     write_flow(tmp_path, "gated", A_GATED_FLOW)
     main(["run", "gated", "--root", str(tmp_path)])
     capsys.readouterr()
@@ -678,6 +699,7 @@ def _start_with_options(root: Path, name: str, body: str) -> None:
 
 def test_resume_sees_the_options_the_run_was_started_with(tmp_path: Path) -> None:
     """Otherwise a continuation would rebuild a different graph than it continues."""
+    init_repo(tmp_path)
     _start_with_options(tmp_path, "gated_options", A_GATED_FLOW_THAT_ECHOES_ITS_OPTIONS)
 
     code = main(["resume", "0001", "--answer", "yes", "--root", str(tmp_path)])
@@ -687,6 +709,7 @@ def test_resume_sees_the_options_the_run_was_started_with(tmp_path: Path) -> Non
 
 def test_replay_sees_the_options_the_run_was_started_with(tmp_path: Path) -> None:
     """A replay that rebuilt the graph from different options would not be a replay."""
+    init_repo(tmp_path)
     _start_with_options(tmp_path, "gated_options", A_GATED_FLOW_THAT_ECHOES_ITS_OPTIONS)
     assert main(["resume", "0001", "--answer", "yes", "--root", str(tmp_path)]) == 0
 
@@ -694,6 +717,7 @@ def test_replay_sees_the_options_the_run_was_started_with(tmp_path: Path) -> Non
 
 
 def test_a_run_started_without_options_is_continued_without_them(tmp_path: Path) -> None:
+    init_repo(tmp_path)
     write_flow(tmp_path, "gated_plain", A_GATED_FLOW_WITHOUT_OPTIONS)
     assert main(["run", "gated_plain", "--root", str(tmp_path), "--no-model"]) == 3
 
@@ -708,7 +732,7 @@ def _marker(root: Path, run_id: str = "0001") -> Path:
 
 def test_a_run_records_what_was_already_dirty(tmp_path: Path) -> None:
     """The baseline belongs to the run, so it has to survive the process."""
-    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    init_repo(tmp_path)
     (tmp_path / "dirty.py").write_text("x = 1\n", encoding="utf-8")
     write_flow(tmp_path, "plain", A_FLOW)
 
@@ -717,14 +741,98 @@ def test_a_run_records_what_was_already_dirty(tmp_path: Path) -> None:
     recorded = _recorded_run(tmp_path, "0001")
     assert recorded is not None
     _, options, baseline = recorded
-    assert baseline is not None and "dirty.py" in baseline
+    assert baseline is not None and "dirty.py" in baseline.dirty
     # And not among the options: a flow validates those, and this is not one.
     assert "baseline" not in options
 
 
+def test_a_run_records_the_commit_it_started_on(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "dirty.py").write_text("y = 2\n", encoding="utf-8")
+    write_flow(tmp_path, "plain", A_FLOW)
+
+    main(["run", "plain", "--root", str(tmp_path), "--no-model"])
+
+    recorded = _recorded_run(tmp_path, "0001")
+    assert recorded is not None
+    _, options, baseline = recorded
+    assert baseline is not None
+    assert baseline.commit == head_commit(tmp_path)
+    assert "dirty.py" in baseline.dirty
+    # Neither half is an option a flow validates.
+    assert "baseline" not in options
+    assert "baseline_commit" not in options
+
+
+def test_a_marker_without_a_baseline_commit_records_no_baseline(tmp_path: Path) -> None:
+    """A run started before this rule existed. The commit decides, and it is missing."""
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('plain\nbaseline="tests/a.py"\n', encoding="utf-8")
+
+    recorded = _recorded_run(tmp_path, "0001")
+
+    assert recorded == ("plain", {}, None)
+
+
+def test_a_marker_with_a_commit_and_no_dirty_paths_is_a_baseline(tmp_path: Path) -> None:
+    """The commit decides alone, so the two halves are not symmetric.
+
+    `_remember_run` always writes both lines -- on a clean tree the `baseline=`
+    one is empty rather than absent -- so this marker is a hand-written or
+    hand-edited one. It is read all the same: the commit is a reference point
+    the guard can measure against, and an absent dirty set means the same as an
+    empty one. Nothing else covers this arm; `dirty or ""` is no branch to
+    coverage.py.
+    """
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('plain\nbaseline_commit="abc123"\n', encoding="utf-8")
+
+    recorded = _recorded_run(tmp_path, "0001")
+
+    assert recorded == ("plain", {}, Baseline("abc123", frozenset()))
+
+
+def test_resume_refuses_a_run_that_recorded_no_baseline(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A run that recorded no commit is refused rather than measured by half.
+
+    Filling the commit in now would hand the repairer everything it
+    committed before the pause as its starting state.
+    """
+    write_flow(tmp_path, "plain", A_FLOW)
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("plain\n", encoding="utf-8")
+    (tmp_path / ".ultraloom" / "runs" / "0001.jsonl").write_text("", encoding="utf-8")
+
+    code = main(["resume", "0001", "--root", str(tmp_path)])
+
+    assert code == 1
+    assert "started before" in capsys.readouterr().err
+
+
+def test_a_run_outside_a_repository_records_no_baseline(tmp_path: Path) -> None:
+    """No commit, no baseline -- and the flow that needs one says so itself."""
+    write_flow(tmp_path, "plain", A_FLOW)
+
+    main(["run", "plain", "--root", str(tmp_path), "--no-model"])
+
+    recorded = _recorded_run(tmp_path, "0001")
+    assert recorded is not None and recorded[2] is None
+
+
 def test_a_resumed_run_keeps_the_baseline_of_its_first_start(tmp_path: Path) -> None:
     """Read back, never taken again -- the whole point of recording it."""
-    _remember_run(tmp_path, "0001", "plain", {"checks": "edit"}, frozenset({"tests/a.py"}))
+    _remember_run(
+        tmp_path,
+        "0001",
+        "plain",
+        {"checks": "edit"},
+        Baseline("abc", frozenset({"tests/a.py"})),
+    )
     subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
     # Something the repairer could have done after the pause. Taking a fresh
     # baseline here would swallow it; reading the recorded one must not.
@@ -732,26 +840,30 @@ def test_a_resumed_run_keeps_the_baseline_of_its_first_start(tmp_path: Path) -> 
 
     recorded = _recorded_run(tmp_path, "0001")
 
-    assert recorded == ("plain", {"checks": "edit"}, frozenset({"tests/a.py"}))
+    assert recorded == (
+        "plain",
+        {"checks": "edit"},
+        Baseline("abc", frozenset({"tests/a.py"})),
+    )
 
 
 def test_a_baseline_of_many_paths_stays_one_marker_line(tmp_path: Path) -> None:
     """A value holding newlines is exactly why the values are encoded."""
     paths = frozenset({"a.py", "b/c.py", "tests/d.py"})
-    _remember_run(tmp_path, "0001", "plain", {}, paths)
+    _remember_run(tmp_path, "0001", "plain", {}, Baseline("abc", paths))
 
-    assert len(_marker(tmp_path).read_text(encoding="utf-8").splitlines()) == 2
+    assert len(_marker(tmp_path).read_text(encoding="utf-8").splitlines()) == 3
     recorded = _recorded_run(tmp_path, "0001")
-    assert recorded is not None and recorded[2] == paths
+    assert recorded is not None and recorded[2] == Baseline("abc", paths)
 
 
 def test_a_clean_tree_is_recorded_as_an_empty_baseline_not_as_none(tmp_path: Path) -> None:
     """ "Nothing was dirty" and "the run recorded nothing" are different answers."""
-    _remember_run(tmp_path, "0001", "plain", {}, frozenset())
+    _remember_run(tmp_path, "0001", "plain", {}, Baseline("abc", frozenset()))
 
     recorded = _recorded_run(tmp_path, "0001")
 
-    assert recorded is not None and recorded[2] == frozenset()
+    assert recorded is not None and recorded[2] == Baseline("abc", frozenset())
 
 
 def test_a_marker_from_before_the_baseline_existed_still_reads(tmp_path: Path) -> None:
@@ -810,6 +922,7 @@ def test_resume_of_a_run_that_is_not_waiting_is_refused(
     A flow without any gate at all -- verify-until-green is one -- would
     otherwise report exit 0 having verified nothing.
     """
+    init_repo(tmp_path)
     write_flow(tmp_path, "smoke", A_FLOW)
     main(["run", "smoke", "--root", str(tmp_path)])
     capsys.readouterr()
