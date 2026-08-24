@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.worktree import WorktreeError, changed_files
+from ultraloom.worktree import WorktreeError, changed_files, head_commit
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -190,3 +190,54 @@ def test_a_root_below_an_unignored_directory_is_answered(tmp_path: Path) -> None
     (package / "a.py").write_text("x = 1\n", encoding="utf-8")
 
     assert changed_files(package) == ("a.py",)
+
+
+def test_head_commit_is_the_sha_of_head(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+
+    sha = head_commit(repo)
+
+    assert len(sha) == 40
+    assert sha == subprocess.run(
+        ("git", "rev-parse", "HEAD"), cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def test_head_commit_reads_a_detached_head(tmp_path: Path) -> None:
+    """A detached HEAD is no special case: the diff needs a commit, not a branch."""
+    repo = _repo(tmp_path)
+    sha = head_commit(repo)
+    subprocess.run(("git", "checkout", "-q", "--detach", sha), cwd=repo, check=True)
+
+    assert head_commit(repo) == sha
+
+
+def test_a_repository_without_a_commit_has_no_head(tmp_path: Path) -> None:
+    """`git init` and nothing else: HEAD names a branch that does not exist yet."""
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+
+    with pytest.raises(WorktreeError):
+        head_commit(tmp_path)
+
+
+def test_a_directory_outside_any_repository_has_no_head(tmp_path: Path) -> None:
+    outside = tmp_path / "plain"
+    outside.mkdir()
+
+    with pytest.raises(WorktreeError):
+        head_commit(outside)
+
+
+def test_head_commit_refuses_a_root_git_ignores(tmp_path: Path) -> None:
+    """A project copy parked below an ignored path answers with the *outer* HEAD.
+
+    Measuring against that is worse than not measuring: every file of the copy
+    then reads as a change the repairer made.
+    """
+    repo = _repo(tmp_path)
+    (repo / ".gitignore").write_text("copy/\n", encoding="utf-8")
+    copy = repo / "copy"
+    copy.mkdir()
+
+    with pytest.raises(WorktreeError):
+        head_commit(copy)

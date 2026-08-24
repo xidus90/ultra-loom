@@ -78,6 +78,25 @@ def changed_files(root: Path) -> tuple[str, ...]:
     return tuple(path for path in paths if not path.startswith(RUN_DIR + "/"))
 
 
+def head_commit(root: Path) -> str:
+    """The commit a run starts on, as git spells it.
+
+    `rev-parse HEAD` and not `--short`: the answer travels in a run marker and
+    is read back rounds later, and an abbreviated SHA is only unique for as
+    long as the repository stays the size it was.
+
+    Three ways of having no answer, all of them `WorktreeError`: no repository,
+    a repository without a commit -- `git init` leaves HEAD naming a branch
+    that does not exist yet -- and a root git ignores. The last one is why
+    `_refuse_if_ignored` is asked here at all: such a directory *is* inside a
+    repository, so `rev-parse` answers readily with the surrounding
+    repository's HEAD. Measuring against that is worse than not measuring, as
+    every file of the parked copy then reads as the repairer's doing.
+    """
+    _refuse_if_ignored(root)
+    return _git(root, "rev-parse", "HEAD").strip()
+
+
 def _run(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     """One git call below `root`, for the callers that read the return code."""
     try:
