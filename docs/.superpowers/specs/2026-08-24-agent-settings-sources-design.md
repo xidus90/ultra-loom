@@ -151,7 +151,7 @@ an der Existenzprüfung zu sterben.
 | Eingabe | Meldung |
 | --- | --- |
 | kein `list[str]` | `[agent].settings must be a list of strings` |
-| zwei Pfade | `[agent].settings names two files (a, b); the SDK loads one` |
+| zwei Pfade | `[agent].settings names 2 files (a.json, b.json); the SDK loads one` |
 | Pfad existiert nicht | `[agent].settings: "x" is neither "user"/"project"/"local" nor an existing file under <root>` |
 | `"managed"` | `managed settings always apply and cannot be selected` |
 
@@ -189,7 +189,7 @@ Der Weg durch `runner.py`, den `mcp_servers` nimmt, entfällt.
 
 ## Was gemessen wurde
 
-Vier Läufe am 24.08.2026 gegen ein Wegwerf-Repo: eine `.claude/settings.json`,
+Fünf Läufe am 24.08.2026 gegen ein Wegwerf-Repo: eine `.claude/settings.json`,
 deren `SessionStart`, `PostToolUse` (Matcher `Write|Edit`) und `Stop` nichts tun
 außer ihren Namen in eine Markerdatei zu schreiben, eine Datei mit dem Wort
 `TODO`, und ein Auftrag, der den Reparateur zwingt, sie mit `Edit` zu ändern.
@@ -202,8 +202,9 @@ Die Optionen sind die, die `_options_for` baut. Der Prompt der ersten Runde ist
 | 2 | `setting_sources=["project"]` | alle drei | **4 901** |
 | 3 | wie 2, plus `mcp_servers={}`, `strict_mcp_config=True` | alle drei | **4 901** |
 | 4 | wie 1, aber ohne `tools`-Deckel | alle drei | 26 358 |
+| 5 | wie 2, aber `setting_sources=[]` | **keiner** | **3 793** |
 
-**`PostToolUse` läuft.** In allen vier Läufen. Der SDK-Pfad führt den Hook aus,
+**`PostToolUse` läuft.** In den Läufen 1 bis 4. Der SDK-Pfad führt den Hook aus,
 und die Spec sagt deshalb *laufen* zu, nicht nur *geladen*. Was in Lauf 0005
 fehlte, lag nicht am SDK -- entweder zeigte das Protokoll den Hook nicht, oder
 spaces `post_edit.py` starb, bevor er etwas tat. Das ist ein Verdacht für
@@ -217,6 +218,15 @@ ungesucht dazu.
 
 **Die MCP-Server kosten nichts.** Lauf 2 und 3 unterscheiden sich nur in ihnen
 und teilen einen byte-identischen Prompt: 4 901 gelesen, nichts neu erzeugt.
+
+**Die leere Liste ist wirklich Isolation.** Lauf 5 schrieb keinen einzigen
+Marker -- `SessionStart`, `PostToolUse` und `Stop` fehlten alle drei, wo die
+Läufe 1 bis 4 je alle drei schrieben --, und der Prompt der ersten Runde fiel
+von 4 901 auf 3 793 Token. Die verlangte Änderung geschah trotzdem. `[]` ist
+also kein Leerlauf, sondern kostet die Hooks des Projekts selbst; für ein
+Godot-Projekt heißt das, auf die `override.cfg` zu verzichten, die der
+`SessionStart`-Hook schreibt und die der erste Abschnitt dieses Entwurfs als
+Voraussetzung führt.
 
 **Der `tools`-Deckel ist das teuerste Stück Sparsamkeit im System.** Lauf 4
 zeigt, was ohne ihn im Prompt stünde: 26 358 statt 4 901, Faktor 5,4. Er ist in

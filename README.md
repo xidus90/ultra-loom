@@ -139,8 +139,10 @@ settings always apply and nothing here overrides them.
 
 `[agent].settings` covers settings files and nothing else. The MCP servers a
 machine configures in `~/.claude.json` arrive by a different route and are
-unaffected -- they cost no tokens either, because `[agent].mcp_servers` and the
-tool profile in `tools.py` keep them out of the prompt.
+unaffected -- they cost no tokens either, because the `tools` cap keeps them
+out of the prompt: the adapter names the built-in tools exhaustively, and what
+it does not name never reaches the model. `[agent].mcp_servers` keeps nothing
+out; it is an allow-list that only ever widens `allowed_tools`.
 
 Which wheel of `claude-agent-sdk` gets installed decides whether the agent
 path runs at all, so the extra pins one exact version. The wheels for a

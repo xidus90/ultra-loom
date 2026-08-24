@@ -360,11 +360,14 @@ def test_every_name_the_adapter_uses_exists_on_the_installed_sdk(tmp_path: Path)
     )
 
     # Names are not enough here either: a source the SDK does not know would be
-    # passed straight through to the CLI and change which files load.
+    # passed straight through to the CLI and change which files load. The three
+    # words are spelled out rather than read from config or from the option
+    # shape above -- that shape only ever carries the default `["project"]`, so
+    # reading it would leave "user" and "local" unguarded, and importing the
+    # words from ultraloom would compare the codebase against itself.
     known = set(typing.get_args(sdk.types.SettingSource))
-    assert set(options["setting_sources"]) <= known, (
-        f"the SDK no longer knows {sorted(set(options['setting_sources']) - known)}"
-    )
+    reserved = {"user", "project", "local"}
+    assert reserved <= known, f"the SDK no longer knows {sorted(reserved - known)}"
 
     # Names are not enough. An unrecognised permission mode is the difference
     # between "denied at once" and whatever the SDK falls back to, and the

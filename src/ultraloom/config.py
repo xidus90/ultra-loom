@@ -113,7 +113,10 @@ class Config:
             # Here and not in load_config, so a Config built by hand carries the
             # same assurance. The alternative is the failure this key exists to
             # remove: a run that starts, spends 3.4 seconds per agent node, and
-            # reports a fault of the SDK's.
+            # reports a fault of the SDK's. Deliberately not symmetric with
+            # settings_file above, whose existence load_config alone checks: the
+            # adapter takes that path as plain data, so a hand-built Config may
+            # legitimately name a file that is not there.
             raise ConfigError(f"cli_path is not a file: {self.cli_path}")
 
 

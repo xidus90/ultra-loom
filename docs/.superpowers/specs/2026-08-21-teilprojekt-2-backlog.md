@@ -201,6 +201,12 @@ Liegenlassens: ein `uv sync` auf einer frischen Maschine kann den Agentenpfad
 ohne Zutun stilllegen, und die Meldung zeigt auf cmd.exe statt auf die
 Installation.
 
+**ERLEDIGT** (zum Punkt darunter) — umgesetzt in
+[2026-08-24-agent-settings-sources-design.md](2026-08-24-agent-settings-sources-design.md).
+Die Richtungsfrage ist entschieden: `[agent].settings` benennt die Quellen,
+der Standard `["project"]` erbt genau die versionierte Projektdatei, und der
+Adapter übergibt das Feld immer statt es dem SDK zu überlassen.
+
 **`setting_sources` bleibt ungesetzt.** Der Adapter (`model/agent_sdk.py`)
 übergibt das Feld nicht, also gilt der Standard des SDK. Gemessen in space heißt
 das: die `SessionStart`- und `Stop`-Hooks des Projekts liefen im Reparaturlauf
@@ -217,10 +223,16 @@ danebenstehen ist es nicht.
 Dazu gehört, dass das SDK dem Reparateur die **global konfigurierten
 MCP-Server des Benutzers** anbietet. In Lauf 0005 versuchte er,
 `mcp__context-mode__ctx_execute` für einen eigenen gdlint-Lauf zu benutzen, und
-wurde von `permission_mode: "dontAsk"` abgewiesen. Die Sperre hält also — aber
-die Werkzeuge stehen im Prompt, kosten Token und in diesem Fall eine
-Werkzeugrunde. `[agent].mcp_servers` sagt heute, was *zusätzlich* erlaubt ist,
-und nichts darüber, was ohnehin schon da ist.
+wurde von `permission_mode: "dontAsk"` abgewiesen. Die Sperre hält also, und
+die verlorene Werkzeugrunde war real — aber nicht aus dem Grund, der hier
+zuerst stand. Nachgemessen am 24.08.2026: zwei Läufe, die sich einzig in den
+geerbten MCP-Servern unterschieden, hatten einen byte-identischen Prompt. Die
+Serverdefinitionen stehen gar nicht im Prompt, weil ultralooms `tools`-Deckel
+die eingebauten Werkzeuge erschöpfend aufzählt und nichts anderes durchlässt.
+Die verlorene Runde entstand anders: das Modell rief ein Werkzeug, das ihm nie
+angeboten worden war, und die Rechteschicht wies es ab — dagegen hilft keine
+Ladeliste. `[agent].mcp_servers` sagt heute, was *zusätzlich* erlaubt ist, und
+nichts darüber, was ohnehin schon da ist.
 
 ## Was die Prüfkette über Werkzeuge annimmt
 
