@@ -224,7 +224,7 @@ stellt vier Regeln auf:
 den Arbeitsbaum allein. `changed_since(root, base)` vereinigt dazu zwei Fragen,
 weil keine von beiden allein antwortet:
 
-- `git diff --name-only --no-renames <base>` vergleicht den Baum von `base`
+- `git diff --name-only -z --no-renames <base>` vergleicht den Baum von `base`
   gegen den auf der Platte und sieht damit alles an verfolgten Dateien —
   Committetes wie Ungestagtes —, ist aber blind für eine unverfolgte Datei;
 - `git status --porcelain -z -uall` sieht die unverfolgte Datei, liest eine
@@ -239,13 +239,22 @@ Inhalte vergleicht und keine Historien.
 
 `--no-renames`, damit eine Umbenennung als alter *und* als neuer Pfad
 zurückkommt; sonst meldete git das Paar als einen Eintrag, und ein beiseite
-geschobener Test wäre ein Pfad, den die Wache nie gegen ihre Liste hält. Beim
-Status steht `-uall`, weil die Vorgabe ein ganzes unverfolgtes Verzeichnis zu
-einem Eintrag zusammenzieht, der auf keine Datei zeigt, und `-z`, weil ein Pfad
-mit Nicht-ASCII sonst zitiert zurückkommt. Eine Umbenennung meldet `status` als
-*zwei* Felder, von denen nur das erste das Drei-Zeichen-Präfix trägt; schnitte
-man auch vom zweiten drei Zeichen ab, liefe ein beiseite umbenannter Test an der
-Wache vorbei.
+geschobener Test wäre ein Pfad, den die Wache nie gegen ihre Liste hält.
+
+`-z` steht an **beiden** Fragen, und aus demselben Grund: `core.quotePath` ist
+standardmäßig an, also gibt git jeden Pfad mit einem Nicht-ASCII-Byte
+C-zitiert zurück — `"tests/test_gr\303\274n.py"`. Dessen erstes Segment heißt
+`"tests` und nicht `tests`, damit trifft ihn kein konfigurierter Pfad, er
+überlebt weder den Präfix-Schnitt noch den `RUN_DIR`-Ausschluss, und die Wache
+lässt ihn durch. Das galt eine Zeit lang nur für den Status; der Diff fragte
+ohne `-z` und hatte damit genau diese Lücke, obwohl `docs/abläufe/` im eigenen
+Baum liegt und Umlaute in Pfaden also nicht exotisch sind.
+
+Beim Status steht zusätzlich `-uall`, weil die Vorgabe ein ganzes unverfolgtes
+Verzeichnis zu einem Eintrag zusammenzieht, der auf keine Datei zeigt. Und eine
+Umbenennung meldet `status` als *zwei* Felder, von denen nur das erste das
+Drei-Zeichen-Präfix trägt; schnitte man auch vom zweiten drei Zeichen ab, liefe
+ein beiseite umbenannter Test an der Wache vorbei.
 
 Pfade werden segmentweise verglichen (`PurePosixPath`), damit `tests/` nicht
 `testsuite/thing.py` einfängt, und die Groß-/Kleinschreibung wird exakt
@@ -821,9 +830,9 @@ aus dem die Grundlinie entsteht, und `changed_since`, das `guard` liest. Und
 erst nachdem die Pfade auf `root` bezogen sind, weil nur diese Schreibweise
 passt. Der Rest von `.ultraloom/` bleibt sichtbar: `config.toml` trägt die
 Schwellen, gegen die geprüft wird, und wer daran ändert, ist genau der Fall,
-für den `guard` da ist. Drei Tests in `test_worktree.py`
-halten die Grenze, einer in `tests/flows/` fährt den gemeldeten Fall mit dem
-echten `differ` und `.ultraloom/` unter den geschützten Pfaden.
+für den `guard` da ist. Drei Tests in `test_worktree.py` halten die Grenze,
+einer in `tests/flows/` fährt den gemeldeten Fall mit dem echten `differ` und
+`.ultraloom/` unter den geschützten Pfaden.
 
 ## Der Lauf, der das Preset erwischte: ultraloom, 23.08.2026
 
