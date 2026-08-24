@@ -13,9 +13,21 @@ from ultraloom.discovery import (
     FlowContext,
     FlowLoadError,
     FlowNotFoundError,
+    LoadedFlow,
     find_flow,
     list_flows,
 )
+from ultraloom.graph import END, CodeNode, Graph
+
+
+def test_a_loaded_flow_declares_no_baseline_need_by_default() -> None:
+    """Flows that never measure against a commit owe no declaration."""
+    flow: Graph[object] = Graph("plain", start="only")
+    flow.add(CodeNode("only", lambda _state: {}))
+    flow.edge("only", END)
+
+    assert LoadedFlow(flow, object()).needs_baseline is False
+
 
 A_FLOW = '''
 """A minimal flow for tests."""

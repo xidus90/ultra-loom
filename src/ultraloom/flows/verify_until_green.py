@@ -577,7 +577,11 @@ def build(context: FlowContext) -> LoadedFlow:
     # which Graph -- being mutable -- is invariant in. The cast is the erasure
     # discovery performs on every flow it loads; every node in this graph still
     # only ever sees a VerifyState.
-    return LoadedFlow(cast(Graph[object], graph), VerifyState(kinds=kinds))
+    # The declaration is why `build` takes a baseline rather than inventing
+    # one on resume: the flow measures repairs against the commit the run
+    # started on, so a start without one is refused before anything of the
+    # run exists -- not allowed to pause and then refused at every answer.
+    return LoadedFlow(cast(Graph[object], graph), VerifyState(kinds=kinds), needs_baseline=True)
 
 
 def _kinds_from(requested: str | None, config: Config) -> tuple[str, ...]:

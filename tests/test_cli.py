@@ -558,6 +558,60 @@ def test_run_builds_a_flow_that_defines_build(
     assert "done" in capsys.readouterr().out
 
 
+A_GUARDED_FLOW = '''
+"""A flow that measures its repairs against the commit it starts from."""
+
+from dataclasses import dataclass
+
+from ultraloom.discovery import LoadedFlow
+from ultraloom.graph import END, CodeNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Data:
+    root: str = ""
+
+
+def build(context):
+    flow = Graph("guarded", start="mark")
+    flow.add(CodeNode("mark", lambda _d: {"root": str(context.root)}))
+    flow.edge("mark", END)
+    return LoadedFlow(flow, Data(root=str(context.config.root)), needs_baseline=True)
+'''
+
+
+def test_a_guarded_flow_refuses_to_start_outside_a_repository(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A run that every resume would refuse must not be allowed to begin.
+
+    Started outside a repository there is no commit to measure against, so
+    the pause at a gate would succeed and every later answer would fail --
+    begun only to be unfinishable.
+    """
+    write_flow(tmp_path, "guarded", A_GUARDED_FLOW)
+
+    exit_code = main(["run", "guarded", "--root", str(tmp_path), "--no-model"])
+
+    assert exit_code == 1
+    assert "repository" in capsys.readouterr().err
+    # Refusing the start leaves none of the run behind.
+    for name in _run_files("0001"):
+        assert not (tmp_path / name).exists()
+
+
+def test_an_unguarded_flow_still_starts_outside_a_repository(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No baseline, no need: a plain flow outside a repository runs as before."""
+    write_flow(tmp_path, "plain", A_FLOW)
+
+    exit_code = main(["run", "plain", "--root", str(tmp_path), "--no-model"])
+
+    assert exit_code == 0
+    assert "done" in capsys.readouterr().out
+
+
 A_FLOW_THAT_ECHOES_ITS_OPTIONS = '''
 """A flow that asserts what the command line handed it."""
 

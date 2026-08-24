@@ -51,6 +51,32 @@ def _config() -> Config:
     return Config(root=Path("."), test_paths=("tests/",))
 
 
+def test_build_declares_that_it_measures_against_a_commit(tmp_path: Path) -> None:
+    """The declaration is what lets the CLI refuse a doomed start early."""
+    context = FlowContext(
+        root=tmp_path,
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        baseline=Baseline("abc", frozenset()),
+    )
+
+    loaded = build(context)
+
+    assert loaded.needs_baseline is True
+
+
+def test_assemble_refuses_to_guard_without_any_commit(tmp_path: Path) -> None:
+    """No baseline handed in and git gives none: refused, not half-guarded."""
+    outside = tmp_path / "plain"
+    outside.mkdir()
+
+    with pytest.raises(ValueError, match="commit"):
+        assemble(_config(), outside, max_rounds=1, head=lambda _root: _fail(outside))
+
+
+def _fail(root: Path) -> str:
+    raise WorktreeError(f"git gives nothing for {root}")
+
+
 def _runner(outcomes: Mapping[str, bool]) -> CheckRunner:
     def run(kind: str, _config: Config, _alongside: frozenset[str] = frozenset()) -> CheckResult:
         ok = outcomes[kind]

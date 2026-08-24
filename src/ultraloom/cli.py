@@ -291,6 +291,19 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
             print(str(error), file=sys.stderr)
             return _EXIT_FAIL
 
+    # A start-time refusal, and so only on `run`: on resume and replay the
+    # marker's recorded baseline decides, and its refusal already stands.
+    if args.command == "run" and taken is None and loaded.needs_baseline:
+        # Before anything of the run exists. A flow measuring against its
+        # starting commit, begun where git gives none, pauses at its gate
+        # and then refuses every resume -- begun only to be unfinishable.
+        print(
+            f"{flow_name} measures its repairs against the commit it starts "
+            f"from, and git gives {root} none; start it inside a repository",
+            file=sys.stderr,
+        )
+        return _EXIT_FAIL
+
     if args.command == "run":
         _remember_run(root, run_id, flow_name, options, taken)
     runner: Runner[object] = Runner(

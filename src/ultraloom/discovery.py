@@ -81,6 +81,11 @@ class LoadedFlow:
 
     graph: Graph[object]
     initial: object
+    # Declared by the flow at load time, not guessed by the CLI: whether its
+    # nodes measure repairs against the commit the run started on. Such a
+    # flow is refused where git gives no commit, because a run begun without
+    # one would pause and then refuse every resume.
+    needs_baseline: bool = False
 
 
 class FlowNotFoundError(LookupError):
