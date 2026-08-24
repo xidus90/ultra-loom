@@ -54,10 +54,16 @@ braucht es weiter für die Schmutzmenge):
   HEAD` liefert dort denselben SHA wie sonst, und der Diff braucht keinen
   Zweignamen.
 - `changed_since(root, base) -> tuple[str, ...]` — die Vereinigung aus
-  `git diff --name-only --no-renames <base>` (verfolgte Dateien, das
-  Committete eingeschlossen) und den untracked-Pfaden aus dem heutigen
-  `status`. `--no-renames`, damit eine Umbenennung als alter *und* neuer
-  Pfad erscheint statt als ein Feld, das der guard erst deuten müsste.
+  `git diff --name-only -z --no-renames <base>` (verfolgte Dateien, das
+  Committete eingeschlossen) und der **ganzen** heutigen `status`-Antwort.
+  Gebaut ist die zweite Hälfte nicht auf die untracked-Pfade eingeschränkt,
+  wie hier ursprünglich stand: verfolgte Änderungen stehen ohnehin schon im
+  Diff, die Vereinigung ändert sich dadurch nicht, und eine Filterung wäre
+  eine zweite Deutung der `status`-Felder neben `_parse_status`.
+  `--no-renames`, damit eine Umbenennung als alter *und* neuer
+  Pfad erscheint statt als ein Feld, das der guard erst deuten müsste. `-z`
+  an beiden Fragen, weil `core.quotePath` sonst jeden Pfad mit Nicht-ASCII
+  C-zitiert zurückgibt und ein zitierter Pfad keinen geschützten trifft.
 
 Beide Antworten laufen durch dieselbe `_prefix`-Umrechnung und denselben
 `RUN_DIR`-Ausschluss wie `changed_files` heute. Eine Relokation, nicht zwei:
@@ -97,10 +103,17 @@ wogegen gemessen wird, statt ihn hinter einem Closure zu verstecken.
 
 ### Absage ohne Basis-Commit
 
-In `verify_until_green.build`, nicht in der CLI. Ein Flow ohne guard braucht
+Im Ablauf, nicht in der CLI. Ein Flow ohne guard braucht
 keinen Basis-Commit, und die CLI weiß nicht, welcher Flow einen braucht.
 `_baseline` in der CLI nimmt den SHA auf, wenn es einen gibt, und bleibt
-sonst ohne. Die Absage fällt damit einmal, an der Stelle, die sie begründen
+sonst ohne.
+
+Gebaut ist sie in `assemble` und nicht, wie hier ursprünglich stand, in
+`build`. Das ist die bessere Stelle: `assemble` ist ohne `build` aufrufbar —
+die Tests des Ablaufs tun genau das —, und in `build` bekäme ein solcher
+Aufrufer die Absage nicht, sondern einen guard, der gegen nichts misst und
+damit zu allem ja sagt. In `assemble` fällt sie für jeden Weg in den Graphen
+hinein, `build` eingeschlossen. Die Absage fällt damit einmal, an der Stelle, die sie begründen
 kann, und **vor** der ersten Reparaturrunde statt danach — heute läuft ein
 Projekt ohne Repository erst eine ganze Runde und stirbt dann im guard an
 einem `WorktreeError`.
