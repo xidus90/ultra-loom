@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.worktree import WorktreeError, changed_files, head_commit
+from ultraloom.worktree import RUN_DIR, WorktreeError, changed_files, changed_since, head_commit
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -241,3 +241,109 @@ def test_head_commit_refuses_a_root_git_ignores(tmp_path: Path) -> None:
 
     with pytest.raises(WorktreeError):
         head_commit(copy)
+
+
+def test_changed_since_sees_a_commit_the_working_tree_no_longer_shows(tmp_path: Path) -> None:
+    """The blind spot this whole change exists for."""
+    repo = _repo(tmp_path)
+    base = head_commit(repo)
+    (repo / "tests" / "test_cli.py").write_text("x = 2\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "sneaky"),
+        cwd=repo,
+        check=True,
+    )
+
+    assert changed_files(repo) == ()  # the tree is clean -- and that is the point
+    assert changed_since(repo, base) == ("tests/test_cli.py",)
+
+
+def test_changed_since_reports_an_untracked_file(tmp_path: Path) -> None:
+    """`diff` cannot see one, so the status answer is unioned in."""
+    repo = _repo(tmp_path)
+    base = head_commit(repo)
+    (repo / "new.py").write_text("z = 3\n", encoding="utf-8")
+
+    assert changed_since(repo, base) == ("new.py",)
+
+
+def test_changed_since_names_both_sides_of_a_rename(tmp_path: Path) -> None:
+    """--no-renames, so a test moved out of the way cannot walk past the guard."""
+    repo = _repo(tmp_path)
+    base = head_commit(repo)
+    subprocess.run(("git", "mv", "tests/test_cli.py", "src_test.py"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "moved"),
+        cwd=repo,
+        check=True,
+    )
+
+    assert set(changed_since(repo, base)) == {"tests/test_cli.py", "src_test.py"}
+
+
+def test_changed_since_reports_a_path_once(tmp_path: Path) -> None:
+    """Committed *and* edited again: diff and status both name it."""
+    repo = _repo(tmp_path)
+    base = head_commit(repo)
+    (repo / "a.c").write_text("int one;\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "one"),
+        cwd=repo,
+        check=True,
+    )
+    (repo / "a.c").write_text("int two;\n", encoding="utf-8")
+
+    assert changed_since(repo, base) == ("a.c",)
+
+
+def test_changed_since_leaves_out_the_run_directory(tmp_path: Path) -> None:
+    """ultraloom's own journal is not the repairer's doing."""
+    repo = _repo(tmp_path)
+    base = head_commit(repo)
+    runs = repo / RUN_DIR
+    runs.mkdir(parents=True)
+    (runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
+
+    assert changed_since(repo, base) == ()
+
+
+def test_changed_since_answers_relative_to_root_in_a_monorepo(tmp_path: Path) -> None:
+    """git answers repository-relative whatever the working directory is."""
+    repo = _repo(tmp_path)
+    package = repo / "package"
+    (package / "tests").mkdir(parents=True)
+    (package / "tests" / "test_x.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "package"),
+        cwd=repo,
+        check=True,
+    )
+    base = head_commit(package)
+    (package / "tests" / "test_x.py").write_text("x = 2\n", encoding="utf-8")
+    (repo / "gone.py").write_text("elsewhere\n", encoding="utf-8")
+
+    # Relative to `root`, and nothing from outside it: that is not this
+    # project's change.
+    assert changed_since(package, base) == ("tests/test_x.py",)
+
+
+def test_changed_since_refuses_a_root_git_ignores(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    base = head_commit(repo)
+    (repo / ".gitignore").write_text("copy/\n", encoding="utf-8")
+    copy = repo / "copy"
+    copy.mkdir()
+
+    with pytest.raises(WorktreeError):
+        changed_since(copy, base)
+
+
+def test_changed_since_refuses_a_base_git_does_not_know(tmp_path: Path) -> None:
+    """An unresolvable base must never read as "nothing changed"."""
+    repo = _repo(tmp_path)
+
+    with pytest.raises(WorktreeError):
+        changed_since(repo, "0" * 40)

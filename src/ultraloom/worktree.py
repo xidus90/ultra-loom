@@ -65,8 +65,17 @@ def changed_files(root: Path) -> tuple[str, ...]:
     # would otherwise carry the call past this point and be dropped by the
     # relocation below -- an empty answer again, and this time an unchecked one.
     _refuse_if_ignored(root)
-    output = _status(root)
-    paths = _parse_status(output)
+    return _relocate(root, _parse_status(_status(root)))
+
+
+def _relocate(root: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Repository-relative paths as a caller below `root` spells them.
+
+    Anything outside `root` is dropped -- it is not this project's change --
+    and so is everything below `RUN_DIR`, which is ultraloom's own doing and
+    never the repairer's. Both callers go through here, because two spellings
+    of the same path would end up being compared against each other.
+    """
     if not paths:
         # Nothing to relocate, so the second git call is not worth its process.
         return paths
@@ -76,6 +85,36 @@ def changed_files(root: Path) -> tuple[str, ...]:
     # After the relocation, so the comparison is against the spelling a caller
     # below `root` would use rather than the repository-relative one.
     return tuple(path for path in paths if not path.startswith(RUN_DIR + "/"))
+
+
+def changed_since(root: Path, base: str) -> tuple[str, ...]:
+    """Every path that differs between `base` and the working tree, below `root`.
+
+    The union of two questions, because neither answers alone: `diff` sees what
+    was committed since `base` but is blind to an untracked file, and `status`
+    sees the untracked file but reads a committed change as a clean tree. That
+    second blindness is why this function exists -- a repairer that commits its
+    edit leaves `status` with nothing to report, and the guard built on it then
+    lets an edited test file through.
+
+    `--no-renames`, so a rename comes back as its old *and* its new path. Git
+    would otherwise report the pair as one entry, and a test moved out of the
+    way would be a path the guard never compares against its protected list.
+
+    Content-based, so a `reset`, a `rebase` or an `amend` hides nothing: this
+    compares the tree of `base` against the tree on disk, not two histories.
+
+    An unresolvable `base` is a `WorktreeError` and never an empty answer, for
+    the reason every refusal in this module has: a question git cannot answer
+    must not be read as "nothing changed".
+    """
+    _refuse_if_ignored(root)
+    diff = _git(root, "diff", "--name-only", "--no-renames", base)
+    committed = tuple(line for line in diff.splitlines() if line)
+    reported = _parse_status(_status(root))
+    # One call over both answers rather than one per answer: `_relocate` asks
+    # git for the prefix, and that process is the same for either spelling.
+    return tuple(sorted(set(_relocate(root, committed + reported))))
 
 
 def head_commit(root: Path) -> str:
