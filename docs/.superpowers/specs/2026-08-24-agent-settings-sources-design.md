@@ -56,8 +56,17 @@ Der Backlog nennt im selben Absatz, dass das SDK dem Reparateur die global
 konfigurierten MCP-Server anbietet, und liest beides als eine Frage. Es ist
 zweierlei: `setting_sources` deckt ausschließlich die drei `settings.json`, die
 MCP-Server stehen in `~/.claude.json` und kommen über einen anderen Weg. Diese
-Entscheidung räumt die Werkzeugrunde aus Lauf 0005 **nicht** ab. Der Punkt
-bleibt offen und gehört gesondert entschieden.
+Entscheidung räumt die Werkzeugrunde aus Lauf 0005 also **nicht** ab.
+
+Sie soll es auch nicht. Entschieden am 24.08.2026: die MCP-Server aus
+`~/.claude.json` bleiben, wie sie sind. Der Reparateur bekommt sie angeboten,
+`permission_mode: "dontAsk"` weist jeden Aufruf ab, und `[agent].mcp_servers`
+sagt weiterhin, was zusätzlich *erlaubt* ist. Der Preis steht gemessen fest und
+wird bewusst gezahlt: die Werkzeugnamen stehen im Prompt und kosten Token, und
+in Lauf 0005 kostete es eine Werkzeugrunde, weil der Reparateur
+`mcp__context-mode__ctx_execute` versuchte, bevor die Sperre griff. Dafür hält
+die Sperre nachweislich, und ein Lauf, der ein angebotenes Werkzeug abweist,
+ist besser diagnostizierbar als einer, dem es fehlt.
 
 ## Der Schlüssel
 
@@ -82,12 +91,17 @@ settings = ["project", "../.claude/settings.json"]
 
 ### Höchstens ein Pfad
 
+Vorerst einen, und zwar als Entscheidung, nicht als Grenze des Denkbaren:
 `--settings` nimmt einen. Mehrere hießen, dass ultraloom sie selbst zu einem
 Objekt verschmilzt, also Claudes Merge-Semantik nachbaut — Hook-Arrays hängen
 aneinander, skalare Schlüssel überschreiben. Das ist dasselbe zweite Regelwerk,
 das `find_cli` in `model/agent_sdk.py` ausdrücklich vermeidet, und es driftet
 beim ersten Versionssprung. Wer zwei Dateien braucht, schreibt eine dritte, die
 beide enthält.
+
+Die Tür bleibt offen: der Schlüssel ist bereits eine Liste, also kostet ein
+zweiter Pfad später keine Syntaxänderung, sondern nur das Wegfallen dieser
+Ablehnung -- und dann eine Antwort auf die Merge-Frage, die heute keiner hat.
 
 ### Die Reihenfolge in der Liste bedeutet nichts
 
@@ -170,6 +184,7 @@ dafür steht er im Entwurf.
 
 ## Was der Entwurf nicht tut
 
-- Er räumt die global konfigurierten MCP-Server nicht ab (eigener Punkt, oben).
+- Er räumt die global konfigurierten MCP-Server nicht ab. Das ist entschieden
+  und nicht vergessen, siehe oben.
 - Er erzwingt nicht, dass ein Zielprojekt `.claude/settings.json` versioniert.
   Ultraloom kann das nicht, und der Pfad-Ausweg macht es unnötig.
