@@ -39,7 +39,7 @@ from ultraloom.model.fake import FakeModel
 from ultraloom.model.port import Reply
 from ultraloom.runner import FlowExit, Result, Runner
 from ultraloom.state import Delta
-from ultraloom.worktree import WorktreeError, head_commit
+from ultraloom.worktree import WorktreeError, changed_files, head_commit
 
 # A marker file is all `checks` needs to know the language -- and with it, that
 # `coverage` waits for `test`. The order under test lives in the preset table,
@@ -321,6 +321,55 @@ def test_a_test_file_renamed_away_does_not_escape_the_guard(tmp_path: Path) -> N
         guard(VerifyState())
 
     assert "tests/test_cli.py" in str(raised.value)
+
+
+def test_a_committed_test_file_with_an_umlaut_does_not_escape_the_guard(tmp_path: Path) -> None:
+    """A quoted path is a path no protected entry matches.
+
+    Without -z on the diff, git answers '"tests/test_gr\\303\\274n.py"', whose
+    first segment is '"tests' rather than 'tests' -- and the guard waves it
+    through. `docs/abläufe/` is in this project's own tree, so non-ASCII in a
+    path is nothing exotic.
+    """
+    repo = _repo(tmp_path)
+    base = head_commit(repo)
+    (repo / "tests" / "test_grün.py").write_text("assert False\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "umlaut"),
+        cwd=repo,
+        check=True,
+    )
+    guard = make_guard(repo, ("tests/",), baseline=Baseline(base, frozenset()))
+
+    with pytest.raises(FlowExit) as raised:
+        guard(VerifyState())
+
+    assert raised.value.code == 4
+    assert "tests/test_grün.py" in str(raised.value)
+
+
+def test_a_test_file_dirty_before_the_run_stays_excused_once_it_is_committed(
+    tmp_path: Path,
+) -> None:
+    """Spec case 3, with a real repository rather than an injected differ.
+
+    The baseline's dirty half comes from `status` and the accusation from
+    `diff`; only if both spell the path the same way does the subtraction still
+    hold after the repairer commits it.
+    """
+    repo = _repo(tmp_path)
+    (repo / "tests" / "test_cli.py").write_text("x = 2\n", encoding="utf-8")
+    baseline = Baseline(head_commit(repo), frozenset(changed_files(repo)))
+    subprocess.run(("git", "add", "-A"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "swept up"),
+        cwd=repo,
+        check=True,
+    )
+    guard = make_guard(repo, ("tests/",), baseline=baseline)
+
+    assert guard(VerifyState()) == {"touched": ()}
 
 
 def test_the_run_journal_is_not_charged_to_the_repairer(tmp_path: Path) -> None:

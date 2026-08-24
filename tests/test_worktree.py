@@ -344,6 +344,28 @@ def test_changed_since_refuses_a_root_git_ignores(tmp_path: Path) -> None:
         changed_since(copy, base)
 
 
+def test_changed_since_reads_a_committed_non_ascii_path_unquoted(tmp_path: Path) -> None:
+    """The diff half needs -z exactly as much as the status half does.
+
+    `core.quotePath` defaults to true, so without -z git answers
+    '"tests/test_gr\\303\\274n.py"' -- a string whose first segment is
+    '"tests', which no configured protected path ever matches. The
+    `changed_files` case above proves the same thing for the status half.
+    """
+    repo = _repo(tmp_path)
+    base = head_commit(repo)
+    (repo / "tests" / "test_grün.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "umlaut"),
+        cwd=repo,
+        check=True,
+    )
+
+    assert changed_files(repo) == ()  # committed, so only the diff half can see it
+    assert changed_since(repo, base) == ("tests/test_grün.py",)
+
+
 def test_changed_since_refuses_a_base_git_does_not_know(tmp_path: Path) -> None:
     """An unresolvable base must never read as "nothing changed"."""
     repo = _repo(tmp_path)

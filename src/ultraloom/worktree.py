@@ -102,6 +102,13 @@ def changed_since(root: Path, base: str) -> tuple[str, ...]:
     would otherwise report the pair as one entry, and a test moved out of the
     way would be a path the guard never compares against its protected list.
 
+    `-z` on the diff for the same reason `changed_files` passes it to the
+    status: `core.quotePath` defaults to true, so a path holding a non-ASCII
+    byte comes back C-quoted -- `"tests/test_gr\\303\\274n.py"`, whose first
+    segment is `"tests` and not `tests`. Such a path matches no protected entry
+    the project configured, survives neither the prefix cut in `_relocate` nor
+    the `RUN_DIR` filter, and walks straight past the guard.
+
     Content-based, so a `reset`, a `rebase` or an `amend` hides nothing: this
     compares the tree of `base` against the tree on disk, not two histories.
 
@@ -110,8 +117,8 @@ def changed_since(root: Path, base: str) -> tuple[str, ...]:
     must not be read as "nothing changed".
     """
     _refuse_if_ignored(root)
-    diff = _git(root, "diff", "--name-only", "--no-renames", base)
-    committed = tuple(line for line in diff.splitlines() if line)
+    diff = _git(root, "diff", "--name-only", "-z", "--no-renames", base)
+    committed = tuple(field for field in diff.split("\0") if field)
     reported = _parse_status(_status(root))
     # One call over both answers rather than one per answer: `_relocate` asks
     # git for the prefix, and that process is the same for either spelling.
