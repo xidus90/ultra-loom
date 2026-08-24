@@ -1,15 +1,21 @@
-# ultraloom
+@AGENTS.md
 
-## Ablage
+# Nur für Claude Code
 
-Specs, Pläne und SDD liegen unter `docs/.superpowers/`. Abläufe mit Graphbild
-und Erklärung unter `docs/abläufe/`.
+## Worktrees
 
-## Sprachen
+Ein Verzeichnis unter `.claude/worktrees/` ist **nicht** zwangsläufig ein
+Git-Worktree, und `.git/info/exclude` deckt den ganzen Pfad ab. Wer dort
+arbeitet, teilt sich Index und HEAD mit dem Hauptcheckout, `git status`
+antwortet leer, und `git add` überspricht neue Dateien wortlos. Vor einem
+Commit deshalb `git rev-parse --git-dir --git-common-dir` lesen: sind beide
+gleich, ist es kein Worktree. Echte Worktrees legt `git worktree add` unter
+`.worktrees/` an — dort stehen die bestehenden.
 
-Die Projektdoku ist zweisprachig: Die Datei ohne Suffix ist die englische
-Variante und der Standard, die deutsche trägt `.de.md` direkt daneben —
-`README.md` / `README.de.md`,
-`docs/abläufe/verify-until-green.md` / `verify-until-green.de.md`. Jede
-Variante verweist unter der Überschrift auf die andere. Ausgenommen sind die
-Arbeitspapiere unter `docs/.superpowers/` und diese Datei.
+## Subagenten
+
+Kein Subagent pusht. Ein Lauf darf committen; ob die Commits das Remote
+erreichen, entscheidet der Mensch. Das steht hier, weil es schon passiert ist —
+ein Implementierungs-Subagent schob `master` nach `origin`, ohne gefragt zu
+werden, und der Bericht erwähnte es nicht. Nach Subagentenläufen gilt deshalb:
+`git ls-remote origin <zweig>` lesen statt dem Bericht glauben.
