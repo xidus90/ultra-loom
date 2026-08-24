@@ -83,6 +83,9 @@ prefix = "docker compose exec -T web"
 [agent]
 # MCP servers an agent node with the "mcp" tool profile may reach.
 mcp_servers = ["wiki"]
+# Which settings a repair run loads. The three reserved words are Claude Code's
+# own; anything else is a path to one file, relative to --root.
+settings = ["project"]
 # Where the Claude CLI is, when the SDK's own search does not find it.
 cli_path = "C:/Users/me/AppData/Local/Programs/claude/claude.exe"
 ```
@@ -102,6 +105,42 @@ The same holds when nothing is configured at all: a `run` whose flow has an
 agent node looks for a startable CLI once, before the run exists, and says
 which of the three ways out to take if there is none. A flow of code nodes and
 a run started with `--no-model` never ask the question.
+
+`[agent].settings` says which settings a run inherits. The default is
+`["project"]` -- the target project's own `.claude/settings.json`, and nothing
+else. That is the one source that travels into a git worktree, because it is
+the one that is versioned; `.claude/settings.local.json` is untracked and stays
+behind, and `~/.claude/settings.json` belongs to the machine rather than to the
+project. Measured against a repair run, the difference is not only tidiness:
+dropping the user's settings cut the first round's prompt from 14 381 to 4 901
+tokens, because the plugins and skills configured there stop loading.
+
+`"user"`, `"project"` and `"local"` are reserved words. Anything else is a path
+relative to `--root`, loaded on top of them:
+
+```toml
+[agent]
+settings = []                                # no inherited settings at all
+settings = ["hooks/repair.json"]             # one named file, and only it
+settings = ["project", "../.claude/settings.json"]
+```
+
+At most one path: `--settings` takes one, and merging several would mean
+rebuilding Claude Code's own merge semantics here. The order inside the list
+means nothing -- the precedence is Claude Code's and runs managed settings,
+`--settings`, `.claude/settings.local.json`, `.claude/settings.json`,
+`~/.claude/settings.json`, highest first. A named path therefore outranks both
+project files on any scalar key; hooks add up, scalars do not.
+
+A path that is not a file is refused when the configuration is read, which is
+also what catches a misspelled word: `"porject"` is a path, and the message
+names the three that are not. `"managed"` is refused by name, because managed
+settings always apply and nothing here overrides them.
+
+`[agent].settings` covers settings files and nothing else. The MCP servers a
+machine configures in `~/.claude.json` arrive by a different route and are
+unaffected -- they cost no tokens either, because `[agent].mcp_servers` and the
+tool profile in `tools.py` keep them out of the prompt.
 
 Which wheel of `claude-agent-sdk` gets installed decides whether the agent
 path runs at all, so the extra pins one exact version. The wheels for a

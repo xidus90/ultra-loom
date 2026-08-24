@@ -497,4 +497,9 @@ def _model(root: Path, config: Config) -> Model:
     # an ImportError from a command that had already started.
     from ultraloom.model.agent_sdk import AgentSdkModel
 
-    return AgentSdkModel(cwd=root, cli_path=config.cli_path)
+    return AgentSdkModel(
+        cwd=root,
+        cli_path=config.cli_path,
+        setting_sources=config.setting_sources,
+        settings_file=config.settings_file,
+    )

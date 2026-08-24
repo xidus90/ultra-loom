@@ -11,12 +11,14 @@ import pytest
 from ultraloom.cli import (
     MarkerError,
     _decode_baseline,
+    _model,
     _recorded_run,
     _remember_run,
     _run_files,
     main,
     next_run_id,
 )
+from ultraloom.config import Config
 from ultraloom.discovery import Baseline
 from ultraloom.model.port import Reply
 from ultraloom.worktree import head_commit
@@ -455,7 +457,13 @@ def test_the_agent_extra_is_used_when_it_is_installed(
     built: list[tuple[Path, Path | None]] = []
 
     class StandInModel:
-        def __init__(self, cwd: Path, cli_path: Path | None = None) -> None:
+        def __init__(
+            self,
+            cwd: Path,
+            cli_path: Path | None = None,
+            setting_sources: tuple[str, ...] = ("project",),
+            settings_file: Path | None = None,
+        ) -> None:
             self.cwd = cwd
             built.append((cwd, cli_path))
 
@@ -1018,7 +1026,13 @@ def test_the_configured_cli_path_reaches_the_model(
     built: list[Path | None] = []
 
     class StandInModel:
-        def __init__(self, cwd: Path, cli_path: Path | None = None) -> None:
+        def __init__(
+            self,
+            cwd: Path,
+            cli_path: Path | None = None,
+            setting_sources: tuple[str, ...] = ("project",),
+            settings_file: Path | None = None,
+        ) -> None:
             built.append(cli_path)
 
         def ask(self, request: object) -> Reply:
@@ -1104,3 +1118,23 @@ def test_no_model_runs_on_a_machine_without_a_cli(
     # only after the run existed, which is the difference being asserted.
     assert code == 1
     assert (tmp_path / ".ultraloom" / "runs" / "0001.jsonl").exists()
+
+
+def test_the_model_is_built_from_what_the_project_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wiring, not the adapter: _model must not drop what config read."""
+    seen: dict[str, object] = {}
+
+    class _Spy:
+        def __init__(self, **kwargs: object) -> None:
+            seen.update(kwargs)
+
+    monkeypatch.setattr("ultraloom.model.agent_sdk.AgentSdkModel", _Spy)
+    named = tmp_path / "repair.json"
+    config = Config(root=tmp_path, setting_sources=("local",), settings_file=named)
+
+    _model(tmp_path, config)
+
+    assert seen["setting_sources"] == ("local",)
+    assert seen["settings_file"] == named
