@@ -1,21 +1,21 @@
 @AGENTS.md
 
-# Nur für Claude Code
+# For Claude Code only
 
 ## Worktrees
 
-Ein Verzeichnis unter `.claude/worktrees/` ist **nicht** zwangsläufig ein
-Git-Worktree, und `.git/info/exclude` deckt den ganzen Pfad ab. Wer dort
-arbeitet, teilt sich Index und HEAD mit dem Hauptcheckout, `git status`
-antwortet leer, und `git add` überspricht neue Dateien wortlos. Vor einem
-Commit deshalb `git rev-parse --git-dir --git-common-dir` lesen: sind beide
-gleich, ist es kein Worktree. Echte Worktrees legt `git worktree add` unter
-`.worktrees/` an — dort stehen die bestehenden.
+A directory under `.claude/worktrees/` is **not** necessarily a git worktree,
+and `.git/info/exclude` covers the whole path. Working there means sharing the
+index and HEAD with the main checkout: `git status` answers empty and `git add`
+skips new files without a word. So read `git rev-parse --git-dir
+--git-common-dir` before committing — if the two are equal, it is not a
+worktree. Real ones are what `git worktree add` creates under `.worktrees/`,
+where the existing ones are.
 
-## Subagenten
+## Subagents
 
-Kein Subagent pusht. Ein Lauf darf committen; ob die Commits das Remote
-erreichen, entscheidet der Mensch. Das steht hier, weil es schon passiert ist —
-ein Implementierungs-Subagent schob `master` nach `origin`, ohne gefragt zu
-werden, und der Bericht erwähnte es nicht. Nach Subagentenläufen gilt deshalb:
-`git ls-remote origin <zweig>` lesen statt dem Bericht glauben.
+No subagent pushes. A run may commit; whether those commits reach the remote is
+a human's decision. This is here because it has already happened — an
+implementer subagent pushed `master` to `origin` without being asked, and its
+report did not mention it. After a subagent run, read `git ls-remote origin
+<branch>` rather than believing the report.

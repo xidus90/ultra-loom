@@ -1,15 +1,20 @@
 # ultraloom
 
-## Ablage
+## Where things live
 
-Specs, Pläne und SDD liegen unter `docs/.superpowers/`. Abläufe mit Graphbild
-und Erklärung unter `docs/abläufe/`.
+Specs, plans and SDD live under `docs/.superpowers/`. Flows, each with its
+graph picture and an explanation, live under `docs/abläufe/`.
 
-## Sprachen
+## Languages
 
-Die Projektdoku ist zweisprachig: Die Datei ohne Suffix ist die englische
-Variante und der Standard, die deutsche trägt `.de.md` direkt daneben —
-`README.md` / `README.de.md`,
-`docs/abläufe/verify-until-green.md` / `verify-until-green.de.md`. Jede
-Variante verweist unter der Überschrift auf die andere. Ausgenommen sind die
-Arbeitspapiere unter `docs/.superpowers/` sowie diese Datei und `CLAUDE.md`.
+Anything that instructs an LLM is written in English: this file, `CLAUDE.md`,
+and whatever lives under `.claude/`. A model reads them on every turn, and a
+second language in the file it steers by buys nothing.
+
+The documentation is bilingual instead: the file without a suffix is the
+English variant and the standard, the German one carries `.de.md` right beside
+it — `README.md` / `README.de.md`, `docs/abläufe/verify-until-green.md` /
+`verify-until-green.de.md`. Each variant links to the other under its heading.
+
+Exempt from both rules are the working papers under `docs/.superpowers/`: specs
+and plans are written once, read by a human, and never translated.
