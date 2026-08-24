@@ -50,85 +50,40 @@ im Repo stehen*. Ein Projekt, das seine Hooks in `settings.local.json` hält,
 verliert sie im Worktree-Lauf — heute schon, aber ab hier verspricht ultraloom
 etwas, das dort nicht hält. Deshalb der Pfad-Ausweg in Abschnitt *Der Schlüssel*.
 
+Gemessen kommt ein zweiter Grund dazu, den niemand gesucht hat: `["project"]`
+statt heute spart rund 9 500 Token in der ersten Runde, weil die Plugins und
+Skills aus den User-Settings nicht mehr geladen werden. Siehe *Was gemessen
+wurde*.
+
 ## Die zweite Schraube: geerbte MCP-Server
 
 Der Backlog nennt im selben Absatz, dass das SDK dem Reparateur die global
 konfigurierten MCP-Server anbietet, und liest beides als eine Frage. Es ist
 zweierlei: `setting_sources` deckt ausschließlich die drei `settings.json`, die
-MCP-Server stehen in `~/.claude.json` und kommen über einen anderen Weg. Diese
-Entscheidung räumt die Werkzeugrunde aus Lauf 0005 also **nicht** ab.
+MCP-Server stehen in `~/.claude.json` und kommen über einen anderen Weg.
 
-Erben bleibt möglich und bleibt der Ist-Zustand: der Reparateur bekommt die
-Server angeboten, `permission_mode: "dontAsk"` weist jeden Aufruf ab, und
-`[agent].mcp_servers` sagt, was zusätzlich *erlaubt* ist. Neu ist nur, dass man
-es abschalten kann (siehe *Der Schalter*). Der Preis steht gemessen fest und
-wird bewusst gezahlt: die Werkzeugnamen stehen im Prompt und kosten Token, und
-in Lauf 0005 kostete es eine Werkzeugrunde, weil der Reparateur
-`mcp__context-mode__ctx_execute` versuchte, bevor die Sperre griff. Dafür hält
-die Sperre nachweislich, und ein Lauf, der ein angebotenes Werkzeug abweist,
-ist besser diagnostizierbar als einer, dem es fehlt.
+Sie bleiben, wie sie sind, und diesmal nicht aus Bequemlichkeit: **gemessen
+kosten sie nichts.** Zwei Läufe, die sich nur in den MCP-Servern unterscheiden,
+hatten einen byte-identischen Prompt (siehe *Was gemessen wurde*). Der Grund ist
+ultralooms eigener `tools`-Deckel. Er nennt die eingebauten Werkzeuge
+abschließend, und was er nicht nennt, steht nicht im Prompt -- MCP-Werkzeuge
+eingeschlossen.
 
-Dabei ist wichtig, was `[agent].mcp_servers` *nicht* tut: es ist eine
-Erlaubnisliste, keine Ladeliste. Geladen wird ohnehin, was in `~/.claude.json`
-steht, und die Werkzeugdefinitionen stehen im Prompt, unabhängig von dieser
-Liste.
+Damit ist die Behauptung des Backlogs widerlegt, die Werkzeuge stünden im
+Prompt und kosteten Token. Ein Schalter, der sie abschaltet
+(`strict_mcp_config`), hätte nichts gespart und wäre eine Falle geworden: eine
+Konfigurationszeile, die aussieht, als täte sie etwas.
 
-| `[agent].mcp_servers` | Token im Prompt | Werkzeugrunde |
-| --- | --- | --- |
-| leer | voll | eine verschwendete, *wenn* der Reparateur es versucht |
-| nennt den Server | voll, identisch | keine -- der Aufruf geht durch |
+Die Werkzeugrunde aus Lauf 0005 bleibt real, ist aber etwas anderes als
+gedacht. Der Reparateur rief `mcp__context-mode__ctx_execute` auf, **ohne dass
+es ihm angeboten worden war** -- er kannte den Namen anderswoher. Die
+Berechtigungsprüfung wies ab, `permission_mode: "dontAsk"` fragte niemanden,
+der Lauf ging weiter. Gegen einen erfundenen Werkzeugnamen hilft keine
+Ladeliste.
 
-Eine leere Liste ist also nicht die sparsame Stellung, sondern die teuerste:
-dieselben Token, plus die Chance auf eine Runde gegen eine Wand. Wer die Token
-sparen will, braucht `strict_mcp_config` (`types.py:1984`, CLI-Flag
-`--strict-mcp-config`) -- die einzige Schraube, die die Definitionen aus dem
-Prompt nimmt. Sie lädt ausschließlich, was der Aufrufer selbst übergibt, und
-ultraloom kennt heute nur Servernamen, keine Serverkonfigurationen.
+`[agent].mcp_servers` bleibt damit, was es ist: eine Erlaubnisliste für Knoten
+mit dem Profil `mcp`, die einen geerbten Server gezielt freischaltet.
 
-### Der Schalter
-
-Serverkonfigurationen braucht es dafür aber nur, wenn man *auswählen* will. Wer
-nur zwischen „allen“ und „keinem“ wählt, kommt mit einem Boolean aus:
-
-```toml
-[agent]
-inherit_mcp = true      # nimm, was in ~/.claude.json steht
-inherit_mcp = false     # kein MCP-Server im Lauf
-```
-
-```python
-if not inherit_mcp:
-    options["mcp_servers"] = {}
-    options["strict_mcp_config"] = True
-```
-
-Das ist der ganze Eingriff. Weder Werkzeugnamen noch Startangaben tauchen
-irgendwo auf, und bei zwanzig geerbten Servern pflegt niemand zwanzig
-Konfigurationen in `.ultraloom/config.toml`. Eine echte Auswahl -- ultraloom
-beschreibt seine Server selbst -- ist damit vertagt, bis jemand sie braucht.
-
-Bei `inherit_mcp = false` wird nichts geladen, also erlaubt
-`[agent].mcp_servers` Werkzeuge, die es nicht gibt. Zwei Schlüssel, die sich
-widersprechen, sind der Fall, für den `ConfigError` da ist:
-
-```
-[agent]: mcp_servers names ctx, but inherit_mcp = false loads no server at all
-```
-
-### Welcher Standard, entscheidet die Messung
-
-`true` erhält den Ist-Zustand und ist die sichere Wahl. Gegen sie spricht, was
-der Lauf tatsächlich tut: ein Reparateur, der gdlint-Ausgaben liest und
-GDScript korrigiert, hat für `mcp-obsidian` oder `open-design` keine
-Verwendung, und in Lauf 0005 kostete ihn genau das eine Werkzeugrunde. Gezählt
-sind es in der gemessenen Umgebung drei Server mit rund 33
-Werkzeugdefinitionen in jedem Request.
-
-Was diese Definitionen an Token kosten, ist nicht gezählt, und geraten gehört
-es hier nicht hin. Der Spike misst es: derselbe Lauf einmal mit, einmal ohne,
-`usage` aus der `ResultMessage` verglichen -- der Adapter liest sie ohnehin
-schon aus. Ist der Unterschied klein, bleibt `true` und niemand muss etwas
-wissen. Ist er groß, ist `false` der Standard und `true` der Ausweg.
 
 ## Der Schlüssel
 
@@ -213,11 +168,10 @@ verhindert.
 Das ist eine Eigenschaft des Modells, nicht eines Requests — wie `cli_path`.
 Der Weg durch `runner.py`, den `mcp_servers` nimmt, entfällt.
 
-- `config.py`: drei Felder auf `Config` (`setting_sources: tuple[str, ...]`,
-  `settings_file: Path | None`, `inherit_mcp: bool`), zwei TOML-Schlüssel.
-  Aufgeteilt und geprüft beim Laden, neben `_cli_path`; dort auch der
-  Widerspruch zwischen `mcp_servers` und `inherit_mcp = false`.
-- `cli.py`, `_model`: alle drei Felder an `AgentSdkModel` durchgereicht.
+- `config.py`: zwei Felder auf `Config` (`setting_sources: tuple[str, ...]`,
+  `settings_file: Path | None`), ein TOML-Schlüssel. Aufgeteilt und geprüft
+  beim Laden, neben `_cli_path`.
+- `cli.py`, `_model`: beide Felder an `AgentSdkModel` durchgereicht.
 - `model/agent_sdk.py`, `_options_for`: `setting_sources` immer gesetzt,
   `settings` nur wenn vorhanden — nach demselben Muster, das `cli_path` heute
   benutzt, und aus demselben Grund: ein `None` an das SDK zu geben, wo
@@ -232,51 +186,58 @@ Der Weg durch `runner.py`, den `mcp_servers` nimmt, entfällt.
 - Config-Tests für die vier Ablehnungen aus der Tabelle.
 - Ein Test, der Wörter und Pfad korrekt getrennt sieht, inklusive der Mischung.
 - Ein Test für den Standard: ohne Schlüssel steht `["project"]` in den Optionen.
-- Ein Test für `inherit_mcp = false`: `mcp_servers={}` und
-  `strict_mcp_config=True` in den Optionen, und ein `ConfigError`, wenn
-  `mcp_servers` gleichzeitig etwas nennt.
 
-## Der Spike, der vor dem Plan steht
+## Was gemessen wurde
 
-Ein Wegwerf-Repo mit einer `.claude/settings.json`, deren Hooks nichts tun
-außer eine Markerdatei mit Zeitstempel zu schreiben -- je einer für
-`SessionStart`, `PostToolUse` (Matcher `Write|Edit`) und `Stop`. Darin ein
-ultraloom-Lauf mit einem Knoten, der den Reparateur zwingend eine Datei ändern
-lässt, und zum Vergleich derselbe Fall von Hand mit `claude -p`.
+Vier Läufe am 24.08.2026 gegen ein Wegwerf-Repo: eine `.claude/settings.json`,
+deren `SessionStart`, `PostToolUse` (Matcher `Write|Edit`) und `Stop` nichts tun
+außer ihren Namen in eine Markerdatei zu schreiben, eine Datei mit dem Wort
+`TODO`, und ein Auftrag, der den Reparateur zwingt, sie mit `Edit` zu ändern.
+Die Optionen sind die, die `_options_for` baut. Der Prompt der ersten Runde ist
+`cache_read + cache_creation` der Iteration aus der `ResultMessage`.
 
-Er beantwortet zwei Fragen auf einmal:
+| Lauf | Optionen | Marker | Prompt |
+| --- | --- | --- | --- |
+| 1 | wie heute, `setting_sources` ungesetzt | alle drei | 14 381 |
+| 2 | `setting_sources=["project"]` | alle drei | **4 901** |
+| 3 | wie 2, plus `mcp_servers={}`, `strict_mcp_config=True` | alle drei | **4 901** |
+| 4 | wie 1, aber ohne `tools`-Deckel | alle drei | 26 358 |
 
-**Welche Hooks laufen?** Liegen alle drei Marker da, lief der Hook in 0005 und
-das Protokoll zeigte ihn nur nicht -- dann sagt die Spec „laufen“ statt
-„geladen“. Fehlt `PostToolUse` auch von Hand, liegt es an spaces `post_edit.py`
-und nicht am SDK; `run.sh` braucht `uv` und `bash`, und fällt eines davon in der
-Umgebung des Subprozesses aus, ist genau das das Bild. Fehlt es nur über
-ultraloom, liegt es am SDK-Pfad, und dann bleibt „geladen“ -- aber mit Ursache
-statt mit Fragezeichen.
+**`PostToolUse` läuft.** In allen vier Läufen. Der SDK-Pfad führt den Hook aus,
+und die Spec sagt deshalb *laufen* zu, nicht nur *geladen*. Was in Lauf 0005
+fehlte, lag nicht am SDK -- entweder zeigte das Protokoll den Hook nicht, oder
+spaces `post_edit.py` starb, bevor er etwas tat. Das ist ein Verdacht für
+space, kein offener Punkt hier.
 
-**Was kostet das geerbte MCP?** Derselbe Lauf mit `inherit_mcp = true` und mit
-`false`, `usage` verglichen. Das Ergebnis entscheidet den Standard des
-Schalters.
+**Die Entscheidung spart ~9 500 Token pro Runde.** Lauf 1 gegen Lauf 2: 14 381
+gegen 4 901, bei identischem Auftrag. Der Unterschied kommt aus den
+User-Settings -- Plugins und Skills, die ein Reparaturlauf nie anfasst. Das
+Argument für `["project"]` war Reproduzierbarkeit; die Sparsamkeit kam
+ungesucht dazu.
 
-Kosten: ein Wegwerf-Repo, vier Läufe, keine Änderung an ultraloom. Deutlich
-billiger als ein Umsetzungsplan, den er umschreiben könnte.
+**Die MCP-Server kosten nichts.** Lauf 2 und 3 unterscheiden sich nur in ihnen
+und teilen einen byte-identischen Prompt: 4 901 gelesen, nichts neu erzeugt.
+
+**Der `tools`-Deckel ist das teuerste Stück Sparsamkeit im System.** Lauf 4
+zeigt, was ohne ihn im Prompt stünde: 26 358 statt 4 901, Faktor 5,4. Er ist in
+`tools.py` als Sicherheitsgrenze begründet -- „das Werkzeug ist abwesend, nicht
+der Agent brav“ -- und trägt nebenbei die größte Ersparnis. Wer ihn aufweicht,
+zahlt beides.
 
 ## Benannte Unbekannte
 
-`PostToolUse` blieb in Lauf 0005 aus, obwohl der Matcher (`Write|Edit`) das
-Werkzeug des Reparateurs deckt und `space/.claude/settings.json` versioniert
-ist. Warum, ist ungeklärt. Diese Spec sagt deshalb zu, dass die Einstellungen
-des Projekts **geladen** werden — nicht, dass jeder darin konfigurierte Hook
-läuft. Wer die Zusage schärfer braucht, misst zuerst.
+Ungeprüft ist, ob die CLI `.claude/` von `--root` aus nach oben sucht. Falls
+nicht, ist der benannte Pfad die Antwort für das Monorepo, und genau dafür
+steht er im Entwurf.
 
-Ungeprüft ist ebenso, ob die CLI `.claude/` von `--root` aus nach oben sucht.
-Falls nicht, ist der benannte Pfad die Antwort für das Monorepo, und genau
-dafür steht er im Entwurf.
+Die Messung lief gegen den Adapter, nicht durch einen vollen `verify`-Flow. Sie
+sagt also, was das SDK mit diesen Optionen tut -- nicht, was ein Flow mit
+mehreren Agentenknoten über viele Runden summiert.
+
 
 ## Was der Entwurf nicht tut
 
-- Er baut `[agent].mcp_servers` nicht zu einer Ladeliste um. Der Schalter
-  kennt „alle“ und „keine“; eine Auswahl einzelner Server bliebe ein eigener
-  Entwurf.
+- Er fügt keinen MCP-Schalter hinzu. Gemessen würde er nichts sparen, und ein
+  Schlüssel ohne Wirkung ist schlimmer als keiner.
 - Er erzwingt nicht, dass ein Zielprojekt `.claude/settings.json` versioniert.
   Ultraloom kann das nicht, und der Pfad-Ausweg macht es unnötig.
