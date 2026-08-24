@@ -331,6 +331,7 @@ def make_guard(
     test_paths: tuple[str, ...],
     differ: Differ = changed_since,
     baseline: Baseline | None = None,
+    run_files: frozenset[str] = frozenset(),
 ) -> Callable[[VerifyState], Delta]:
     """The `guard` node: what the repairer did, measured against what it may do.
 
@@ -381,9 +382,16 @@ def make_guard(
             # the commit it started on was thrown away. Neither may be read
             # as "nothing changed".
             raise FlowExit(_EXIT_TOUCHED_A_TEST, str(error)) from error
-        # Subtracted before anything else, so `touched` -- which feeds the
+        # Both subtracted before anything else, so `touched` -- which feeds the
         # stagnation check -- also counts only what this run produced.
-        touched = tuple(path for path in reported if path not in baseline.dirty)
+        #
+        # `run_files` and not the whole run directory: ultraloom's answer about
+        # what changed stopped hiding it, because a marker belonging to some
+        # *other* run is a file the repair agent can write with no shell at all
+        # and nobody was watching it. This run's own two are named here, where
+        # the run id is known.
+        ours = baseline.dirty | run_files
+        touched = tuple(path for path in reported if path not in ours)
         forbidden = tuple(path for path in touched if _is_protected(path, test_paths))
         if forbidden:
             raise FlowExit(
@@ -461,6 +469,7 @@ def assemble(
     max_rounds: int = 5,
     baseline: Baseline | None = None,
     head: Callable[[Path], str] = head_commit,
+    run_files: frozenset[str] = frozenset(),
 ) -> Graph[VerifyState]:
     """The graph, with everything it talks to passed in.
 
@@ -477,7 +486,12 @@ def assemble(
     would be in the new baseline, including a test file.
 
     Reading it here is the fallback for a caller that has none, which is
-    `assemble` used directly and `build` on a run that recorded nothing. `head`
+    `assemble` used directly and `build` on a run that recorded nothing.
+
+    `run_files` names what this run writes itself, so the guard does not charge
+    ultraloom's journal and marker to the repair agent. Empty by default, which
+    is what a caller with no run id has: nothing is subtracted then, and a
+    report naming a journal is the harmless direction. `head`
     is a parameter so a test can count how often the baseline's commit is read
     -- once per graph, never once per round -- and can say "git has no commit
     here" without arranging a directory that happens to have none. Not the same
@@ -518,7 +532,7 @@ def assemble(
     graph.add(
         CodeNode(
             "guard",
-            make_guard(root, config.test_paths, differ, baseline),
+            make_guard(root, config.test_paths, differ, baseline, run_files),
             max_visits=max_rounds + 1,
         )
     )
@@ -557,6 +571,7 @@ def build(context: FlowContext) -> LoadedFlow:
         context.root,
         max_rounds=max_rounds,
         baseline=context.baseline,
+        run_files=context.run_files,
     )
     # LoadedFlow holds any flow's graph and therefore types it over `object`,
     # which Graph -- being mutable -- is invariant in. The cast is the erasure

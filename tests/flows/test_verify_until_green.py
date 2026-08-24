@@ -387,10 +387,43 @@ def test_the_run_journal_is_not_charged_to_the_repairer(tmp_path: Path) -> None:
     (runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
     (runs / "0001.flow").write_text("verify_until_green\n", encoding="utf-8")
     guard = make_guard(
-        repo, ("tests/", ".ultraloom/"), baseline=Baseline(head_commit(repo), frozenset())
+        repo,
+        ("tests/", ".ultraloom/"),
+        baseline=Baseline(head_commit(repo), frozenset()),
+        run_files=frozenset({".ultraloom/runs/0001.jsonl", ".ultraloom/runs/0001.flow"}),
     )
 
     assert guard(VerifyState()) == {"touched": ()}
+
+
+def test_a_marker_this_run_did_not_write_reaches_the_guard(tmp_path: Path) -> None:
+    """The hole that subtracting by name replaces, against real git.
+
+    The whole run directory used to be invisible, so a repairer rewriting some
+    other run's marker -- which the `edit` profile can do without a shell --
+    was seen by nobody. Under a project that protects `.ultraloom/` it is exit
+    4 now, and under one that does not it is at least reported.
+    """
+    repo = _repo(tmp_path)
+    runs = repo / ".ultraloom" / "runs"
+    runs.mkdir(parents=True)
+    (runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
+    (runs / "0002.flow").write_text("verify_until_green\n", encoding="utf-8")
+    guard = make_guard(
+        repo,
+        ("tests/", ".ultraloom/"),
+        baseline=Baseline(head_commit(repo), frozenset()),
+        run_files=frozenset({".ultraloom/runs/0001.jsonl", ".ultraloom/runs/0001.flow"}),
+    )
+
+    with pytest.raises(FlowExit) as raised:
+        guard(VerifyState())
+
+    assert raised.value.code == 4
+    assert ".ultraloom/runs/0002.flow" in str(raised.value)
+    # And not the one this run wrote itself: naming it would be the accusation
+    # the subtraction exists to prevent.
+    assert "0001.jsonl" not in str(raised.value)
 
 
 def test_a_test_deep_below_a_protected_directory_is_protected() -> None:
@@ -775,6 +808,58 @@ def test_a_single_round_allows_one_repair_and_then_ends_red(tmp_path: Path) -> N
     assert result.exit_code == _EXIT_STILL_RED
     assert result.state.data.rounds == 2  # one repair, two checks
     assert "1 repair rounds" in (result.detail or "")
+
+
+def test_the_runs_own_journal_and_marker_are_not_the_repairers_doing() -> None:
+    """The two files this run writes itself, and only those two.
+
+    They come into being while the repair agent works, so counted as its doing
+    a project that protects `.ultraloom/` would take exit 4 on every run, named
+    after files ultraloom wrote.
+    """
+    own = frozenset({".ultraloom/runs/0001.jsonl", ".ultraloom/runs/0001.flow"})
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: tuple(sorted(own)),
+        baseline=Baseline("abc", frozenset()),
+        run_files=own,
+    )
+
+    assert guard(VerifyState())["touched"] == ()
+
+
+def test_another_runs_marker_is_the_repairers_doing() -> None:
+    """The hole this replaces: the whole run directory used to be invisible.
+
+    A marker this run did not write is nobody's business but the repairer's --
+    and the `edit` profile can write one without ever reaching for a shell.
+    """
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: (".ultraloom/runs/0002.flow",),
+        baseline=Baseline("abc", frozenset()),
+        run_files=frozenset({".ultraloom/runs/0001.jsonl", ".ultraloom/runs/0001.flow"}),
+    )
+
+    assert guard(VerifyState())["touched"] == (".ultraloom/runs/0002.flow",)
+
+
+def test_a_run_that_names_no_files_of_its_own_subtracts_nothing() -> None:
+    """`assemble` called directly has no run id, so it knows no own files.
+
+    Nothing is hidden then, which is the safe direction: a report naming a
+    journal beats a guard that quietly drops a whole directory.
+    """
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: (".ultraloom/runs/0001.jsonl",),
+        baseline=Baseline("abc", frozenset()),
+    )
+
+    assert guard(VerifyState())["touched"] == (".ultraloom/runs/0001.jsonl",)
 
 
 def test_a_path_dirty_before_the_run_is_not_the_repairers_doing() -> None:

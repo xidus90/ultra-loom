@@ -51,14 +51,16 @@ def changed_files(root: Path) -> tuple[str, ...]:
     path is the ordinary way to end up there, and read as "nothing changed" it
     switches the guard off while every run keeps reporting success.
 
-    What `RUN_DIR` holds is dropped as well, and for a reason of its own: those
-    files are ultraloom's, not the project's. Every run writes its journal and
-    its marker while the repair agent works, so a guard reading this answer
-    would report them as the agent's doing -- and a project that lists
-    `.ultraloom/` among its protected paths would take exit 4 on every single
-    run, named after files ultraloom wrote itself. The rest of `.ultraloom/`
-    stays visible: `config.toml` holds the thresholds a check is measured
-    against, and an agent editing that one is exactly what the guard is for.
+    What `RUN_DIR` holds is answered like anything else. Those files are
+    ultraloom's rather than the project's, and every run writes its journal and
+    its marker while the repair agent works -- but which two of them belong to
+    the run now walking is something only that run knows, so the subtraction
+    belongs to the guard and not here. Dropping the directory wholesale is what
+    this used to do, and it hid every *other* run's marker along the way: files
+    the repair agent can write without ever reaching for a shell, that nobody
+    was watching. `config.toml` was always visible and stays so -- it holds the
+    thresholds a check is measured against, and an agent editing that one is
+    exactly what the guard is for.
     """
     # Before the question rather than after the answer: an ignored root is
     # wrong whatever comes back, and a change *elsewhere* in the repository
@@ -71,20 +73,24 @@ def changed_files(root: Path) -> tuple[str, ...]:
 def _relocate(root: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
     """Repository-relative paths as a caller below `root` spells them.
 
-    Anything outside `root` is dropped -- it is not this project's change --
-    and so is everything below `RUN_DIR`, which is ultraloom's own doing and
-    never the repairer's. Both callers go through here, because two spellings
-    of the same path would end up being compared against each other.
+    Anything outside `root` is dropped -- it is not this project's change.
+    Both callers go through here, because two spellings of the same path would
+    end up being compared against each other.
+
+    What this deliberately does *not* drop is `RUN_DIR`. Whose doing a change
+    is cannot be answered here: this module knows the directory ultraloom
+    writes into, never which two files belong to the run now walking. Dropping
+    the directory hid every other run's marker and journal along with them --
+    files nobody wrote during this run and nobody was watching. The guard
+    subtracts its own two by name instead.
     """
     if not paths:
         # Nothing to relocate, so the second git call is not worth its process.
         return paths
     prefix = _prefix(root)
-    if prefix:
-        paths = tuple(path[len(prefix) :] for path in paths if path.startswith(prefix))
-    # After the relocation, so the comparison is against the spelling a caller
-    # below `root` would use rather than the repository-relative one.
-    return tuple(path for path in paths if not path.startswith(RUN_DIR + "/"))
+    if not prefix:
+        return paths
+    return tuple(path[len(prefix) :] for path in paths if path.startswith(prefix))
 
 
 def changed_since(root: Path, base: str) -> tuple[str, ...]:
@@ -106,8 +112,8 @@ def changed_since(root: Path, base: str) -> tuple[str, ...]:
     status: `core.quotePath` defaults to true, so a path holding a non-ASCII
     byte comes back C-quoted -- `"tests/test_gr\\303\\274n.py"`, whose first
     segment is `"tests` and not `tests`. Such a path matches no protected entry
-    the project configured, survives neither the prefix cut in `_relocate` nor
-    the `RUN_DIR` filter, and walks straight past the guard.
+    the project configured, survives the prefix cut in `_relocate` no
+    better, and walks straight past the guard.
 
     Content-based, so a `reset`, a `rebase` or an `amend` hides nothing: this
     compares the tree of `base` against the tree on disk, not two histories.

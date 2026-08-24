@@ -13,6 +13,7 @@ from ultraloom.cli import (
     _decode_baseline,
     _recorded_run,
     _remember_run,
+    _run_files,
     main,
     next_run_id,
 )
@@ -1033,3 +1034,15 @@ def test_the_configured_cli_path_reaches_the_model(
 
     assert main(["run", "needs_model", "--root", str(tmp_path)]) == 0
     assert built == [cli]
+
+
+def test_a_run_names_the_two_files_it_writes_itself() -> None:
+    """What the guard subtracts, spelled as the answer about the tree spells it.
+
+    Relative to `root` and forward-slashed, because that is what `changed_since`
+    returns -- a mismatch here would not fail loudly, it would quietly charge
+    ultraloom's own journal to the repair agent.
+    """
+    assert _run_files("0001") == frozenset(
+        {".ultraloom/runs/0001.jsonl", ".ultraloom/runs/0001.flow"}
+    )

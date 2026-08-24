@@ -245,8 +245,7 @@ geschobener Test wäre ein Pfad, den die Wache nie gegen ihre Liste hält.
 standardmäßig an, also gibt git jeden Pfad mit einem Nicht-ASCII-Byte
 C-zitiert zurück — `"tests/test_gr\303\274n.py"`. Dessen erstes Segment heißt
 `"tests` und nicht `tests`, damit trifft ihn kein konfigurierter Pfad, er
-überlebt weder den Präfix-Schnitt noch den `RUN_DIR`-Ausschluss, und die Wache
-lässt ihn durch. Das galt eine Zeit lang nur für den Status; der Diff fragte
+überlebt den Präfix-Schnitt ebensowenig, und die Wache lässt ihn durch. Das galt eine Zeit lang nur für den Status; der Diff fragte
 ohne `-z` und hatte damit genau diese Lücke, obwohl `docs/abläufe/` im eigenen
 Baum liegt und Umlaute in Pfaden also nicht exotisch sind.
 
@@ -268,10 +267,15 @@ Unterschied nicht auf — in einem Monorepo mit `--root paket` aber antwortet gi
 konfigurierter Pfad trifft je, und die Testsperre wäre ohne eine einzige Meldung
 aus. Beide Antworten laufen deshalb durch dieselbe Umrechnung: sie schneidet
 den Präfix aus `git rev-parse --show-prefix` ab und lässt alles weg, was
-außerhalb der Projektwurzel liegt. Weggelassen wird auch alles unter
-`.ultraloom/runs/` — Journal und Marker schreibt ultraloom selbst, während der
-Agent arbeitet, und sie ihm anzulasten beendete jeden Lauf eines Projekts, das
-`.ultraloom/` unter seinen geschützten Pfaden führt.
+außerhalb der Projektwurzel liegt. Mehr nicht: **was unter `.ultraloom/runs/`
+liegt, wird gemeldet wie jede andere Datei.** Journal und Marker schreibt
+ultraloom zwar selbst, während der Agent arbeitet, und sie ihm anzulasten
+beendete jeden Lauf eines Projekts, das `.ultraloom/` unter seinen geschützten
+Pfaden führt — aber *welche zwei* Dateien dem gerade laufenden Lauf gehören,
+weiß nur dieser Lauf. Die Wache zieht seine beiden namentlich ab, aus
+`FlowContext.run_files`, das die CLI aus der Run-ID füllt. Der Marker eines
+**fremden** Laufs bleibt damit sichtbar: den kann der Reparateur schreiben, das
+Profil `edit` braucht dafür keine Shell, und vorher sah es niemand.
 
 Kann die Wache nicht antworten, endet der Lauf. Es gibt dafür zwei Wege: der
 Arbeitsbaum ist nicht lesbar — git bricht ab oder lässt sich gar nicht starten —
@@ -824,15 +828,22 @@ das liegt nahe, dort stehen schließlich die Schwellen —, bekäme bei **jedem*
 Lauf Exit 4 und die Meldung, der Reparateur habe geschützte Dateien angefasst.
 `touched` war damit nicht das, was es zu sein behauptete.
 
-**Geschlossen.** `worktree._relocate` lässt weg, was unter `.ultraloom/runs/`
-liegt — an der einen Stelle, durch die beide Antworten laufen: `changed_files`,
-aus dem die Grundlinie entsteht, und `changed_since`, das `guard` liest. Und
-erst nachdem die Pfade auf `root` bezogen sind, weil nur diese Schreibweise
-passt. Der Rest von `.ultraloom/` bleibt sichtbar: `config.toml` trägt die
-Schwellen, gegen die geprüft wird, und wer daran ändert, ist genau der Fall,
-für den `guard` da ist. Drei Tests in `test_worktree.py` halten die Grenze,
-einer in `tests/flows/` fährt den gemeldeten Fall mit dem echten `differ` und
-`.ultraloom/` unter den geschützten Pfaden.
+**Geschlossen.** Zuerst falsch geschlossen: `worktree._relocate` ließ alles
+weg, was unter `.ultraloom/runs/` liegt. Das nahm dem Wächter auch die Marker
+und Journale **fremder** Läufe aus dem Blick — Dateien, die während dieses
+Laufs niemand schreibt außer dem Reparateur, und die das Profil `edit` ohne
+Shell erreicht.
+
+Jetzt zieht der Wächter nur die zwei Dateien ab, die dieser Lauf selbst
+schreibt. Sie stehen in `FlowContext.run_files`, die CLI setzt sie aus der
+Run-ID, und sie sind so geschrieben, wie `root` sie schreibt — dieselbe
+Schreibweise, die `changed_since` zurückgibt. Der Rest von `.ultraloom/` war
+immer sichtbar und bleibt es: `config.toml` trägt die Schwellen, gegen die
+geprüft wird, und wer daran ändert, ist genau der Fall, für den `guard` da ist.
+Drei Tests in `test_worktree.py` halten fest, dass das Modul das Verzeichnis
+meldet statt es zu verstecken, und zwei in `tests/flows/` fahren gegen echtes
+git beide Hälften: das eigene Journal ist nicht `touched`, der Marker eines
+fremden Laufs schon.
 
 ## Der Lauf, der das Preset erwischte: ultraloom, 23.08.2026
 

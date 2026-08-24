@@ -262,7 +262,13 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
             )
             return _EXIT_FAIL
 
-    context = FlowContext(root=root, config=config, options=options, baseline=baseline)
+    context = FlowContext(
+        root=root,
+        config=config,
+        options=options,
+        baseline=baseline,
+        run_files=_run_files(run_id),
+    )
     try:
         loaded = find_flow(flow_name, root, context)
     except (FlowNotFoundError, FlowLoadError) as error:
@@ -407,6 +413,17 @@ def _remember_run(
     # are JSON, which is what keeps a multi-line one on its own single line.
     lines = [flow_name, *(f"{name}={json.dumps(value)}" for name, value in options.items())]
     marker.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _run_files(run_id: str) -> frozenset[str]:
+    """The two files this run writes itself, as `root` spells them.
+
+    Handed to the flow because a guard must not report ultraloom's own doing as
+    the repair agent's. Named one by one and not by their directory: every
+    other run's marker lives there too, and that one the agent can write -- the
+    `edit` profile needs no shell for it -- while nobody is watching.
+    """
+    return frozenset({f"{RUN_DIR}/{run_id}.jsonl", f"{RUN_DIR}/{run_id}.flow"})
 
 
 def _decode_baseline(recorded: str) -> frozenset[str]:

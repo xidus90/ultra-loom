@@ -115,14 +115,14 @@ def test_a_clean_repository_answers_with_nothing(tmp_path: Path) -> None:
     assert changed_files(_repo(tmp_path)) == ()
 
 
-def test_the_run_directory_is_not_part_of_the_answer(tmp_path: Path) -> None:
-    """ultraloom's own journals are not a change to the project.
+def test_the_run_directory_is_part_of_the_answer(tmp_path: Path) -> None:
+    """Whose doing a change is, is not a question this module can answer.
 
-    The guard reads this answer to say what the repair agent did, and every run
-    writes its journal and its marker while that agent works. Left in, they are
-    the agent's doing according to every caller -- and a project that lists
-    `.ultraloom/` among its protected paths gets exit 4 on every single run,
-    naming files ultraloom wrote itself.
+    Every run writes its journal and its marker while the repair agent works,
+    so a caller reporting them as the agent's doing is wrong -- but only the run
+    knows which two files are its own, and only the guard has to subtract them.
+    Dropping the whole directory here hid a second run's marker as well, which
+    nobody wrote and nobody was watching.
     """
     repo = _repo(tmp_path)
     runs = repo / ".ultraloom" / "runs"
@@ -131,7 +131,11 @@ def test_the_run_directory_is_not_part_of_the_answer(tmp_path: Path) -> None:
     (runs / "0001.flow").write_text("verify_until_green\n", encoding="utf-8")
     (repo / "own.py").write_text("x = 1\n", encoding="utf-8")
 
-    assert changed_files(repo) == ("own.py",)
+    assert changed_files(repo) == (
+        ".ultraloom/runs/0001.flow",
+        ".ultraloom/runs/0001.jsonl",
+        "own.py",
+    )
 
 
 def test_the_rest_of_the_ultraloom_directory_stays_visible(tmp_path: Path) -> None:
@@ -147,12 +151,11 @@ def test_the_rest_of_the_ultraloom_directory_stays_visible(tmp_path: Path) -> No
     assert changed_files(repo) == (".ultraloom/config.toml",)
 
 
-def test_the_run_directory_is_only_dropped_below_the_given_root(tmp_path: Path) -> None:
-    """A sibling project's `.ultraloom/runs` is not below `root` anyway.
+def test_a_run_directory_below_root_is_spelled_relative_to_root(tmp_path: Path) -> None:
+    """The guard subtracts its own two files by name, so the spelling must match.
 
-    But `root`'s own is, however deep `root` sits below the repository root --
-    the filter runs after the paths have been made relative to `root`, which is
-    the only spelling that matches.
+    git answers repository-relative, the run knows its files as `root` spells
+    them, and a monorepo run with `--root package` is where the two differ.
     """
     repo = _repo(tmp_path)
     package = repo / "package"
@@ -160,7 +163,7 @@ def test_the_run_directory_is_only_dropped_below_the_given_root(tmp_path: Path) 
     (package / ".ultraloom" / "runs" / "0001.jsonl").write_text("{}\n", encoding="utf-8")
     (package / "own.py").write_text("x = 1\n", encoding="utf-8")
 
-    assert changed_files(package) == ("own.py",)
+    assert changed_files(package) == (".ultraloom/runs/0001.jsonl", "own.py")
 
 
 def test_a_root_git_ignores_is_an_error_not_an_empty_answer(tmp_path: Path) -> None:
@@ -301,15 +304,16 @@ def test_changed_since_reports_a_path_once(tmp_path: Path) -> None:
     assert changed_since(repo, base) == ("a.c",)
 
 
-def test_changed_since_leaves_out_the_run_directory(tmp_path: Path) -> None:
-    """ultraloom's own journal is not the repairer's doing."""
+def test_changed_since_reports_the_run_directory_too(tmp_path: Path) -> None:
+    """Same answer as `changed_files`, and for the same reason: whose doing a
+    change is belongs to the caller that knows which files are its own."""
     repo = _repo(tmp_path)
     base = head_commit(repo)
     runs = repo / RUN_DIR
     runs.mkdir(parents=True)
     (runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
 
-    assert changed_since(repo, base) == ()
+    assert changed_since(repo, base) == (".ultraloom/runs/0001.jsonl",)
 
 
 def test_changed_since_answers_relative_to_root_in_a_monorepo(tmp_path: Path) -> None:

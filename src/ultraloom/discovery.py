@@ -58,12 +58,21 @@ class FlowContext:
     its options should not have to know about it. `None` means the run recorded
     none -- older runs did not -- which is a different answer from "the tree
     was clean".
+
+    `run_files` is the fifth: the paths, as `root` spells them, that this run
+    writes itself -- its journal and its marker. They come into being while the
+    repair agent works, so a guard that counted them would report ultraloom's
+    own doing as the agent's. Named one by one rather than by their directory,
+    because every *other* run's marker in that directory is something the agent
+    can write and nobody else did. Empty means a caller that has no run id, and
+    then nothing is subtracted, which is the safe direction.
     """
 
     root: Path
     config: Config
     options: Mapping[str, str] = field(default_factory=dict)
     baseline: Baseline | None = None
+    run_files: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
