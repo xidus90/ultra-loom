@@ -1,5 +1,7 @@
 # ultraloom
 
+[Deutsch](README.de.md)
+
 A check chain that puts one interface in front of ruff, eslint, gdlint, mypy,
 tsc, pytest, vitest and coverage — and an optional graph harness for agent
 flows.
