@@ -198,9 +198,12 @@ def test_head_commit_is_the_sha_of_head(tmp_path: Path) -> None:
     sha = head_commit(repo)
 
     assert len(sha) == 40
-    assert sha == subprocess.run(
-        ("git", "rev-parse", "HEAD"), cwd=repo, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    assert (
+        sha
+        == subprocess.run(
+            ("git", "rev-parse", "HEAD"), cwd=repo, capture_output=True, text=True, check=True
+        ).stdout.strip()
+    )
 
 
 def test_head_commit_reads_a_detached_head(tmp_path: Path) -> None:
