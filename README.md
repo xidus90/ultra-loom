@@ -303,6 +303,12 @@ green because its test was edited is the one repair worth nothing. Coverage is
 never repaired at all, for the same reason: closing a coverage gap means
 writing tests.
 
+Every repair is measured against the commit the run started on, so this flow
+starts only inside a git repository; elsewhere there is nothing to measure
+against, and a run begun without one would pause and then refuse every answer.
+A `resume` of an older run whose marker names no commit is refused the same
+way — start a new run instead.
+
 ```toml
 [verify]
 # Required by this flow: the paths the repairer must leave alone.
