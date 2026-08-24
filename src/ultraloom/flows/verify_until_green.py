@@ -375,7 +375,11 @@ def make_guard(
         try:
             reported = differ(root, baseline.commit)
         except WorktreeError as error:
-            # A guard that cannot see the working tree must stop the run.
+            # A guard that cannot answer must stop the run, and there are
+            # now two ways of not answering: an unreadable working tree, and
+            # a baseline commit git cannot resolve -- a run resumed after
+            # the commit it started on was thrown away. Neither may be read
+            # as "nothing changed".
             raise FlowExit(_EXIT_TOUCHED_A_TEST, str(error)) from error
         # Subtracted before anything else, so `touched` -- which feeds the
         # stagnation check -- also counts only what this run produced.

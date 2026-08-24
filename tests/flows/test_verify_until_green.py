@@ -771,22 +771,36 @@ def test_a_source_file_dirty_before_the_run_does_not_count_as_touched() -> None:
 
 
 def test_assemble_takes_the_baseline_once_when_it_builds_the_graph(tmp_path: Path) -> None:
-    """Once, at build time: asked again per round it would absolve the repairer."""
+    """Once, at build time: asked again per round it would absolve the repairer.
+
+    Counted on `head` and not on the differ. The baseline is a commit now, and
+    the commit is what a second reading would move: a run taking a fresh HEAD
+    each round would measure the repairer against its own last commit and find
+    nothing. The differ is asked once per round by design, so counting it would
+    say nothing about this rule at all.
+
+    A real repository, because the baseline's dirty half is `changed_files` on
+    the actual tree; the dirty test file is what proves the baseline was taken
+    at all.
+    """
     repo = _repo(tmp_path)
     (repo / "tests" / "test_cli.py").write_text("x = 2\n", encoding="utf-8")
-    calls: list[int] = []
+    heads: list[Path] = []
 
-    def differ(_root: Path, _base: str) -> tuple[str, ...]:
-        calls.append(1)
-        return ("tests/test_cli.py",)
+    def head(root: Path) -> str:
+        heads.append(root)
+        return "abc"
 
     graph = assemble(
         config=Config(root=repo, test_paths=("tests/",)),
         root=repo,
         check_runner=_runner({"lint": False}),
-        differ=differ,
-        head=lambda _root: "abc",
+        differ=lambda _root, _base: ("tests/test_cli.py",),
+        head=head,
     )
+    # Taken while the graph was built, before any node has run.
+    assert heads == [repo]
+
     model = FakeModel([Reply(RepairResult("looked around", changed=False), tokens=0)])
     result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
         VerifyState(kinds=("lint",))
@@ -796,11 +810,8 @@ def test_assemble_takes_the_baseline_once_when_it_builds_the_graph(tmp_path: Pat
     # and the run ends on stagnation rather than on a false accusation.
     assert result.exit_code == 1
     assert "stagnated" in (result.detail or "")
-    # Once, in the guard. The baseline's dirty half no longer comes from the
-    # differ but from `changed_files` on the real tree -- which is why this
-    # needs a real repository. A second call here would be a second reading
-    # per round, which is what this test forbids.
-    assert len(calls) == 1
+    # Still once, after a full repair round with a guard visit in it.
+    assert heads == [repo]
 
 
 def test_a_repairable_red_next_to_an_unrepairable_one_is_still_repaired(tmp_path: Path) -> None:
