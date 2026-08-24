@@ -224,8 +224,9 @@ stellt vier Regeln auf:
 den Arbeitsbaum allein. `changed_since(root, base)` vereinigt dazu zwei Fragen,
 weil keine von beiden allein antwortet:
 
-- `git diff --name-only --no-renames <base>` sieht, was seit dem Basis-Commit
-  committet wurde, ist aber blind für eine unverfolgte Datei;
+- `git diff --name-only --no-renames <base>` vergleicht den Baum von `base`
+  gegen den auf der Platte und sieht damit alles an verfolgten Dateien —
+  Committetes wie Ungestagtes —, ist aber blind für eine unverfolgte Datei;
 - `git status --porcelain -z -uall` sieht die unverfolgte Datei, liest eine
   committete Änderung aber als sauberen Baum.
 
@@ -374,7 +375,7 @@ Parametern aufbauen wie der ursprüngliche Lauf.
 | rot, stagniert | 1 | Dieselben Prüfungen sind wieder rot, und der Reparaturlauf dazwischen hat keine Datei geändert. |
 | rot, Ring in der Reihenfolge | 1 | `[verify.after]` und die Presets ergeben zusammen einen Kreis. Kein roter Befund, sondern das Ende des Laufs: eine Reparaturrunde gegen den Quelltext schließt keinen Ring in der Konfiguration. Die Meldung nennt den Pfad. |
 | rot, keine Prüfung | 1 | Der Zustand benennt keine Prüfart. Ein grünes Ergebnis, nach dem niemand gesehen hat, ist der eine Fehler, den dieser Ablauf nie erzeugen darf. |
-| rot, kein Basis-Commit | 1 | git gibt für die Projektwurzel keinen Commit her — kein Repository, ein Repository ohne Commit, oder eine von git ignorierte Wurzel. Der Lauf wird abgelehnt, **bevor** die erste Reparaturrunde läuft. Ein fortzusetzender Lauf, dessen Marker keinen Basis-Commit trägt, wird aus demselben Grund abgelehnt. |
+| abgelehnt, kein Basis-Commit | 1 | git gibt für die Projektwurzel keinen Commit her — kein Repository, ein Repository ohne Commit, oder eine von git ignorierte Wurzel. Der Lauf wird abgelehnt, **bevor** die erste Reparaturrunde läuft. Ein fortzusetzender Lauf, dessen Marker keinen Basis-Commit trägt, wird aus demselben Grund abgelehnt. |
 | abgebrochen, Tests angefasst | 4 | Der Reparateur hat einen geschützten Pfad geändert, oder die Wache kann nicht antworten: der Arbeitsbaum ist nicht lesbar, oder git löst den Basis-Commit nicht mehr auf. |
 
 `ultraloom resume` gibt es für diesen Ablauf nicht: er kennt kein Gate, also
@@ -477,9 +478,10 @@ Reparateur geändert hatte und was schon vorher geändert war. Dasselbe zeigte
 sich harmloser in Lauf 0002, wo `touched` die von Hand angelegte
 `.ultraloom/config.toml` enthielt. In der Praxis hieß das: **ein Lauf auf einem
 schmutzigen Arbeitsbaum, in dem ein geschützter Pfad geändert ist, endete immer
-mit Exit 4** — auch wenn der
-Reparateur sich vorbildlich verhalten hatte. Die Sperre war damit nach der
-sicheren Seite hin falsch, aber sie war falsch.
+mit Exit 4** — auch wenn der Reparateur sich vorbildlich verhalten hatte. Die
+Sperre war damit nach der sicheren Seite hin falsch, aber sie war falsch. Wer
+sie schärfen will, nimmt `changed_files` vor dem ersten `repair` als Grundlinie
+auf und meldet nur, was danach dazugekommen ist.
 
 **Geschlossen.** Genau die hier vorgeschlagene Schärfung wurde gebaut: die
 Grundlinie wird vor dem ersten `repair` aufgenommen und abgezogen. Sie hat
@@ -813,12 +815,13 @@ das liegt nahe, dort stehen schließlich die Schwellen —, bekäme bei **jedem*
 Lauf Exit 4 und die Meldung, der Reparateur habe geschützte Dateien angefasst.
 `touched` war damit nicht das, was es zu sein behauptete.
 
-**Geschlossen.** `worktree.changed_files` lässt weg, was unter
-`.ultraloom/runs/` liegt — an der einen Stelle, die sowohl die Grundlinie als
-auch `guard` lesen, und erst nachdem die Pfade auf `root` bezogen sind, weil nur
-diese Schreibweise passt. Der Rest von `.ultraloom/` bleibt sichtbar:
-`config.toml` trägt die Schwellen, gegen die geprüft wird, und wer daran ändert,
-ist genau der Fall, für den `guard` da ist. Drei Tests in `test_worktree.py`
+**Geschlossen.** `worktree._relocate` lässt weg, was unter `.ultraloom/runs/`
+liegt — an der einen Stelle, durch die beide Antworten laufen: `changed_files`,
+aus dem die Grundlinie entsteht, und `changed_since`, das `guard` liest. Und
+erst nachdem die Pfade auf `root` bezogen sind, weil nur diese Schreibweise
+passt. Der Rest von `.ultraloom/` bleibt sichtbar: `config.toml` trägt die
+Schwellen, gegen die geprüft wird, und wer daran ändert, ist genau der Fall,
+für den `guard` da ist. Drei Tests in `test_worktree.py`
 halten die Grenze, einer in `tests/flows/` fährt den gemeldeten Fall mit dem
 echten `differ` und `.ultraloom/` unter den geschützten Pfaden.
 

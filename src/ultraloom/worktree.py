@@ -90,12 +90,13 @@ def _relocate(root: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
 def changed_since(root: Path, base: str) -> tuple[str, ...]:
     """Every path that differs between `base` and the working tree, below `root`.
 
-    The union of two questions, because neither answers alone: `diff` sees what
-    was committed since `base` but is blind to an untracked file, and `status`
-    sees the untracked file but reads a committed change as a clean tree. That
-    second blindness is why this function exists -- a repairer that commits its
-    edit leaves `status` with nothing to report, and the guard built on it then
-    lets an edited test file through.
+    The union of two questions, because neither answers alone: `diff` compares
+    the tree of `base` against the one on disk -- so it sees every tracked
+    file that differs, committed or not -- but is blind to an untracked file,
+    and `status` sees the untracked file but reads a committed change as a
+    clean tree. That second blindness is why this function exists -- a repairer
+    that commits its edit leaves `status` with nothing to report, and the guard
+    built on it then lets an edited test file through.
 
     `--no-renames`, so a rename comes back as its old *and* its new path. Git
     would otherwise report the pair as one entry, and a test moved out of the
