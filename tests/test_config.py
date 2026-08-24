@@ -25,6 +25,8 @@ def test_a_project_without_a_config_gets_empty_defaults(tmp_path: Path) -> None:
     assert config.coverage_report is None
     assert config.coverage_threshold == 100
     assert config.mcp_servers == ()
+    assert config.setting_sources == ("project",)
+    assert config.settings_file is None
 
 
 def test_check_commands_are_read(tmp_path: Path) -> None:
@@ -703,3 +705,87 @@ def test_a_config_built_by_hand_is_held_to_the_same_rule(tmp_path: Path) -> None
     """The check sits on the dataclass, not on the reader -- as with `commands`."""
     with pytest.raises(ConfigError, match="cli_path"):
         Config(root=tmp_path, cli_path=tmp_path / "nowhere")
+
+
+def test_without_the_key_a_run_loads_the_projects_own_settings(tmp_path: Path) -> None:
+    write_config(tmp_path, "[agent]\n")
+
+    config = load_config(tmp_path)
+
+    assert config.setting_sources == ("project",)
+    assert config.settings_file is None
+
+
+def test_the_reserved_words_become_setting_sources(tmp_path: Path) -> None:
+    write_config(tmp_path, '[agent]\nsettings = ["local", "project"]\n')
+
+    assert load_config(tmp_path).setting_sources == ("local", "project")
+
+
+def test_the_order_of_the_list_does_not_travel(tmp_path: Path) -> None:
+    """Sorted and duplicate-free: it becomes part of a prompt cache prefix."""
+    write_config(tmp_path, '[agent]\nsettings = ["project", "local", "project"]\n')
+
+    assert load_config(tmp_path).setting_sources == ("local", "project")
+
+
+def test_an_empty_list_is_isolation_and_not_the_default(tmp_path: Path) -> None:
+    write_config(tmp_path, "[agent]\nsettings = []\n")
+
+    config = load_config(tmp_path)
+
+    assert config.setting_sources == ()
+    assert config.settings_file is None
+
+
+def test_a_path_becomes_the_settings_file(tmp_path: Path) -> None:
+    (tmp_path / "hooks").mkdir()
+    named = tmp_path / "hooks" / "repair.json"
+    named.write_text("{}", encoding="utf-8")
+    write_config(tmp_path, '[agent]\nsettings = ["hooks/repair.json"]\n')
+
+    config = load_config(tmp_path)
+
+    assert config.setting_sources == ()
+    assert config.settings_file == named
+
+
+def test_words_and_a_path_may_be_mixed(tmp_path: Path) -> None:
+    named = tmp_path / "repair.json"
+    named.write_text("{}", encoding="utf-8")
+    write_config(tmp_path, '[agent]\nsettings = ["project", "repair.json"]\n')
+
+    config = load_config(tmp_path)
+
+    assert config.setting_sources == ("project",)
+    assert config.settings_file == named
+
+
+def test_settings_that_are_not_a_list_of_strings_are_refused(tmp_path: Path) -> None:
+    write_config(tmp_path, "[agent]\nsettings = 1\n")
+
+    with pytest.raises(ConfigError, match=r"\[agent\].settings must be a list of strings"):
+        load_config(tmp_path)
+
+
+def test_two_files_are_refused_because_the_sdk_loads_one(tmp_path: Path) -> None:
+    for name in ("a.json", "b.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    write_config(tmp_path, '[agent]\nsettings = ["a.json", "b.json"]\n')
+
+    with pytest.raises(ConfigError, match="the SDK loads one"):
+        load_config(tmp_path)
+
+
+def test_a_file_that_is_not_there_is_refused_with_the_three_words(tmp_path: Path) -> None:
+    write_config(tmp_path, '[agent]\nsettings = ["porject"]\n')
+
+    with pytest.raises(ConfigError, match="nor an existing file"):
+        load_config(tmp_path)
+
+
+def test_managed_settings_are_named_rather_than_read_as_a_path(tmp_path: Path) -> None:
+    write_config(tmp_path, '[agent]\nsettings = ["managed"]\n')
+
+    with pytest.raises(ConfigError, match="managed settings always apply"):
+        load_config(tmp_path)

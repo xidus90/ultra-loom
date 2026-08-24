@@ -39,6 +39,16 @@ DEFAULT_TIMEOUT = 600
 # as soon as one project writes the key down.
 CLI_PATH_ENV = "ULTRALOOM_CLI_PATH"
 
+# The three settings files Claude Code discovers on its own. Anything else in
+# [agent].settings is a path to one more file, and that one the SDK loads into
+# the flag layer, where it outranks all three.
+_SETTING_SOURCES = ("user", "project", "local")
+
+# The fourth level. Named here so it can be refused with its own reason rather
+# than die as a file that is not there -- it always applies, and nothing
+# ultraloom sets overrides it.
+_MANAGED = "managed"
+
 
 def _default_parallelism() -> int:
     # process_cpu_count honours a CPU affinity mask, which a build agent may
@@ -64,6 +74,11 @@ class Config:
     # Where the Claude CLI is, when the SDK's own search does not find it. None
     # is the normal case and means "let the SDK look".
     cli_path: Path | None = None
+    # Which settings a run loads, and one file it loads on top of them. Sorted
+    # and duplicate-free: this ends up in the CLI command and therefore in a
+    # prompt cache prefix, where set iteration order must never leak.
+    setting_sources: tuple[str, ...] = ("project",)
+    settings_file: Path | None = None
     test_paths: tuple[str, ...] = ()
     timeout: int = DEFAULT_TIMEOUT
     godot_import: bool = True
@@ -198,6 +213,7 @@ def load_config(root: Path) -> Config:
         raise ConfigError(f"{path}: [exec].prefix must be a string")
 
     cli_path = _cli_path(agent.get("cli_path"), path)
+    setting_sources, settings_file = _settings_from(agent.get("settings"), root, path)
 
     servers = agent.get("mcp_servers", [])
     if not isinstance(servers, list) or not all(isinstance(name, str) for name in servers):
@@ -212,6 +228,8 @@ def load_config(root: Path) -> Config:
         coverage_threshold=threshold,
         mcp_servers=tuple(servers),
         cli_path=cli_path,
+        setting_sources=setting_sources,
+        settings_file=settings_file,
         test_paths=tuple(raw_tests),
         timeout=timeout,
         godot_import=godot_import,
@@ -235,6 +253,47 @@ def _cli_path(configured: object, path: Path) -> Path | None:
         if candidate is not None and candidate.strip():
             return Path(candidate.strip())
     return None
+
+
+def _settings_from(
+    configured: object, root: Path, path: Path
+) -> tuple[tuple[str, ...], Path | None]:
+    """The words become sources, a path becomes the one named file.
+
+    One key rather than two, because the two SDK fields behind it only make
+    sense together: a run that names a file and forgets to empty the sources
+    would load the file *and* everything it meant to replace.
+    """
+    if configured is None:
+        # Absent means the default, and the default is the project's own
+        # versioned settings -- the only source that travels into a worktree.
+        return ("project",), None
+    if not isinstance(configured, list) or not all(isinstance(entry, str) for entry in configured):
+        raise ConfigError(f"{path}: [agent].settings must be a list of strings")
+
+    sources: list[str] = []
+    files: list[str] = []
+    for entry in configured:
+        if entry in _SETTING_SOURCES:
+            sources.append(entry)
+        elif entry == _MANAGED:
+            raise ConfigError(
+                f"{path}: [agent].settings names {entry!r}, but managed settings always "
+                "apply and cannot be selected"
+            )
+        elif (root / entry).is_file():
+            files.append(entry)
+        else:
+            raise ConfigError(
+                f'{path}: [agent].settings: {entry!r} is neither "user"/"project"/"local" '
+                f"nor an existing file under {root}"
+            )
+    if len(files) > 1:
+        raise ConfigError(
+            f"{path}: [agent].settings names {len(files)} files ({', '.join(files)}); "
+            "the SDK loads one"
+        )
+    return tuple(sorted(set(sources))), (root / files[0] if files else None)
 
 
 def _parallelism(value: object, path: Path) -> int:
