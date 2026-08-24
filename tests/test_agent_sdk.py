@@ -40,6 +40,8 @@ class _Options:
     effort: str | None = None
     cwd: str | None = None
     output_format: dict[str, Any] | None = None
+    setting_sources: list[str] | None = None
+    settings: str | None = None
 
 
 @dataclass
@@ -348,6 +350,22 @@ def test_every_name_the_adapter_uses_exists_on_the_installed_sdk(tmp_path: Path)
         f"the SDK no longer takes {sorted(set(with_cli) - option_fields)}"
     )
 
+    # Same reason as cli_path: `settings` appears only when a project named a
+    # file, so the shape above never carries it.
+    with_file = AgentSdkModel(
+        cwd=tmp_path, setting_sources=(), settings_file=tmp_path / "repair.json"
+    )._options_for(a_request())
+    assert set(with_file) <= option_fields, (
+        f"the SDK no longer takes {sorted(set(with_file) - option_fields)}"
+    )
+
+    # Names are not enough here either: a source the SDK does not know would be
+    # passed straight through to the CLI and change which files load.
+    known = set(typing.get_args(sdk.types.SettingSource))
+    assert set(options["setting_sources"]) <= known, (
+        f"the SDK no longer knows {sorted(set(options['setting_sources']) - known)}"
+    )
+
     # Names are not enough. An unrecognised permission mode is the difference
     # between "denied at once" and whatever the SDK falls back to, and the
     # harness runs unattended, where that difference is the whole guarantee.
@@ -562,3 +580,36 @@ def test_the_installed_wheel_bundles_its_cli_where_ultraloom_looks() -> None:
 
 def _never_called(name: str) -> str | None:  # pragma: no cover  # the assertion is that it is not
     raise AssertionError(f"the PATH was searched for {name!r} although the CLI was already known")
+
+
+def test_a_run_loads_the_projects_own_settings_by_default(
+    stub_sdk: StubSdk, tmp_path: Path
+) -> None:
+    _ask(tmp_path)
+
+    _prompt, options = stub_sdk.calls[0]
+    assert options.setting_sources == ["project"]
+    assert options.settings is None
+
+
+def test_configured_sources_reach_the_sdk(stub_sdk: StubSdk, tmp_path: Path) -> None:
+    from ultraloom.model.agent_sdk import AgentSdkModel
+
+    AgentSdkModel(cwd=tmp_path, setting_sources=("local", "project")).ask(a_request())
+
+    _prompt, options = stub_sdk.calls[0]
+    assert options.setting_sources == ["local", "project"]
+
+
+def test_a_named_settings_file_reaches_the_sdk_as_a_string(
+    stub_sdk: StubSdk, tmp_path: Path
+) -> None:
+    from ultraloom.model.agent_sdk import AgentSdkModel
+
+    named = tmp_path / "repair.json"
+
+    AgentSdkModel(cwd=tmp_path, setting_sources=(), settings_file=named).ask(a_request())
+
+    _prompt, options = stub_sdk.calls[0]
+    assert options.setting_sources == []
+    assert options.settings == str(named)

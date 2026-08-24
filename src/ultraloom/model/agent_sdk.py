@@ -11,7 +11,7 @@ import asyncio
 import dataclasses
 import shutil
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -100,9 +100,17 @@ class AgentSdkModel:
     `FakeModel` does — the port is a shape, not a base class.
     """
 
-    def __init__(self, cwd: Path, cli_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        cwd: Path,
+        cli_path: Path | None = None,
+        setting_sources: Sequence[str] = ("project",),
+        settings_file: Path | None = None,
+    ) -> None:
         self._cwd = cwd
         self._cli_path = cli_path
+        self._setting_sources = tuple(setting_sources)
+        self._settings_file = settings_file
 
     def ask(self, request: Request) -> Reply:
         """Answer one request, or raise ModelError."""
@@ -166,6 +174,10 @@ class AgentSdkModel:
             "permission_mode": "dontAsk",
             "effort": request.effort,
             "cwd": str(self._cwd),
+            # Always passed, never left to the SDK: `None` there means "load
+            # every source, like the CLI", which is a machine's answer and not
+            # a project's. An empty list is isolation and says so.
+            "setting_sources": list(self._setting_sources),
             "output_format": {"type": "json_schema", "schema": _schema_of(request.schema)},
         }
         if self._cli_path is not None:
@@ -173,6 +185,10 @@ class AgentSdkModel:
             # answer where ultraloom has none, and what it makes of that is the
             # SDK's business to change.
             options["cli_path"] = str(self._cli_path)
+        if self._settings_file is not None:
+            # The flag layer, which outranks all three discovered files. Only
+            # when a project named one — the same reason cli_path is optional.
+            options["settings"] = str(self._settings_file)
         return options
 
 
