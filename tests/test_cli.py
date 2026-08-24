@@ -915,6 +915,44 @@ def test_resume_says_which_marker_it_could_not_read(
     assert "broken line" in capsys.readouterr().err
 
 
+def test_an_empty_marker_is_refused_by_name(tmp_path: Path) -> None:
+    """An empty marker cannot say which flow a run belongs to.
+
+    Tuple unpacking would end the command in a bare ValueError naming neither
+    the file nor the problem -- the same reason a lost separator raises.
+    """
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("", encoding="utf-8")
+
+    with pytest.raises(MarkerError) as raised:
+        _recorded_run(tmp_path, "0001")
+
+    assert "0001.flow" in str(raised.value)
+
+
+def test_a_marker_whose_first_line_is_blank_is_refused_too(tmp_path: Path) -> None:
+    """A leading blank line still leaves the file saying nothing about its flow."""
+    marker = _marker(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("\nchecks=edit\n", encoding="utf-8")
+
+    with pytest.raises(MarkerError):
+        _recorded_run(tmp_path, "0001")
+
+
+def test_resume_of_a_run_with_an_empty_marker_names_the_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A sentence on stderr and exit 1, not a traceback out of unpacking."""
+    write_flow(tmp_path, "plain", A_FLOW)
+    main(["run", "plain", "--root", str(tmp_path), "--no-model"])
+    _marker(tmp_path).write_text("", encoding="utf-8")
+
+    assert main(["resume", "0001", "--root", str(tmp_path)]) == 1
+    assert "0001.flow" in capsys.readouterr().err
+
+
 def test_a_blank_line_in_a_marker_is_not_a_broken_option(tmp_path: Path) -> None:
     """A trailing newline, an editor's blank line: neither says anything is wrong."""
     marker = _marker(tmp_path)

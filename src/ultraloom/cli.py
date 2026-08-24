@@ -357,7 +357,14 @@ def _recorded_run(root: Path, run_id: str) -> tuple[str, dict[str, str], Baselin
     marker = root / RUN_DIR / f"{run_id}.flow"
     if not marker.exists():
         return None
-    flow_name, *rest = marker.read_text(encoding="utf-8").splitlines()
+    lines = marker.read_text(encoding="utf-8").splitlines()
+    if not lines or not lines[0].strip():
+        # An empty marker cannot say which flow the run belongs to. Raised
+        # rather than unpacked: `flow_name, *rest = lines` would end the
+        # command in a bare ValueError naming neither the file nor the
+        # problem -- the same reason a lost separator raises below.
+        raise MarkerError(f"{marker}: says nothing -- not even which flow it belongs to")
+    flow_name, *rest = lines
     options: dict[str, str] = {}
     for line in rest:
         if not line:
