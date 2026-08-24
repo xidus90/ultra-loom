@@ -1,5 +1,7 @@
 # verify-until-green
 
+[English](verify-until-green.md)
+
 Der erste Ablauf, den ultraloom mitliefert. Er führt die Prüfkette aus, lässt
 einen Agenten reparieren, was rot ist, prüft danach, ob der Agent sich an die
 Regeln gehalten hat, und beginnt von vorn — bis alles grün ist oder ehrlich rot.
@@ -17,6 +19,7 @@ ultraloom run verify_until_green [--checks <liste|profil>] [--max-rounds <n>]
 
 ## Der Graph
 
+<!-- flow-graph -->
 ```mermaid
 flowchart TD
     check -->|kein Fehler| END
@@ -195,6 +198,46 @@ eigenen Vor-Tor: es weiß, welche Hooks in seine `project.godot` gehören, und
 kann die Datei prüfen, bevor irgendetwas startet. Der Griff ist, die geänderte
 Datei zu verwerfen.
 
+## Was ein Lauf erbt
+
+Ein Reparaturlauf startet Claude Code, und Claude Code liest
+Einstellungsdateien — Hooks, Berechtigungen, Umgebung. Welche davon er liest,
+sagt `[agent].settings` in `.ultraloom/config.toml`. Ohne den Schlüssel gilt
+`["project"]`: die versionierte `.claude/settings.json` des Zielprojekts und
+sonst nichts.
+
+```mermaid
+flowchart TD
+    managed["Managed settings<br/>managed-settings.json, MDM<br/>Rang 1"]
+    named["benannte Datei<br/>settings = ['hooks/repair.json']<br/>Rang 2"]
+    local[".claude/settings.local.json<br/>nur mit 'local'<br/>Rang 3"]
+    project[".claude/settings.json<br/>Standard 'project'<br/>Rang 4"]
+    user["~/.claude/settings.json<br/>nur mit 'user'<br/>Rang 5"]
+    run(["der Reparaturlauf"])
+
+    managed -->|immer, nicht abwählbar| run
+    named -->|schlägt alles darunter| run
+    local --> run
+    project --> run
+    user --> run
+```
+
+Die Ränge sind die von Claude Code, nicht die von ultraloom: bei einem
+Konflikt in einem skalaren Schlüssel gewinnt der kleinere Rang. Hooks summieren
+sich dagegen, statt einander zu verdrängen.
+
+Warum `project` der Standard ist, entscheidet der Worktree. Die versionierte
+Datei reist im Commit mit und ist in jedem frischen Arbeitsbaum da;
+`settings.local.json` ist untracked und bleibt im Hauptcheckout zurück, und
+`~/.claude/settings.json` gehört der Maschine und nicht dem Projekt. Gemessen
+kommt eine zweite Wirkung dazu: `["project"]` statt „alles" senkte den Prompt
+der ersten Runde von 14 381 auf 4 901 Token, weil die Plugins und Skills aus
+den Benutzereinstellungen nicht mehr geladen werden.
+
+Die Vollform steht in der Konfigurationsreferenz des README unter
+`[agent].settings`; die Messungen stehen in
+`docs/.superpowers/specs/2026-08-24-agent-settings-sources-design.md`.
+
 ## Der Agent
 
 Werkzeugprofil `edit`, Effort `high`, Schema `RepairResult` mit den Feldern
@@ -315,6 +358,26 @@ läuft; die CLI meldet ihn als Ladefehler des Ablaufs mit Exit 1. Eine Wache, di
 gegen nichts misst, sagt zu allem ja, und Nein-Sagen ist die ganze Aufgabe
 dieses Ablaufs. Die halbe Grundlinie — nur `dirty`, ohne Commit — wird deshalb
 gar nicht erst gebildet: sie läse sich an jeder späteren Stelle wie eine ganze.
+
+### Grundlinie und Wache im Bild
+
+```mermaid
+flowchart TD
+    start(["Lauf beginnt"]) --> baseline["Grundlinie einmal nehmen:<br/>commit = wogegen gemessen wird<br/>dirty = was schon vorher schmutzig war"]
+    baseline --> repair["repair ändert Dateien"]
+    repair --> gitdiff["git diff --no-renames gegen commit<br/>sieht auch Committetes"]
+    repair --> gitstatus["git status -uall<br/>sieht auch Unverfolgtes"]
+    gitdiff --> union["Vereinigung beider Antworten"]
+    gitstatus --> union
+    union --> subtract["minus dirty der Grundlinie"]
+    subtract --> judge{"trifft ein geschützter Pfad?"}
+    judge -->|ja| red(["Exit 4: der Agent hat die Regeln gebrochen"])
+    judge -->|nein| again(["weiter mit check"])
+```
+
+Beide Fragen stehen da, weil keine allein antwortet, und die Grundlinie wird
+abgezogen, weil `guard` „was hat der Agent getan" beantwortet und nicht „was
+ist an diesem Baum schmutzig".
 
 ### Die Grundlinie gehört zum Lauf, nicht zum Prozess
 
@@ -655,26 +718,43 @@ sich sonst läse, als wäre die Abdeckung geprüft worden.
 
 ### Führt das SDK die Hooks des Projekts zusätzlich aus?
 
-Abschnitt 17 des Kern-Designs fragt es, und die Antwort aus dem
-Sitzungsprotokoll von Lauf 0005 ist: **teilweise ja.** `SessionStart`
-(`session_start.py`, 760 ms) und `Stop` (`lint.py`, 1180 ms) liefen mit; der
-`SessionStart`-Hook schrieb dabei eine `override.cfg` in den Arbeitsbaum.
-`PostToolUse` — und damit die teure Prüfung `godot_quality.py` nach jeder
-Bearbeitung — erscheint nach dem `Edit` des Reparateurs **nicht** im Protokoll.
-Genauer: doppelt geprüft wird **teilweise**. `lint.py` ist eine zweite
+Abschnitt 17 des Kern-Designs fragt es. Die Antwort aus dem Sitzungsprotokoll
+von Lauf 0005 lautete „teilweise ja"; gemessen lautet sie **ja**.
+
+Fünf Läufe am 24.08.2026 gegen ein Wegwerf-Repo, dessen Hooks nichts tun außer
+ihren eigenen Namen in eine Markerdatei zu schreiben: `SessionStart`,
+`PostToolUse` (Matcher `Write|Edit`) und `Stop` liefen in **jedem** Lauf, der
+überhaupt Einstellungen lud. Der SDK-Pfad führt `PostToolUse` also aus. Dass er
+im Protokoll von Lauf 0005 fehlte, liegt nicht am SDK — entweder zeigte das
+Protokoll ihn nicht, oder spaces `post_edit.py` starb, bevor er etwas tat. Das
+ist ein Verdacht gegen space und kein offener Punkt hier.
+
+Was Lauf 0005 sonst zeigte, bleibt richtig. `lint.py` ist eine zweite
 Linter-Instanz und lief mit — sie prüft in space allerdings das Wiki und nicht
 den GDScript-Code, und ihr Befund geht in den Kontext des Agenten, nicht in das
-Urteil des Ablaufs. Ausgeblieben ist die teure Doppelprüfung: `godot_quality.py`
-über `PostToolUse` nach jeder Bearbeitung. Der Reparaturlauf zahlt damit rund
-zwei Sekunden Hook-Zeit und bekommt einen Seiteneffekt im Baum. Wer das nicht
-will, setzt `setting_sources` im SDK-Adapter; ultraloom setzt das Feld heute
-nicht.
+Urteil des Ablaufs. Der `SessionStart`-Hook schrieb eine `override.cfg` in den
+Arbeitsbaum; das ist kein fremder Seiteneffekt, sondern die Vorbedingung dafür,
+dass parallele Godot-Worktrees einander nicht den `user://`-Save löschen (siehe
+*Was ein Godot-Projekt vorher braucht*).
 
-Nebenbei zeigte dasselbe Protokoll, dass das SDK dem Reparateur die globalen
-MCP-Server des Benutzers anbietet. Er rief `mcp__context-mode__ctx_execute` auf,
-um sein Ergebnis mit einem eigenen gdlint-Lauf nachzuprüfen, und wurde von
-`permission_mode: "dontAsk"` abgewiesen — die Sperre hält, aber die Werkzeuge
-stehen im Prompt und kosten eine Werkzeugrunde.
+Wer die Hooks des Projekts **nicht** will, sagt es heute in der Konfiguration
+statt im Adapter — siehe *Was ein Lauf erbt*. Der Standard `["project"]` lädt
+die versionierten Einstellungen des Zielprojekts; `settings = []` lud in der
+Messung keinen einzigen Hook, und die Bearbeitung des Agenten fand trotzdem
+statt. Der Preis der Vollständigkeit ist klein und zählbar: rund zwei Sekunden
+Hook-Zeit pro Runde.
+
+Dasselbe Protokoll zeigte, dass das SDK dem Reparateur die global
+konfigurierten MCP-Server des Benutzers anbietet. Er rief
+`mcp__context-mode__ctx_execute` auf, um sein Ergebnis mit einem eigenen
+gdlint-Lauf nachzuprüfen, und wurde von `permission_mode: "dontAsk"`
+abgewiesen. Die Sperre hält also. Die naheliegende Folgerung — die Werkzeuge
+stünden im Prompt und kosteten Token — ist gemessen **falsch**: zwei Läufe, die
+sich nur in den geerbten MCP-Servern unterschieden, hatten einen
+byte-identischen Prompt. Der `tools`-Deckel des Adapters nennt die eingebauten
+Werkzeuge abschließend, und was er nicht nennt, erreicht den Prompt nicht. Die
+verlorene Werkzeugrunde war etwas anderes: der Reparateur nannte ein Werkzeug,
+das ihm nie angeboten worden war.
 
 ## Die Läufe mit Stufen: space, 23.08.2026
 

@@ -18,6 +18,7 @@ ultraloom run verify_until_green [--checks <liste|profil>] [--max-rounds <n>]
 
 ## The graph
 
+<!-- flow-graph -->
 ```mermaid
 flowchart TD
     check -->|no failure| END
@@ -191,6 +192,45 @@ in its own pre-gate: it knows which hooks belong in its `project.godot` and
 can check the file before anything starts. The fix is to discard the changed
 file.
 
+## What a run inherits
+
+A repair run starts Claude Code, and Claude Code reads settings files — hooks,
+permissions, environment. Which of them it reads is what `[agent].settings` in
+`.ultraloom/config.toml` says. Without the key, `["project"]` applies: the
+target project's versioned `.claude/settings.json` and nothing else.
+
+```mermaid
+flowchart TD
+    managed["Managed settings<br/>managed-settings.json, MDM<br/>rank 1"]
+    named["named file<br/>settings = ['hooks/repair.json']<br/>rank 2"]
+    local[".claude/settings.local.json<br/>only with 'local'<br/>rank 3"]
+    project[".claude/settings.json<br/>default 'project'<br/>rank 4"]
+    user["~/.claude/settings.json<br/>only with 'user'<br/>rank 5"]
+    run(["the repair run"])
+
+    managed -->|always, cannot be deselected| run
+    named -->|outranks everything below| run
+    local --> run
+    project --> run
+    user --> run
+```
+
+The ranks are Claude Code's, not ultraloom's: on a conflict in a scalar key,
+the lower rank wins. Hooks, by contrast, add up rather than displace one
+another.
+
+Why `project` is the default is decided by the worktree. The versioned file
+travels in the commit and is there in every fresh working tree;
+`settings.local.json` is untracked and stays behind in the main checkout, and
+`~/.claude/settings.json` belongs to the machine rather than to the project.
+Measured, a second effect comes with it: `["project"]` instead of "everything"
+cut the first round's prompt from 14 381 to 4 901 tokens, because the plugins
+and skills from the user settings stop loading.
+
+The full form is in the README's configuration reference under
+`[agent].settings`; the measurements are in
+`docs/.superpowers/specs/2026-08-24-agent-settings-sources-design.md`.
+
 ## The Agent
 
 Tool profile `edit`, effort `high`, schema `RepairResult` with the fields
@@ -310,6 +350,26 @@ reports it as a flow load error with exit 1. A guard measuring against nothing
 says yes to everything, and saying no is this flow's entire job. The half
 baseline — only `dirty`, without a commit — is therefore never formed at all:
 anywhere downstream it would read as a whole one.
+
+### The baseline and the guard, drawn
+
+```mermaid
+flowchart TD
+    start(["run begins"]) --> baseline["take the baseline once:<br/>commit = what is measured against<br/>dirty = what was already dirty before"]
+    baseline --> repair["repair changes files"]
+    repair --> gitdiff["git diff --no-renames against commit<br/>sees committed work too"]
+    repair --> gitstatus["git status -uall<br/>sees untracked files too"]
+    gitdiff --> union["union of both answers"]
+    gitstatus --> union
+    union --> subtract["minus the baseline's dirty"]
+    subtract --> judge{"does it hit a protected path?"}
+    judge -->|yes| red(["exit 4: the agent broke the rules"])
+    judge -->|no| again(["on to check"])
+```
+
+Both questions are there because neither answers alone, and the baseline is
+subtracted because `guard` answers "what did the agent do" and not "what is
+dirty in this tree".
 
 ### The Baseline Belongs to the Run, Not the Process
 
@@ -646,25 +706,41 @@ though coverage had been checked.
 
 ### Does the SDK run the project's hooks as well?
 
-Section 17 of the core design asks it, and the answer from run 0005's session
-log is: **partially yes.** `SessionStart` (`session_start.py`, 760 ms) and
-`Stop` (`lint.py`, 1180 ms) ran along; the `SessionStart` hook wrote an
-`override.cfg` into the working tree as it did. `PostToolUse` — and with it
-the expensive `godot_quality.py` check after every edit — does **not** appear
-in the log after the repairer's `Edit`. More precisely: double checking
-happens **partially**. `lint.py` is a second linter instance and did run —
-though in space it checks the wiki, not the GDScript code, and its finding
-goes into the agent's context, not into the flow's verdict. Missing was the
-expensive double check: `godot_quality.py` over `PostToolUse` after every
-edit. The repair run thus pays around two seconds of hook time and gets a
-side effect in the tree. Whoever does not want that sets `setting_sources` in
-the SDK adapter; ultraloom does not set the field today.
+Section 17 of the core design asks it. The answer from run 0005's session log
+was "partially yes"; measured, it is **yes**.
 
-Incidentally, the same log showed that the SDK offers the repairer the user's
-global MCP servers. It called `mcp__context-mode__ctx_execute` to verify its
-result with a gdlint run of its own, and was refused by
-`permission_mode: "dontAsk"` — the lock holds, but the tools stand in the
-prompt and cost a tool round.
+Five runs on 24.08.2026 against a throwaway repo whose hooks do nothing but
+write their own name into a marker file: `SessionStart`, `PostToolUse`
+(matcher `Write|Edit`) and `Stop` ran in **every** run that loaded any
+settings at all. So the SDK path does run `PostToolUse`. Its absence from run
+0005's log is not the SDK's doing — either the log did not show it, or space's
+`post_edit.py` died before it did anything. That is a suspicion about space,
+not an open point here.
+
+What run 0005 showed otherwise still holds. `lint.py` is a second linter
+instance and did run — though in space it checks the wiki, not the GDScript
+code, and its finding goes into the agent's context, not into the flow's
+verdict. The `SessionStart` hook wrote an `override.cfg` into the working
+tree; that is not a foreign side effect but the precondition for parallel
+Godot worktrees not deleting each other's `user://` save (see *What a Godot
+project needs first*).
+
+Whoever does **not** want the project's hooks says so in the configuration
+today rather than in the adapter — see *What a run inherits*. The default
+`["project"]` loads the target project's versioned settings; `settings = []`
+loaded not a single hook in the measurement, and the agent's edit still
+happened. The price of completeness is small and countable: around two seconds
+of hook time per round.
+
+The same log showed that the SDK offers the repairer the user's globally
+configured MCP servers. It called `mcp__context-mode__ctx_execute` to verify
+its result with a gdlint run of its own, and was refused by
+`permission_mode: "dontAsk"`. So the lock holds. The obvious conclusion — that
+the tools sit in the prompt and cost tokens — is measurably **false**: two
+runs differing only in their inherited MCP servers had a byte-identical
+prompt. The adapter's `tools` cap names the built-in tools exhaustively, and
+what it does not name never reaches the prompt. The lost tool round was
+something else: the repairer named a tool it had never been offered.
 
 ## The runs with stages: space, 23.08.2026
 
