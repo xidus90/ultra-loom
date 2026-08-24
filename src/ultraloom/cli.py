@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     # Type-only, so the check side still imports nothing from the harness at
     # runtime — the boundary is about sys.modules, not about annotations.
     from ultraloom.discovery import Baseline
+    from ultraloom.graph import Graph
     from ultraloom.model.port import Model
 
 _EXIT_OK = 0
@@ -275,6 +276,21 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
         print(str(error), file=sys.stderr)
         return _EXIT_FAIL
 
+    wants_model = not getattr(args, "no_model", False)
+    if wants_model and _asks_a_model(loaded.graph):
+        # Before anything of the run exists. Without a startable CLI every
+        # agent node fails a few seconds in, once per node, with a message
+        # about the SDK -- and leaves a journal behind for a run that never
+        # had a chance.
+        from ultraloom.model.agent_sdk import find_cli
+        from ultraloom.model.port import ModelError
+
+        try:
+            find_cli(config.cli_path)
+        except ModelError as error:
+            print(str(error), file=sys.stderr)
+            return _EXIT_FAIL
+
     if args.command == "run":
         _remember_run(root, run_id, flow_name, options, taken)
     runner: Runner[object] = Runner(
@@ -458,6 +474,18 @@ def _baseline(root: Path) -> Baseline | None:
         return Baseline(head_commit(root), frozenset(changed_files(root)))
     except WorktreeError:
         return None
+
+
+def _asks_a_model(graph: Graph[object]) -> bool:
+    """Whether this flow has a node that would call the model at all.
+
+    The question the diagnosis above turns on: a flow of code nodes needs no
+    CLI, and refusing to start it on a machine without one would be a check
+    inventing a requirement the run does not have.
+    """
+    from ultraloom.graph import AgentNode
+
+    return any(isinstance(graph.node(name), AgentNode) for name in graph.node_names())
 
 
 def _model(root: Path, config: Config) -> Model:

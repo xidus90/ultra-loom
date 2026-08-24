@@ -98,6 +98,18 @@ unset, which is how a machine that exports the variable switches it off again.
 A path that is not a file is refused when the configuration is read -- before
 the first node, rather than once per agent call.
 
+The same holds when nothing is configured at all: a `run` whose flow has an
+agent node looks for a startable CLI once, before the run exists, and says
+which of the three ways out to take if there is none. A flow of code nodes and
+a run started with `--no-model` never ask the question.
+
+Which wheel of `claude-agent-sdk` gets installed decides whether the agent
+path runs at all, so the extra pins one exact version. The wheels for a
+specific platform carry a `claude` executable; the platform-independent one
+does not, and 0.2.144 shipped no Windows wheel -- so on Windows that release
+leaves the SDK with nothing to start. A lower bound would not have helped: the
+*newer* release was the broken one.
+
 `lint`, `types` and `test` take three shapes, told apart by type: a string is
 one command, a list is several, and a table is the full form with `commands`
 (required, not empty) and `threaded` (default `false`). A string and a table

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import shutil
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Final
@@ -27,6 +29,68 @@ _MCP_PREFIX = "mcp__"
 # guard test in test_agent_sdk.py can hold them against the installed SDK;
 # the stub the unit tests use declares whatever they ask of it.
 RESULT_FIELDS: Final = ("is_error", "subtype", "result", "usage", "structured_output")
+
+# Where a wheel that carries the CLI keeps it, relative to the package root.
+BUNDLE_DIR: Final = "_bundled"
+
+_WINDOWS: Final = sys.platform == "win32"
+
+_NO_CLI: Final = (
+    "no Claude CLI to start: the installed claude-agent-sdk bundles none and none "
+    "was found on PATH. Name one in [agent].cli_path, export ULTRALOOM_CLI_PATH for "
+    "this machine, or install Claude Code natively "
+    "(irm https://claude.ai/install.ps1 | iex)"
+)
+
+
+def find_cli(cli_path: Path | None = None, *, windows: bool = _WINDOWS) -> Path:
+    """The CLI a run would start, or a ModelError saying which way out to take.
+
+    Deliberately a diagnosis and not a second rulebook: it walks the same three
+    places the SDK walks, in the same order, and refuses only where all three
+    come up empty. Being stricter than the SDK would turn this into a check
+    that forbids runs the SDK could have made.
+    """
+    if cli_path is not None:
+        # Its existence is Config's business; what it *is* is this file's,
+        # because the reason a .cmd cannot be started is the SDK's reason.
+        _reject_batch(cli_path, windows)
+        return cli_path
+    bundled = bundled_cli(windows=windows)
+    if bundled is not None:
+        return bundled
+    # `claude.exe` first: shutil.which walks PATH directory-major, so an npm
+    # shim in an early directory shadows a native executable in a later one.
+    for name in ("claude.exe", "claude") if windows else ("claude",):
+        found = shutil.which(name)
+        if found:
+            _reject_batch(Path(found), windows)
+            return Path(found)
+    raise ModelError(_NO_CLI)
+
+
+def bundled_cli(*, windows: bool = _WINDOWS) -> Path | None:
+    """The CLI inside the installed wheel, if this wheel carries one.
+
+    A platform wheel does; the platform-independent one does not, and that is
+    the whole failure this diagnosis exists for.
+    """
+    package = Path(_sdk().__file__ or ".").parent
+    cli = package / BUNDLE_DIR / ("claude.exe" if windows else "claude")
+    return cli if cli.is_file() else None
+
+
+def _reject_batch(cli_path: Path, windows: bool) -> None:
+    """Refuse a .cmd/.bat, the way the SDK does, but before a run has begun."""
+    if not windows or cli_path.suffix.rstrip(". ").lower() not in (".cmd", ".bat"):
+        return
+    raise ModelError(
+        f"{cli_path} is a batch script, and the agent SDK refuses to start one: "
+        "Windows runs .cmd/.bat through cmd.exe, where an argument cannot be "
+        "escaped reliably. Name a claude.exe in [agent].cli_path, export "
+        "ULTRALOOM_CLI_PATH for this machine, or install Claude Code natively "
+        "(irm https://claude.ai/install.ps1 | iex)"
+    )
 
 
 class AgentSdkModel:

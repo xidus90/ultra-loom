@@ -8,8 +8,12 @@ license-files = ["LICENSE"]
 dependencies = []
 
 [project.optional-dependencies]
-# The harness needs the Claude Agent SDK; the check chain must not.
-agent = ["claude-agent-sdk>=0.2.143"]
+# The harness needs the Claude Agent SDK; the check chain must not. Pinned to
+# the exact version, because the wheel decides whether the agent path runs at
+# all: 0.2.144 shipped no win_amd64 wheel, so Windows installs the
+# platform-independent one, which bundles no claude.exe. A lower bound would
+# not have caught that -- the *newer* release was the broken one.
+agent = ["claude-agent-sdk==0.2.143"]
 
 [project.scripts]
 ultraloom = "ultraloom.cli:main"
@@ -20,7 +24,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "coverage[toml]>=7",
-    "claude-agent-sdk>=0.2.143",
+    "claude-agent-sdk==0.2.143",
 ]
 
 [build-system]

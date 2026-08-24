@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import shutil
 import sys
 import typing
 from collections.abc import AsyncIterator
@@ -428,3 +429,136 @@ def test_without_a_cli_path_the_option_is_not_passed_at_all(tmp_path: Path) -> N
     from ultraloom.model.agent_sdk import AgentSdkModel
 
     assert "cli_path" not in AgentSdkModel(cwd=tmp_path)._options_for(a_request())
+
+
+def _bundle(module: ModuleType, tmp_path: Path, name: str) -> Path:
+    """Give the stub module a package directory carrying a bundled CLI."""
+    package = tmp_path / "claude_agent_sdk"
+    (package / "_bundled").mkdir(parents=True)
+    cli = package / "_bundled" / name
+    cli.write_text("", encoding="utf-8")
+    module.__file__ = str(package / "__init__.py")
+    return cli
+
+
+def test_a_configured_cli_is_taken_without_asking_the_path(
+    stub_sdk: StubSdk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Config already proved the file exists; the machine's answer wins."""
+    from ultraloom.model import agent_sdk
+
+    monkeypatch.setattr(shutil, "which", _never_called)
+    cli = tmp_path / "claude.exe"
+    cli.write_text("", encoding="utf-8")
+
+    assert agent_sdk.find_cli(cli, windows=True) == cli
+
+
+def test_a_configured_batch_shim_is_refused_before_the_run_starts(
+    stub_sdk: StubSdk, tmp_path: Path
+) -> None:
+    """The SDK refuses a .cmd for a real reason: Windows runs it through
+    cmd.exe, where arguments cannot be escaped. Saying so here costs no run."""
+    from ultraloom.model import agent_sdk
+
+    shim = tmp_path / "claude.CMD"
+    shim.write_text("", encoding="utf-8")
+
+    with pytest.raises(ModelError, match=r"cmd\.exe"):
+        agent_sdk.find_cli(shim, windows=True)
+
+
+def test_the_bundled_cli_of_the_installed_wheel_is_found(
+    stub_sdk: StubSdk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ultraloom.model import agent_sdk
+
+    monkeypatch.setattr(shutil, "which", _never_called)
+    cli = _bundle(stub_sdk.module, tmp_path, "claude.exe")
+
+    assert agent_sdk.find_cli(windows=True) == cli
+
+
+def test_a_wheel_without_a_bundled_cli_falls_back_to_the_path(
+    stub_sdk: StubSdk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The measured failure: 0.2.144 ships no win_amd64 wheel, so Windows
+    installs the platform-independent one and there is nothing to bundle."""
+    from ultraloom.model import agent_sdk
+
+    _bundle(stub_sdk.module, tmp_path, "unrelated")
+    found = tmp_path / "claude.exe"
+    monkeypatch.setattr(shutil, "which", lambda name: str(found) if "exe" in name else "")
+
+    assert agent_sdk.find_cli(windows=True) == found
+
+
+def test_on_posix_the_path_entry_needs_no_extension(
+    stub_sdk: StubSdk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ultraloom.model import agent_sdk
+
+    _bundle(stub_sdk.module, tmp_path, "claude.exe")  # the wrong name for POSIX
+    found = tmp_path / "claude"
+    monkeypatch.setattr(shutil, "which", lambda name: str(found))
+
+    assert agent_sdk.find_cli(windows=False) == found
+
+
+def test_a_path_holding_only_the_npm_shim_is_no_cli_at_all(
+    stub_sdk: StubSdk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ultraloom.model import agent_sdk
+
+    _bundle(stub_sdk.module, tmp_path, "unrelated")
+    monkeypatch.setattr(shutil, "which", lambda name: str(tmp_path / "claude.CMD"))
+
+    with pytest.raises(ModelError, match=r"cmd\.exe"):
+        agent_sdk.find_cli(windows=True)
+
+
+def test_no_cli_anywhere_names_every_way_out(
+    stub_sdk: StubSdk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ultraloom.model import agent_sdk
+
+    _bundle(stub_sdk.module, tmp_path, "unrelated")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    with pytest.raises(ModelError) as failure:
+        agent_sdk.find_cli(windows=True)
+
+    message = str(failure.value)
+    assert "ULTRALOOM_CLI_PATH" in message
+    assert "[agent].cli_path" in message
+    assert "install.ps1" in message
+
+
+def test_looking_for_the_cli_without_the_agent_extra_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ultraloom.model import agent_sdk
+
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+
+    with pytest.raises(ModelError, match=r"ultraloom\[agent\]"):
+        agent_sdk.find_cli()
+
+
+def test_the_installed_wheel_bundles_its_cli_where_ultraloom_looks() -> None:
+    """The drift guard the stubs cannot be, in the shape RESULT_FIELDS has.
+
+    The wheel is pinned for exactly this reason: 0.2.144 shipped no win_amd64
+    wheel, and the plain one carries no CLI. If the layout moves, ultraloom's
+    diagnosis would start refusing runs the SDK could have made.
+    """
+    sdk = pytest.importorskip("claude_agent_sdk")
+    from ultraloom.model.agent_sdk import BUNDLE_DIR, bundled_cli
+
+    package = Path(sdk.__file__).parent
+    assert (package / BUNDLE_DIR).is_dir(), f"the wheel no longer bundles a {BUNDLE_DIR} directory"
+    assert bundled_cli(windows=sys.platform == "win32") is not None
+
+
+def _never_called(name: str) -> str | None:  # pragma: no cover  # the assertion is that it is not
+    raise AssertionError(f"the PATH was searched for {name!r} although the CLI was already known")

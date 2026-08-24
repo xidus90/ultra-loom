@@ -161,6 +161,25 @@ davon Arbeit bleibt.
 
 ## Der Agentenpfad hängt an einer ungepinnten Fremdversion
 
+**ERLEDIGT** (zum Punkt darunter) — das Extra nennt jetzt genau
+`claude-agent-sdk==0.2.143`, und `run` prüft vor dem ersten Knoten, ob eine
+startbare CLI erreichbar ist. Nachgemessen am 24.08.2026: 0.2.144 ist das
+einzige Release seit 0.2.135 **ohne `win_amd64`-Rad** und zugleich `latest` —
+auf Windows installiert `uv sync` damit das plattformlose Rad, das keine
+`claude.exe` mitbringt. Eine Untergrenze hätte das nicht gefangen, ein Deckel
+veraltet bei jedem Release; eine feste Version sagt, wogegen gemessen wurde.
+Die Diagnose (`agent_sdk.find_cli`) geht dieselben drei Wege wie das SDK —
+konfigurierter Pfad, gebündelte CLI des Rads, `PATH` — und verweigert nur, wenn
+alle drei leer ausgehen; strenger zu sein hieße, Läufe zu verbieten, die das SDK
+hinbekommen hätte. Sie greift nur, wenn der geladene Graph einen Agent-Knoten
+trägt und der Lauf nicht `--no-model` heißt, und sie läuft, bevor Journal und
+Marker entstehen. Ein `test_agent_sdk`-Wächter hält fest, dass das installierte
+Rad seine CLI dort bündelt, wo ultraloom sucht.
+
+Überholt ist dabei ein Halbsatz des Befunds unten: die Meldung des SDK nennt in
+0.2.143 selbst drei Abhilfen, `cli_path` darunter — und das bietet ultraloom
+inzwischen an. Was blieb, war der Zeitpunkt.
+
 **`claude-agent-sdk` ist nicht gepinnt, und die Wahl entscheidet über Lauf oder
 Nichtlauf.** Das Extra nennt weder Untergrenze noch Deckel. In der Umgebung von
 Task 14 löste das auf `0.2.144` auf, und dieses Rad brachte keine

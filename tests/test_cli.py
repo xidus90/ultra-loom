@@ -466,6 +466,9 @@ def test_the_agent_extra_is_used_when_it_is_installed(
     module = ModuleType("ultraloom.model.agent_sdk")
     # A stand-in for the optional extra, which this subproject does not ship.
     module.AgentSdkModel = StandInModel  # type: ignore[attr-defined]  # a stub module grows its attributes
+    # The stand-in replaces the whole module, so it also answers the start-up
+    # question the CLI asks before it builds the model.
+    module.find_cli = lambda _cli_path=None: Path("claude.exe")  # type: ignore[attr-defined]  # a stub module grows its attributes
     monkeypatch.setitem(sys.modules, "ultraloom.model.agent_sdk", module)
     write_flow(tmp_path, "needs_model", A_MODEL_FLOW)
 
@@ -1023,6 +1026,9 @@ def test_the_configured_cli_path_reaches_the_model(
 
     module = ModuleType("ultraloom.model.agent_sdk")
     module.AgentSdkModel = StandInModel  # type: ignore[attr-defined]  # a stub module grows its attributes
+    # The stand-in replaces the whole module, so it also answers the start-up
+    # question the CLI asks before it builds the model.
+    module.find_cli = lambda _cli_path=None: Path("claude.exe")  # type: ignore[attr-defined]  # a stub module grows its attributes
     monkeypatch.setitem(sys.modules, "ultraloom.model.agent_sdk", module)
     monkeypatch.delenv("ULTRALOOM_CLI_PATH", raising=False)
     cli = tmp_path / "claude.exe"
@@ -1046,3 +1052,55 @@ def test_a_run_names_the_two_files_it_writes_itself() -> None:
     assert _run_files("0001") == frozenset(
         {".ultraloom/runs/0001.jsonl", ".ultraloom/runs/0001.flow"}
     )
+
+
+def _no_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A machine on which no startable Claude CLI can be reached."""
+    from ultraloom.model import agent_sdk
+    from ultraloom.model.port import ModelError
+
+    def refuse(_cli_path: Path | None = None) -> Path:
+        raise ModelError("no Claude CLI to start: export ULTRALOOM_CLI_PATH")
+
+    monkeypatch.setattr(agent_sdk, "find_cli", refuse)
+
+
+def test_a_run_needing_the_model_stops_before_it_starts_when_no_cli_is_reachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The finding this closes: without a startable CLI every agent node died
+    after 3.4 seconds, once per node, naming a fault of the SDK's. Nothing of
+    the run may exist afterwards -- no journal, no marker, no run id spent."""
+    _no_cli(monkeypatch)
+    write_flow(tmp_path, "needs_model", A_MODEL_FLOW)
+
+    code = main(["run", "needs_model", "--root", str(tmp_path)])
+
+    assert code == 1
+    assert "ULTRALOOM_CLI_PATH" in capsys.readouterr().err
+    assert not (tmp_path / ".ultraloom" / "runs").exists()
+
+
+def test_a_flow_without_agent_nodes_runs_on_a_machine_without_a_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check is about what the flow will actually do, not about the machine."""
+    _no_cli(monkeypatch)
+    write_flow(tmp_path, "smoke", A_FLOW)
+
+    assert main(["run", "smoke", "--root", str(tmp_path)]) == 0
+
+
+def test_no_model_runs_on_a_machine_without_a_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--no-model` says the run will not ask a model; then no CLI is needed."""
+    _no_cli(monkeypatch)
+    write_flow(tmp_path, "needs_model", A_MODEL_FLOW)
+
+    code = main(["run", "needs_model", "--root", str(tmp_path), "--no-model"])
+
+    # Exit 1 for the node that has no model to ask -- but from the runner, and
+    # only after the run existed, which is the difference being asserted.
+    assert code == 1
+    assert (tmp_path / ".ultraloom" / "runs" / "0001.jsonl").exists()
