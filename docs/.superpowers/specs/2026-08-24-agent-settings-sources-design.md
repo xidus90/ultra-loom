@@ -68,6 +68,23 @@ in Lauf 0005 kostete es eine Werkzeugrunde, weil der Reparateur
 die Sperre nachweislich, und ein Lauf, der ein angebotenes Werkzeug abweist,
 ist besser diagnostizierbar als einer, dem es fehlt.
 
+Dabei ist wichtig, was `[agent].mcp_servers` *nicht* tut: es ist eine
+Erlaubnisliste, keine Ladeliste. Geladen wird ohnehin, was in `~/.claude.json`
+steht, und die Werkzeugdefinitionen stehen im Prompt, unabhängig von dieser
+Liste.
+
+| `[agent].mcp_servers` | Token im Prompt | Werkzeugrunde |
+| --- | --- | --- |
+| leer | voll | eine verschwendete, *wenn* der Reparateur es versucht |
+| nennt den Server | voll, identisch | keine -- der Aufruf geht durch |
+
+Eine leere Liste ist also nicht die sparsame Stellung, sondern die teuerste:
+dieselben Token, plus die Chance auf eine Runde gegen eine Wand. Wer die Token
+sparen will, braucht `strict_mcp_config` (`types.py:1984`, CLI-Flag
+`--strict-mcp-config`) -- die einzige Schraube, die die Definitionen aus dem
+Prompt nimmt. Sie lädt ausschließlich, was der Aufrufer selbst übergibt, und
+ultraloom kennt heute nur Servernamen, keine Serverkonfigurationen.
+
 ## Der Schlüssel
 
 Ein Schlüssel, zwei Wertsorten, weil zwei SDK-Felder dahinterstehen, die nur
