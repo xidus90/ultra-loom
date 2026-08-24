@@ -334,6 +334,13 @@ Prüfung, die grün wird, weil ihr Test bearbeitet wurde, ist die eine
 Reparatur ohne jeden Wert. Coverage wird überhaupt nie repariert, aus
 demselben Grund: Eine Coverage-Lücke schließen heißt, Tests schreiben.
 
+Jede Reparatur wird gegen den Commit gemessen, auf dem der Lauf begonnen hat,
+darum startet dieser Ablauf nur innerhalb eines Git-Repositorys; anderswo gibt
+es nichts, wogegen zu messen wäre, und ein Lauf, der ohne einen begonnen wurde,
+würde pausieren und dann jede Antwort verweigern. Ein `resume` eines älteren Laufs, dessen
+Marker keinen Commit nennt, wird genauso verweigert — dann lieber einen neuen
+Lauf starten.
+
 ```toml
 [verify]
 # Von diesem Ablauf verlangt: die Pfade, die der Reparateur in Ruhe lassen muss.

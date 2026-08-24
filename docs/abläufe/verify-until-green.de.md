@@ -320,10 +320,12 @@ weiß nur dieser Lauf. Die Wache zieht seine beiden namentlich ab, aus
 **fremden** Laufs bleibt damit sichtbar: den kann der Reparateur schreiben, das
 Profil `edit` braucht dafür keine Shell, und vorher sah es niemand.
 
-Kann die Wache nicht antworten, endet der Lauf. Es gibt dafür zwei Wege: der
-Arbeitsbaum ist nicht lesbar — git bricht ab oder lässt sich gar nicht starten —
-oder git löst den Basis-Commit nicht auf — etwa in einem fortgesetzten Lauf,
-dessen Startcommit inzwischen weggeworfen wurde. Eine unbeantwortbare Frage als
+Kann die Wache nicht antworten, endet der Lauf. Es gibt dafür drei Wege: es gibt
+gar keine Grundlinie — siehe unten, über die Kommandozeile wird der Lauf schon
+vor dem Start abgewiesen — oder der Arbeitsbaum ist nicht lesbar — git bricht ab
+oder lässt sich gar nicht starten — oder git löst den Basis-Commit nicht auf —
+etwa in einem fortgesetzten Lauf, dessen Startcommit inzwischen weggeworfen
+wurde. Eine unbeantwortbare Frage als
 „nichts geändert" zu lesen, hebelte genau die Regel aus, für die dieser Knoten
 da ist.
 
@@ -352,12 +354,21 @@ Die Grundlinie speist auch `touched` und damit die Stagnationserkennung: was
 schon vorher schmutzig war, zählt nicht als Änderung dieses Laufs.
 
 Gibt git keinen Commit her — kein Repository, ein Repository ohne Commit, oder
-eine Wurzel, die git ignoriert —, dann **beginnt der Lauf gar nicht erst**.
-`assemble` wirft einen `ValueError`, und zwar bevor die erste Reparaturrunde
-läuft; die CLI meldet ihn als Ladefehler des Ablaufs mit Exit 1. Eine Wache, die
-gegen nichts misst, sagt zu allem ja, und Nein-Sagen ist die ganze Aufgabe
-dieses Ablaufs. Die halbe Grundlinie — nur `dirty`, ohne Commit — wird deshalb
-gar nicht erst gebildet: sie läse sich an jeder späteren Stelle wie eine ganze.
+eine Wurzel, die git ignoriert —, dann **beginnt der Lauf gar nicht erst**. Die
+Verweigerung gehört der CLI: `build` erklärt `needs_baseline`, und `run` weist
+den Start mit Exit 1 ab, bevor es ein Journal oder einen Marker gibt. Eine
+Wache, die gegen nichts misst, sagt zu allem ja, und Nein-Sagen ist die ganze
+Aufgabe dieses Ablaufs. Die halbe Grundlinie — nur `dirty`, ohne Commit — wird
+deshalb gar nicht erst gebildet: sie läse sich an jeder späteren Stelle wie
+eine ganze.
+
+Die Verweigerung sitzt dort und nicht in `assemble`, weil `assemble` innerhalb
+von `build` läuft und alles, was dort fliegt, die CLI als *Ladefehler* des
+Ablaufs erreicht — bevor sie `needs_baseline` gelesen hat und das Wahre sagen
+kann. Also wird der Graph mit unbesetzter `baseline` gebaut, und `guard`
+verweigert beim ersten Besuch mit Exit 4. Diese zweite Verweigerung erreicht
+nur, wer den Graphen selbst baut; über die Kommandozeile ist der Lauf da längst
+vorbei.
 
 ### Grundlinie und Wache im Bild
 

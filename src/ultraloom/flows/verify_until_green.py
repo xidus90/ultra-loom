@@ -362,17 +362,27 @@ def make_guard(
     them.
 
     Refuses an empty `test_paths` for the same reason `make_repair` does: a
-    guard that protects nothing is a guard that always says yes.
+    guard that protects nothing is a guard that always says yes. A missing
+    `baseline` is refused too, but on the first visit rather than here -- see
+    the comment in `guard`.
     """
     if not test_paths:
         raise ValueError("guard needs test_paths to protect; configure [verify].tests")
-    if baseline is None:
-        raise ValueError(
-            "guard needs a baseline: without a commit to measure against it "
-            "cannot tell a repair from what the tree already looked like"
-        )
 
     def guard(_state: VerifyState) -> Delta:
+        if baseline is None:
+            # Refused when the node is reached, not when it is built: building
+            # happens inside `build`, and a refusal there reaches the command
+            # line as a flow *load* error -- before the CLI has read the flow's
+            # `needs_baseline` and could refuse the start itself, with the
+            # better message and without a journal. So the graph assembles and
+            # this node says no, which is the same no it says to everything
+            # else it cannot answer.
+            raise FlowExit(
+                _EXIT_TOUCHED_A_TEST,
+                "guard has no baseline: without a commit to measure against it "
+                "cannot tell a repair from what the tree already looked like",
+            )
         try:
             reported = differ(root, baseline.commit)
         except WorktreeError as error:
@@ -501,16 +511,15 @@ def assemble(
     if baseline is None:
         try:
             baseline = Baseline(head(root), frozenset(changed_files(root)))
-        except WorktreeError as error:
-            # Refused, not fallen back on: a guard measuring against nothing is
-            # a guard that says yes to everything, and saying no is this flow's
-            # whole job. Raised here rather than in `build`, so a direct caller
-            # takes the same refusal the command line does -- and it lands
-            # before the first repair round rather than after it.
-            raise ValueError(
-                "verify-until-green needs a commit to measure the repairer "
-                f"against, and git gives none for {root}: {error}"
-            ) from error
+        except WorktreeError:
+            # Left as None rather than raised over. Refusing here would refuse
+            # inside `build`, which the CLI reports as a flow *load* error --
+            # and that refusal fires before the CLI ever sees the flow's
+            # `needs_baseline`, so the earlier and better-aimed refusal at the
+            # start of the command could never be reached. The guard below
+            # still has no baseline and still says no to everything it is
+            # asked; nothing here can make it say yes.
+            baseline = None
 
     def report_red(state: VerifyState) -> Delta:
         raise FlowExit(_EXIT_STILL_RED, _why_red(state, max_rounds))

@@ -226,17 +226,6 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
             print(f"run {run_id!r} does not say which flow it belongs to", file=sys.stderr)
             return _EXIT_FAIL
         flow_name, options, baseline = recorded
-        if baseline is None:
-            # Taking one now would measure the run against the tree the
-            # repairer has meanwhile edited, so everything it had already
-            # changed would count as untouched. Refuse rather than measure.
-            print(
-                f"run {run_id} was started before the guard measured against a "
-                "commit, or outside a repository; start a new run with "
-                "`ultraloom run`",
-                file=sys.stderr,
-            )
-            return _EXIT_FAIL
         gate = pending_gate(Journal(journal_path))
         if args.command == "replay" and gate is not None:
             # Replaying would hit a ReplayGapError at the gate, because the
@@ -291,17 +280,29 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
             print(str(error), file=sys.stderr)
             return _EXIT_FAIL
 
-    # A start-time refusal, and so only on `run`: on resume and replay the
-    # marker's recorded baseline decides, and its refusal already stands.
-    if args.command == "run" and taken is None and loaded.needs_baseline:
-        # Before anything of the run exists. A flow measuring against its
-        # starting commit, begun where git gives none, pauses at its gate
-        # and then refuses every resume -- begun only to be unfinishable.
-        print(
-            f"{flow_name} measures its repairs against the commit it starts "
-            f"from, and git gives {root} none; start it inside a repository",
-            file=sys.stderr,
-        )
+    # Asked of the flow rather than of every run: a flow that measures nothing
+    # against a commit is none of this refusal's business, and before
+    # `needs_baseline` existed it was refused all the same.
+    if loaded.needs_baseline and baseline is None:
+        if args.command == "run":
+            # Before anything of the run exists. A flow measuring against its
+            # starting commit, begun where git gives none, pauses at its gate
+            # and then refuses every resume -- begun only to be unfinishable.
+            print(
+                f"{flow_name} measures its repairs against the commit it starts "
+                f"from, and git gives {root} none; start it inside a repository",
+                file=sys.stderr,
+            )
+        else:
+            # Taking one now would measure the run against the tree the
+            # repairer has meanwhile edited, so everything it had already
+            # changed would count as untouched. Refuse rather than measure.
+            print(
+                f"run {run_id} was started before the guard measured against a "
+                "commit, or outside a repository; start a new run with "
+                "`ultraloom run`",
+                file=sys.stderr,
+            )
         return _EXIT_FAIL
 
     if args.command == "run":

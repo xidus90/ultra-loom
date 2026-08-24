@@ -64,13 +64,29 @@ def test_build_declares_that_it_measures_against_a_commit(tmp_path: Path) -> Non
     assert loaded.needs_baseline is True
 
 
-def test_assemble_refuses_to_guard_without_any_commit(tmp_path: Path) -> None:
-    """No baseline handed in and git gives none: refused, not half-guarded."""
+def test_assemble_leaves_the_baseline_unset_when_git_gives_no_commit(tmp_path: Path) -> None:
+    """No baseline handed in and git gives none: assembled, but never guarded.
+
+    Not refused here: the refusal that matters is the command line's, before
+    anything of the run exists, and it only gets its turn if `build` returns.
+    """
     outside = tmp_path / "plain"
     outside.mkdir()
 
-    with pytest.raises(ValueError, match="commit"):
-        assemble(_config(), outside, max_rounds=1, head=lambda _root: _fail(outside))
+    graph = assemble(
+        _config(),
+        outside,
+        max_rounds=1,
+        check_runner=_runner({"lint": False}),
+        head=lambda _root: _fail(outside),
+    )
+    model = FakeModel([Reply(RepairResult("had a go", changed=True), tokens=0)])
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
+        VerifyState(kinds=("lint",))
+    )
+
+    assert result.exit_code == 4
+    assert "baseline" in (result.detail or "")
 
 
 def _fail(root: Path) -> str:
@@ -315,10 +331,19 @@ def test_the_guard_measures_against_the_recorded_commit() -> None:
     assert seen == ["abc"]
 
 
-def test_a_guard_without_a_baseline_is_refused() -> None:
-    """A guard with no reference point cannot tell a repair from a starting state."""
-    with pytest.raises(ValueError, match="baseline"):
-        make_guard(Path("."), ("tests/",), differ=lambda _root, _base: ())
+def test_a_guard_without_a_baseline_is_refused_when_it_runs() -> None:
+    """A guard with no reference point cannot tell a repair from a starting state.
+
+    Refused on the visit and not at construction, so the graph still assembles
+    and the command line keeps its own, earlier refusal.
+    """
+    guard = make_guard(Path("."), ("tests/",), differ=lambda _root, _base: ())
+
+    with pytest.raises(FlowExit) as raised:
+        guard(VerifyState(kinds=("lint",)))
+
+    assert raised.value.code == 4
+    assert "baseline" in str(raised.value)
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -1043,15 +1068,22 @@ def _head_raises(error: Exception) -> Callable[[Path], str]:
     return head
 
 
-def test_assemble_refuses_a_project_with_no_commit_to_measure_against(tmp_path: Path) -> None:
-    """Before the first repair round, not after it: the run cannot be guarded."""
-    with pytest.raises(ValueError, match="commit"):
-        assemble(
-            config=Config(root=tmp_path, test_paths=("tests/",)),
-            root=tmp_path,
-            differ=lambda _root, _base: (),
-            head=_head_raises(WorktreeError("no HEAD here")),
-        )
+def test_a_project_with_no_commit_to_measure_against_stops_at_the_guard(tmp_path: Path) -> None:
+    """Only a `WorktreeError` is absorbed, and it costs the guard its answer."""
+    graph = assemble(
+        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=tmp_path,
+        check_runner=_runner({"lint": False}),
+        differ=lambda _root, _base: (),
+        head=_head_raises(WorktreeError("no HEAD here")),
+    )
+    model = FakeModel([Reply(RepairResult("had a go", changed=True), tokens=0)])
+    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
+        VerifyState(kinds=("lint",))
+    )
+
+    assert result.exit_code == 4
+    assert "baseline" in (result.detail or "")
 
 
 def test_an_unreadable_tree_still_stops_the_run_at_the_guard(tmp_path: Path) -> None:
@@ -1146,12 +1178,18 @@ def test_build_without_a_recorded_baseline_reads_the_tree(tmp_path: Path) -> Non
     assert _guard_of(build(context).graph)(VerifyState())["touched"] == ()
 
 
-def test_build_refuses_a_project_with_no_commit(tmp_path: Path) -> None:
-    """The same refusal on the road a real run takes."""
+def test_build_still_returns_for_a_project_with_no_commit(tmp_path: Path) -> None:
+    """The road a real run takes, and the reason `needs_baseline` can be read.
+
+    `build` is where the CLI learns that this flow measures against a commit.
+    Refusing here would refuse before it ever learns it, and the run would be
+    turned away as an unloadable flow instead of an unguardable start.
+    """
     context = FlowContext(root=tmp_path, config=Config(root=tmp_path, test_paths=("tests/",)))
 
-    with pytest.raises(ValueError, match="commit"):
-        build(context)
+    loaded = build(context)
+
+    assert loaded.needs_baseline is True
 
 
 def test_an_unavailable_check_beside_a_repairable_one_still_gets_its_rounds(

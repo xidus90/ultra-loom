@@ -313,10 +313,11 @@ in from the run ID. The marker of a **foreign** run thus stays visible: the
 repairer can write it — the `edit` profile needs no shell for that — and
 before now nobody saw it.
 
-If the guard cannot answer, the run ends. There are two ways this happens: the
-working tree is not readable — git aborts or cannot be started at all — or git
-cannot resolve the baseline commit — for instance in a resumed run whose
-starting commit has since been thrown away. Reading an unanswerable question
+If the guard cannot answer, the run ends. There are three ways this happens:
+there is no baseline at all — see below, and over the command line the run is
+refused before it starts — or the working tree is not readable — git aborts or
+cannot be started at all — or git cannot resolve the baseline commit — for
+instance in a resumed run whose starting commit has since been thrown away. Reading an unanswerable question
 as "nothing changed" would gut exactly the rule this node exists for.
 
 ### The Baseline
@@ -344,12 +345,19 @@ The baseline also feeds `touched`, and with it stagnation detection: what was
 already dirty beforehand does not count as a change made by this run.
 
 If git yields no commit — no repository, a repository without a commit, or a
-root that git ignores — then **the run never starts at all**. `assemble`
-raises a `ValueError`, and before the first repair round runs at that; the CLI
-reports it as a flow load error with exit 1. A guard measuring against nothing
-says yes to everything, and saying no is this flow's entire job. The half
-baseline — only `dirty`, without a commit — is therefore never formed at all:
-anywhere downstream it would read as a whole one.
+root that git ignores — then **the run never starts at all**. The refusal is
+the command line's: `build` declares `needs_baseline`, and `run` turns the
+start away with exit 1 before a journal or a marker exists. A guard measuring
+against nothing says yes to everything, and saying no is this flow's entire
+job. The half baseline — only `dirty`, without a commit — is therefore never
+formed at all: anywhere downstream it would read as a whole one.
+
+The refusal sits there and not in `assemble` because `assemble` runs inside
+`build`, and anything raised there reaches the command line as a flow *load*
+error — before the CLI has read `needs_baseline` and can say the true thing.
+So the graph assembles with `baseline` unset, and `guard` refuses on its first
+visit with exit 4. That second refusal is only ever reached by a caller that
+builds the graph itself; down the command line the run is already over.
 
 ### The baseline and the guard, drawn
 

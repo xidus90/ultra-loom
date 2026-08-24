@@ -860,24 +860,67 @@ def test_a_marker_with_a_commit_and_no_dirty_paths_is_a_baseline(tmp_path: Path)
     assert recorded == ("plain", {}, Baseline("abc123", frozenset()))
 
 
-def test_resume_refuses_a_run_that_recorded_no_baseline(
+A_GUARDED_GATED_FLOW = '''
+"""A guarded flow that pauses, so a resume has something to answer."""
+
+from dataclasses import dataclass
+
+from ultraloom.discovery import LoadedFlow
+from ultraloom.graph import END, GateNode, Graph
+
+
+@dataclass(frozen=True, slots=True)
+class Data:
+    answer: str = ""
+
+
+def build(context):
+    flow = Graph("guarded_gated", start="ask")
+    flow.add(GateNode("ask", lambda _d: "Proceed?", lambda _d, a: {"answer": a}))
+    flow.edge("ask", END)
+    return LoadedFlow(flow, Data(), needs_baseline=True)
+'''
+
+
+def test_resume_refuses_a_guarded_run_that_recorded_no_baseline(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A run that recorded no commit is refused rather than measured by half.
 
     Filling the commit in now would hand the repairer everything it
-    committed before the pause as its starting state.
+    committed before the pause as its starting state. The marker is stripped
+    afterwards because that is the only way such a run can exist now: started
+    before the guard measured against a commit at all.
     """
-    write_flow(tmp_path, "plain", A_FLOW)
-    marker = _marker(tmp_path)
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text("plain\n", encoding="utf-8")
-    (tmp_path / ".ultraloom" / "runs" / "0001.jsonl").write_text("", encoding="utf-8")
+    init_repo(tmp_path)
+    write_flow(tmp_path, "guarded_gated", A_GUARDED_GATED_FLOW)
+    main(["run", "guarded_gated", "--root", str(tmp_path), "--no-model"])
+    capsys.readouterr()
+    _marker(tmp_path).write_text("guarded_gated\n", encoding="utf-8")
 
-    code = main(["resume", "0001", "--root", str(tmp_path)])
+    code = main(["resume", "0001", "--answer", "yes", "--root", str(tmp_path)])
 
     assert code == 1
     assert "started before" in capsys.readouterr().err
+
+
+def test_resume_carries_an_unguarded_run_that_recorded_no_baseline(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No commit to measure against is only a problem for a flow that measures.
+
+    A plain flow paused outside a repository was refused every answer before
+    `needs_baseline` existed -- unfinishable for a reason that was never its
+    own.
+    """
+    write_flow(tmp_path, "gated", A_GATED_FLOW)
+    main(["run", "gated", "--root", str(tmp_path)])
+    capsys.readouterr()
+
+    code = main(["resume", "0001", "--answer", "yes", "--root", str(tmp_path)])
+
+    assert code == 0
+    assert "done" in capsys.readouterr().out
 
 
 def test_a_run_outside_a_repository_records_no_baseline(tmp_path: Path) -> None:
