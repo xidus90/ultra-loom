@@ -17,11 +17,12 @@ from typing import TYPE_CHECKING
 
 from ultraloom.checks import CheckResult, CheckUnavailableError, run_all, run_check
 from ultraloom.config import Config, ConfigError, load_config
-from ultraloom.worktree import RUN_DIR, WorktreeError, changed_files
+from ultraloom.worktree import RUN_DIR, WorktreeError, changed_files, head_commit
 
 if TYPE_CHECKING:
     # Type-only, so the check side still imports nothing from the harness at
     # runtime — the boundary is about sys.modules, not about annotations.
+    from ultraloom.discovery import Baseline
     from ultraloom.model.port import Model
 
 _EXIT_OK = 0
@@ -208,7 +209,7 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
         run_id, flow_name = next_run_id(root), args.flow
         options: dict[str, str] = _flow_options(args)
         taken = _baseline(root)
-        baseline: frozenset[str] | None = taken
+        baseline: Baseline | None = taken
     else:
         run_id = args.run_id
         journal_path = root / RUN_DIR / f"{run_id}.jsonl"
@@ -224,6 +225,17 @@ def _flow_command(args: argparse.Namespace, root: Path, config: Config) -> int:
             print(f"run {run_id!r} does not say which flow it belongs to", file=sys.stderr)
             return _EXIT_FAIL
         flow_name, options, baseline = recorded
+        if baseline is None:
+            # Taking one now would measure the run against the tree the
+            # repairer has meanwhile edited, so everything it had already
+            # changed would count as untouched. Refuse rather than measure.
+            print(
+                f"run {run_id} was started before the guard measured against a "
+                "commit, or outside a repository; start a new run with "
+                "`ultraloom run`",
+                file=sys.stderr,
+            )
+            return _EXIT_FAIL
         gate = pending_gate(Journal(journal_path))
         if args.command == "replay" and gate is not None:
             # Replaying would hit a ReplayGapError at the gate, because the
@@ -305,14 +317,13 @@ class MarkerError(ValueError):
     """Raised for a run marker that cannot be read."""
 
 
-# The marker key the baseline travels under. Reserved: it is popped back out
-# before the options reach a flow, so a flow never sees it among its own.
+# The marker keys the baseline travels under. Reserved: they are popped back
+# out before the options reach a flow, so a flow never sees them among its own.
 _BASELINE = "baseline"
+_BASELINE_COMMIT = "baseline_commit"
 
 
-def _recorded_run(
-    root: Path, run_id: str
-) -> tuple[str, dict[str, str], frozenset[str] | None] | None:
+def _recorded_run(root: Path, run_id: str) -> tuple[str, dict[str, str], Baseline | None] | None:
     """Which flow a run belongs to, and which options it was started with.
 
     The journal records what each node did, not which graph the nodes came
@@ -336,8 +347,17 @@ def _recorded_run(
             # the line -- a traceback where a sentence belongs.
             raise MarkerError(f"{marker}: option line without '=': {line!r}")
         options[name] = _decode_option(raw)
-    recorded = options.pop(_BASELINE, None)
-    baseline = None if recorded is None else _decode_baseline(recorded)
+    # Local import for the same reason as in _flow_command (spec 15.2):
+    # discovery belongs to the harness side and `ultraloom check` must not
+    # pull it in, so the name exists at runtime only where it is used.
+    from ultraloom.discovery import Baseline
+
+    dirty = options.pop(_BASELINE, None)
+    commit = options.pop(_BASELINE_COMMIT, None)
+    # Both or neither. A marker holding only the path set was written before
+    # the commit existed, and reading it as a baseline would measure the run
+    # against a tree the repairer has already had its hands on.
+    baseline = None if commit is None else Baseline(commit, _decode_baseline(dirty or ""))
     return flow_name.strip(), options, baseline
 
 
@@ -364,11 +384,21 @@ def _remember_run(
     run_id: str,
     flow_name: str,
     options: dict[str, str],
-    baseline: frozenset[str],
+    baseline: Baseline | None,
 ) -> None:
+    """Write the run marker, with the baseline when there is one.
+
+    The marker is written even without a baseline: without it `resume` would
+    not find the flow at all, and the refusal a run without a baseline earns
+    should come from the missing baseline and not from a missing file.
+    """
     marker = root / RUN_DIR / f"{run_id}.flow"
     marker.parent.mkdir(parents=True, exist_ok=True)
-    options = options | {_BASELINE: "\n".join(sorted(baseline))}
+    if baseline is not None:
+        options = options | {
+            _BASELINE: "\n".join(sorted(baseline.dirty)),
+            _BASELINE_COMMIT: baseline.commit,
+        }
     # One line each, not one JSON document: the file is read by eye as often as
     # by code, and the first line means what it always meant. Only the values
     # are JSON, which is what keeps a multi-line one on its own single line.
@@ -387,23 +417,27 @@ def _decode_baseline(recorded: str) -> frozenset[str]:
     return frozenset(line for line in recorded.split("\n") if line)
 
 
-def _baseline(root: Path) -> frozenset[str]:
-    """What is already dirty in the working tree when a run starts.
+def _baseline(root: Path) -> Baseline | None:
+    """What a run starts from, or None where git cannot say.
 
     Taken once, at the start, and carried in the run marker from there on. The
-    question "what was dirty before this run began" has exactly one right
-    answer and it comes into being at the start; asking git again on `resume`
-    would answer it with the tree the repairer has meanwhile edited, and every
-    file it had already touched -- a test file included -- would be excused.
+    question "what did this run start from" has exactly one right answer and it
+    comes into being at the start; asking git again on `resume` would answer it
+    with the tree the repairer has meanwhile edited, and every file it had
+    already touched -- a test file included -- would be excused.
 
-    An unreadable tree is recorded as an empty baseline rather than refused: a
-    flow that cares reports it at the point where it actually looks, and one
-    that does not care never needed git at all.
+    The dirty set is only worth taking once a commit stands behind it: without
+    one there is nothing to measure a change against, and half a baseline reads
+    like a whole one at every later call site. The flow that needs one refuses
+    the run; a flow that does not never needed git at all.
     """
+    # Local import for the same reason as in _flow_command (spec 15.2).
+    from ultraloom.discovery import Baseline
+
     try:
-        return frozenset(changed_files(root))
+        return Baseline(head_commit(root), frozenset(changed_files(root)))
     except WorktreeError:
-        return frozenset()
+        return None
 
 
 def _model(root: Path, config: Config) -> Model:
