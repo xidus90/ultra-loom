@@ -17,7 +17,7 @@ from ultraloom.checks import (
     run_check,
 )
 from ultraloom.config import Config
-from ultraloom.discovery import FlowContext
+from ultraloom.discovery import Baseline, FlowContext
 from ultraloom.flows.verify_until_green import (
     _EXIT_STILL_RED,
     MODEL_OUTPUT_LINES,
@@ -39,7 +39,7 @@ from ultraloom.model.fake import FakeModel
 from ultraloom.model.port import Reply
 from ultraloom.runner import FlowExit, Result, Runner
 from ultraloom.state import Delta
-from ultraloom.worktree import WorktreeError
+from ultraloom.worktree import WorktreeError, head_commit
 
 # A marker file is all `checks` needs to know the language -- and with it, that
 # `coverage` waits for `test`. The order under test lives in the preset table,
@@ -181,7 +181,12 @@ def test_a_reply_of_the_wrong_type_is_refused() -> None:
 
 
 def test_a_source_only_change_passes_and_is_recorded() -> None:
-    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("src/ultraloom/cli.py",))
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: ("src/ultraloom/cli.py",),
+        baseline=Baseline("abc", frozenset()),
+    )
 
     delta = guard(VerifyState())
 
@@ -189,7 +194,12 @@ def test_a_source_only_change_passes_and_is_recorded() -> None:
 
 
 def test_a_touched_test_file_stops_the_run_with_code_4() -> None:
-    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("tests/test_cli.py",))
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: ("tests/test_cli.py",),
+        baseline=Baseline("abc", frozenset()),
+    )
 
     with pytest.raises(FlowExit) as raised:
         guard(VerifyState())
@@ -200,26 +210,46 @@ def test_a_touched_test_file_stops_the_run_with_code_4() -> None:
 
 def test_a_prefix_match_is_not_a_path_match() -> None:
     # "tests/" must not forgive "tests_helper.py" and must not catch "testsuite/".
-    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("testsuite/thing.py",))
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: ("testsuite/thing.py",),
+        baseline=Baseline("abc", frozenset()),
+    )
 
     assert guard(VerifyState())["touched"] == ("testsuite/thing.py",)
 
 
 def test_a_single_file_may_be_protected() -> None:
-    guard = make_guard(Path("."), ("conftest.py",), differ=lambda _root: ("conftest.py",))
+    guard = make_guard(
+        Path("."),
+        ("conftest.py",),
+        differ=lambda _root, _base: ("conftest.py",),
+        baseline=Baseline("abc", frozenset()),
+    )
 
     with pytest.raises(FlowExit):
         guard(VerifyState())
 
 
 def test_a_file_next_to_a_protected_one_is_not_protected() -> None:
-    guard = make_guard(Path("."), ("conftest.py",), differ=lambda _root: ("conftest_helper.py",))
+    guard = make_guard(
+        Path("."),
+        ("conftest.py",),
+        differ=lambda _root, _base: ("conftest_helper.py",),
+        baseline=Baseline("abc", frozenset()),
+    )
 
     assert guard(VerifyState())["touched"] == ("conftest_helper.py",)
 
 
 def test_nothing_changed_is_an_empty_record_not_a_failure() -> None:
-    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ())
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: (),
+        baseline=Baseline("abc", frozenset()),
+    )
 
     assert guard(VerifyState())["touched"] == ()
 
@@ -227,6 +257,42 @@ def test_nothing_changed_is_an_empty_record_not_a_failure() -> None:
 def test_a_guard_without_test_paths_is_refused() -> None:
     with pytest.raises(ValueError, match="test_paths"):
         make_guard(Path("."), ())
+
+
+def test_a_committed_test_file_still_stops_the_run() -> None:
+    """The blind spot: the guard must not depend on the tree staying dirty."""
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: ("tests/test_cli.py",),
+        baseline=Baseline("abc", frozenset()),
+    )
+
+    with pytest.raises(FlowExit) as raised:
+        guard(VerifyState())
+
+    assert raised.value.code == 4
+    assert "tests/test_cli.py" in str(raised.value)
+
+
+def test_the_guard_measures_against_the_recorded_commit() -> None:
+    """Not against HEAD, which the repairer may have moved."""
+    seen: list[str] = []
+
+    def differ(_root: Path, base: str) -> tuple[str, ...]:
+        seen.append(base)
+        return ()
+
+    guard = make_guard(Path("."), ("tests/",), differ=differ, baseline=Baseline("abc", frozenset()))
+    guard(VerifyState())
+
+    assert seen == ["abc"]
+
+
+def test_a_guard_without_a_baseline_is_refused() -> None:
+    """A guard with no reference point cannot tell a repair from a starting state."""
+    with pytest.raises(ValueError, match="baseline"):
+        make_guard(Path("."), ("tests/",), differ=lambda _root, _base: ())
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -249,7 +315,7 @@ def test_a_test_file_renamed_away_does_not_escape_the_guard(tmp_path: Path) -> N
     """Moving a test out of tests/ is deleting it by another name."""
     repo = _repo(tmp_path)
     subprocess.run(("git", "mv", "tests/test_cli.py", "moved.py"), cwd=repo, check=True)
-    guard = make_guard(repo, ("tests/",))
+    guard = make_guard(repo, ("tests/",), baseline=Baseline(head_commit(repo), frozenset()))
 
     with pytest.raises(FlowExit) as raised:
         guard(VerifyState())
@@ -271,13 +337,20 @@ def test_the_run_journal_is_not_charged_to_the_repairer(tmp_path: Path) -> None:
     runs.mkdir(parents=True)
     (runs / "0001.jsonl").write_text("{}\n", encoding="utf-8")
     (runs / "0001.flow").write_text("verify_until_green\n", encoding="utf-8")
-    guard = make_guard(repo, ("tests/", ".ultraloom/"))
+    guard = make_guard(
+        repo, ("tests/", ".ultraloom/"), baseline=Baseline(head_commit(repo), frozenset())
+    )
 
     assert guard(VerifyState()) == {"touched": ()}
 
 
 def test_a_test_deep_below_a_protected_directory_is_protected() -> None:
-    guard = make_guard(Path("."), ("tests/",), differ=lambda _root: ("tests/flows/sub/test_x.py",))
+    guard = make_guard(
+        Path("."),
+        ("tests/",),
+        differ=lambda _root, _base: ("tests/flows/sub/test_x.py",),
+        baseline=Baseline("abc", frozenset()),
+    )
 
     with pytest.raises(FlowExit):
         guard(VerifyState())
@@ -332,11 +405,11 @@ def _run_flow(
         config=Config(root=tmp_path, test_paths=("tests/",)),
         root=tmp_path,
         check_runner=runner,
-        differ=lambda _root: next(diffs, ()),
+        differ=lambda _root, _base: next(diffs, ()),
         max_rounds=max_rounds,
         # Explicit, so the scripted tree does not lose its first answer to the
         # baseline reading. What `assemble` does without one has its own test.
-        baseline=frozenset(),
+        baseline=Baseline("abc", frozenset()),
     )
     if model is None:
         model = FakeModel([Reply(repair, tokens=0) for repair in repairs or []])
@@ -502,14 +575,24 @@ def _built_kinds(context: FlowContext) -> tuple[str, ...]:
 
 def test_the_checks_option_may_name_a_profile(tmp_path: Path) -> None:
     config = Config(root=tmp_path, test_paths=("tests/",), profiles={"edit": ("lint", "types")})
-    context = FlowContext(root=tmp_path, config=config, options={"checks": "edit"})
+    context = FlowContext(
+        root=tmp_path,
+        config=config,
+        options={"checks": "edit"},
+        baseline=Baseline("abc", frozenset()),
+    )
 
     assert _built_kinds(context) == ("lint", "types")
 
 
 def test_the_checks_option_may_be_a_list(tmp_path: Path) -> None:
     config = Config(root=tmp_path, test_paths=("tests/",))
-    context = FlowContext(root=tmp_path, config=config, options={"checks": "lint,types"})
+    context = FlowContext(
+        root=tmp_path,
+        config=config,
+        options={"checks": "lint,types"},
+        baseline=Baseline("abc", frozenset()),
+    )
 
     assert _built_kinds(context) == ("lint", "types")
 
@@ -517,7 +600,9 @@ def test_the_checks_option_may_be_a_list(tmp_path: Path) -> None:
 def test_without_a_checks_option_every_known_kind_runs(tmp_path: Path) -> None:
     config = Config(root=tmp_path, test_paths=("tests/",))
 
-    assert _built_kinds(FlowContext(root=tmp_path, config=config)) == KINDS
+    context = FlowContext(root=tmp_path, config=config, baseline=Baseline("abc", frozenset()))
+
+    assert _built_kinds(context) == KINDS
 
 
 def test_an_unknown_check_name_is_refused_before_the_run(tmp_path: Path) -> None:
@@ -530,7 +615,12 @@ def test_an_unknown_check_name_is_refused_before_the_run(tmp_path: Path) -> None
 
 def test_the_round_ceiling_may_be_raised_from_the_command_line(tmp_path: Path) -> None:
     config = Config(root=tmp_path, test_paths=("tests/",))
-    context = FlowContext(root=tmp_path, config=config, options={"max_rounds": "9"})
+    context = FlowContext(
+        root=tmp_path,
+        config=config,
+        options={"max_rounds": "9"},
+        baseline=Baseline("abc", frozenset()),
+    )
 
     graph = build(context).graph
     graph.validate()
@@ -643,8 +733,8 @@ def test_a_path_dirty_before_the_run_is_not_the_repairers_doing() -> None:
     guard = make_guard(
         Path("."),
         ("tests/",),
-        differ=lambda _root: ("tests/test_cli.py",),
-        baseline=frozenset({"tests/test_cli.py"}),
+        differ=lambda _root, _base: ("tests/test_cli.py",),
+        baseline=Baseline("abc", frozenset({"tests/test_cli.py"})),
     )
 
     assert guard(VerifyState())["touched"] == ()
@@ -654,8 +744,8 @@ def test_a_protected_path_outside_the_baseline_still_stops_the_run() -> None:
     guard = make_guard(
         Path("."),
         ("tests/",),
-        differ=lambda _root: ("tests/test_cli.py", "tests/test_new.py"),
-        baseline=frozenset({"tests/test_cli.py"}),
+        differ=lambda _root, _base: ("tests/test_cli.py", "tests/test_new.py"),
+        baseline=Baseline("abc", frozenset({"tests/test_cli.py"})),
     )
 
     with pytest.raises(FlowExit) as raised:
@@ -673,8 +763,8 @@ def test_a_source_file_dirty_before_the_run_does_not_count_as_touched() -> None:
     guard = make_guard(
         Path("."),
         ("tests/",),
-        differ=lambda _root: ("src/a.py", "src/b.py"),
-        baseline=frozenset({"src/a.py"}),
+        differ=lambda _root, _base: ("src/a.py", "src/b.py"),
+        baseline=Baseline("abc", frozenset({"src/a.py"})),
     )
 
     assert guard(VerifyState())["touched"] == ("src/b.py",)
@@ -682,17 +772,20 @@ def test_a_source_file_dirty_before_the_run_does_not_count_as_touched() -> None:
 
 def test_assemble_takes_the_baseline_once_when_it_builds_the_graph(tmp_path: Path) -> None:
     """Once, at build time: asked again per round it would absolve the repairer."""
+    repo = _repo(tmp_path)
+    (repo / "tests" / "test_cli.py").write_text("x = 2\n", encoding="utf-8")
     calls: list[int] = []
 
-    def differ(_root: Path) -> tuple[str, ...]:
+    def differ(_root: Path, _base: str) -> tuple[str, ...]:
         calls.append(1)
         return ("tests/test_cli.py",)
 
     graph = assemble(
-        config=Config(root=tmp_path, test_paths=("tests/",)),
-        root=tmp_path,
+        config=Config(root=repo, test_paths=("tests/",)),
+        root=repo,
         check_runner=_runner({"lint": False}),
         differ=differ,
+        head=lambda _root: "abc",
     )
     model = FakeModel([Reply(RepairResult("looked around", changed=False), tokens=0)])
     result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
@@ -703,7 +796,11 @@ def test_assemble_takes_the_baseline_once_when_it_builds_the_graph(tmp_path: Pat
     # and the run ends on stagnation rather than on a false accusation.
     assert result.exit_code == 1
     assert "stagnated" in (result.detail or "")
-    assert len(calls) == 2  # once for the baseline, once in the guard
+    # Once, in the guard. The baseline's dirty half no longer comes from the
+    # differ but from `changed_files` on the real tree -- which is why this
+    # needs a real repository. A second call here would be a second reading
+    # per round, which is what this test forbids.
+    assert len(calls) == 1
 
 
 def test_a_repairable_red_next_to_an_unrepairable_one_is_still_repaired(tmp_path: Path) -> None:
@@ -762,39 +859,38 @@ def _guard_of(graph: Graph[object]) -> Callable[[object], Delta]:
 
 
 def _raises(error: Exception) -> Differ:
-    def differ(_root: Path) -> tuple[str, ...]:
+    def differ(_root: Path, _base: str) -> tuple[str, ...]:
         raise error
 
     return differ
 
 
-def test_an_unreadable_tree_does_not_stop_the_graph_from_being_built(tmp_path: Path) -> None:
-    """The green case never reaches the guard, so it must not die of its baseline.
+def _head_raises(error: Exception) -> Callable[[Path], str]:
+    def head(_root: Path) -> str:
+        raise error
 
-    The differ raises rather than the directory being chosen to be outside a
-    repository: on a machine whose temp directory happens to sit inside a git
-    tree, that arrangement passes without touching the branch it is named for.
-    """
-    graph = assemble(
-        config=Config(root=tmp_path, test_paths=("tests/",)),
-        root=tmp_path,
-        check_runner=_runner({"lint": True}),
-        differ=_raises(WorktreeError("no git here")),
-    )
-    result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=FakeModel([])).run(
-        VerifyState(kinds=("lint",))
-    )
+    return head
 
-    assert result.status == "done"
+
+def test_assemble_refuses_a_project_with_no_commit_to_measure_against(tmp_path: Path) -> None:
+    """Before the first repair round, not after it: the run cannot be guarded."""
+    with pytest.raises(ValueError, match="commit"):
+        assemble(
+            config=Config(root=tmp_path, test_paths=("tests/",)),
+            root=tmp_path,
+            differ=lambda _root, _base: (),
+            head=_head_raises(WorktreeError("no HEAD here")),
+        )
 
 
 def test_an_unreadable_tree_still_stops_the_run_at_the_guard(tmp_path: Path) -> None:
-    """Swallowed while the baseline is taken, reported where it actually matters."""
+    """Read when the graph is built, reported where it actually matters."""
     graph = assemble(
         config=Config(root=tmp_path, test_paths=("tests/",)),
         root=tmp_path,
         check_runner=_runner({"lint": False}),
         differ=_raises(WorktreeError("no git here")),
+        baseline=Baseline("abc", frozenset()),
     )
     model = FakeModel([Reply(RepairResult("had a go", changed=True), tokens=0)])
     result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
@@ -805,17 +901,46 @@ def test_an_unreadable_tree_still_stops_the_run_at_the_guard(tmp_path: Path) -> 
     assert "no git here" in (result.detail or "")
 
 
-def test_a_differ_that_fails_for_another_reason_is_not_swallowed(tmp_path: Path) -> None:
-    """`except WorktreeError` and not `except FlowExit`: only unreadability is expected."""
+def test_a_baseline_reading_that_fails_for_another_reason_is_not_swallowed(
+    tmp_path: Path,
+) -> None:
+    """`except WorktreeError` and not `except Exception`: only a missing commit is expected."""
     with pytest.raises(FlowExit) as raised:
         assemble(
             config=Config(root=tmp_path, test_paths=("tests/",)),
             root=tmp_path,
             check_runner=_runner({"lint": True}),
-            differ=_raises(FlowExit(7, "something else entirely")),
+            differ=lambda _root, _base: (),
+            head=_head_raises(FlowExit(7, "something else entirely")),
         )
 
     assert raised.value.code == 7
+
+
+def _empty_repo(tmp_path: Path) -> Path:
+    """A repository with one commit and nothing in it.
+
+    A commit and not just `git init`: the guard measures against one, and a
+    repository that has none is refused before the first repair round.
+    """
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    subprocess.run(
+        (
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "first",
+        ),
+        cwd=tmp_path,
+        check=True,
+    )
+    return tmp_path
 
 
 def test_build_takes_the_baseline_the_run_recorded(tmp_path: Path) -> None:
@@ -824,14 +949,14 @@ def test_build_takes_the_baseline_the_run_recorded(tmp_path: Path) -> None:
     A real repository with a real dirty test file, so the guard's own reading
     does find it and the baseline is what decides.
     """
-    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_cli.py").write_text("x = 1\n", encoding="utf-8")
+    repo = _empty_repo(tmp_path)
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_cli.py").write_text("x = 1\n", encoding="utf-8")
     context = FlowContext(
-        root=tmp_path,
-        config=Config(root=tmp_path, test_paths=("tests/",)),
+        root=repo,
+        config=Config(root=repo, test_paths=("tests/",)),
         options={"checks": "lint"},
-        baseline=frozenset({"tests/test_cli.py"}),
+        baseline=Baseline(head_commit(repo), frozenset({"tests/test_cli.py"})),
     )
 
     # Covered by the recorded baseline, so not the repairer's doing -- even
@@ -841,13 +966,21 @@ def test_build_takes_the_baseline_the_run_recorded(tmp_path: Path) -> None:
 
 def test_build_without_a_recorded_baseline_reads_the_tree(tmp_path: Path) -> None:
     """A flow built by hand, or a run from before the baseline was recorded."""
-    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
-    config = Config(root=tmp_path, test_paths=("tests/",))
-    context = FlowContext(root=tmp_path, config=config, options={"checks": "lint"})
+    repo = _empty_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    config = Config(root=repo, test_paths=("tests/",))
+    context = FlowContext(root=repo, config=config, options={"checks": "lint"})
 
     assert _guard_of(build(context).graph)(VerifyState())["touched"] == ()
+
+
+def test_build_refuses_a_project_with_no_commit(tmp_path: Path) -> None:
+    """The same refusal on the road a real run takes."""
+    context = FlowContext(root=tmp_path, config=Config(root=tmp_path, test_paths=("tests/",)))
+
+    with pytest.raises(ValueError, match="commit"):
+        build(context)
 
 
 def test_an_unavailable_check_beside_a_repairable_one_still_gets_its_rounds(
@@ -870,8 +1003,8 @@ def test_an_unavailable_check_beside_a_repairable_one_still_gets_its_rounds(
         config=Config(root=tmp_path, test_paths=("tests/",)),
         root=tmp_path,
         check_runner=runner,
-        differ=lambda _root: ("src/thing.py",),
-        baseline=frozenset(),
+        differ=lambda _root, _base: ("src/thing.py",),
+        baseline=Baseline("abc", frozenset()),
     )
     model = FakeModel([Reply(RepairResult("fixed the lint", changed=True), tokens=0)])
     result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
@@ -912,11 +1045,11 @@ def test_the_guard_holds_when_the_project_root_is_below_the_repository_root(
     The real `changed_files`, not a scripted differ -- the mismatch this test
     is about lives in the answer git gives, so a scripted one cannot show it.
     """
-    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
-    package = tmp_path / "package"
+    repo = _empty_repo(tmp_path)
+    package = repo / "package"
     (package / "tests").mkdir(parents=True)
     (package / "tests" / "test_x.py").write_text("x = 1\n", encoding="utf-8")
-    guard = make_guard(package, ("tests/",), baseline=frozenset())
+    guard = make_guard(package, ("tests/",), baseline=Baseline(head_commit(package), frozenset()))
 
     with pytest.raises(FlowExit) as raised:
         guard(VerifyState())
@@ -1036,8 +1169,8 @@ def test_a_blocked_check_does_not_buy_an_unrepairable_project_five_rounds(
         config=Config(root=tmp_path, test_paths=("tests/",)),
         root=tmp_path,
         check_runner=runner,
-        differ=lambda _root: (),
-        baseline=frozenset(),
+        differ=lambda _root, _base: (),
+        baseline=Baseline("abc", frozenset()),
     )
     model = FakeModel([])
     result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
@@ -1065,8 +1198,8 @@ def test_a_blocked_check_beside_a_repairable_one_still_gets_its_rounds(
         config=Config(root=tmp_path, test_paths=("tests/",)),
         root=tmp_path,
         check_runner=runner,
-        differ=lambda _root: ("src/thing.py",),
-        baseline=frozenset(),
+        differ=lambda _root, _base: ("src/thing.py",),
+        baseline=Baseline("abc", frozenset()),
     )
     model = FakeModel([Reply(RepairResult("fixed the suite", changed=True), tokens=0)])
     result = Runner(graph, Journal(tmp_path / "run.jsonl"), model=model).run(
@@ -1180,8 +1313,8 @@ def test_the_journal_keeps_the_full_output_while_the_repairer_sees_the_clip(
         config=Config(root=tmp_path, test_paths=("tests/",)),
         root=tmp_path,
         check_runner=runner,
-        differ=lambda _root: (),
-        baseline=frozenset(),
+        differ=lambda _root, _base: (),
+        baseline=Baseline("abc", frozenset()),
         max_rounds=1,
     )
     journal = Journal(tmp_path / "run.jsonl")
