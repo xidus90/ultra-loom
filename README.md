@@ -319,7 +319,7 @@ Exit codes: `0` green, `1` still red after the last round, `3` waiting at an
 approval point, `4` the run was stopped over the protected test paths — either
 the repairer touched one, or the working tree could not be read to tell.
 
-The flow is described at length — in German — in
+The flow is described at length — in English and German, side by side — in
 `docs/abläufe/verify-until-green.md`.
 
 ### Writing a flow
