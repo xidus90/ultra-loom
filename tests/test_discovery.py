@@ -9,6 +9,7 @@ from ultraloom import discovery
 from ultraloom.config import Config
 from ultraloom.discovery import (
     FLOW_DIR,
+    Baseline,
     FlowContext,
     FlowLoadError,
     FlowNotFoundError,
@@ -346,3 +347,17 @@ def test_loading_a_flow_leaves_no_trace_in_sys_modules(tmp_path: Path) -> None:
     find_flow("postponed", tmp_path)
 
     assert not [name for name in sys.modules if name.startswith("ultraloom_flow_")]
+
+
+def test_a_baseline_carries_both_halves_of_the_starting_state() -> None:
+    """Neither half replaces the other: the commit is what a change is measured
+    against, the dirty set is what must not be laid at the repairer's door."""
+    root = Path(".")
+    baseline = Baseline(commit="abc", dirty=frozenset({"src/a.py"}))
+    context = FlowContext(
+        root=root, config=Config(root=root, test_paths=("tests/",)), baseline=baseline
+    )
+
+    assert context.baseline is not None
+    assert context.baseline.commit == "abc"
+    assert context.baseline.dirty == frozenset({"src/a.py"})

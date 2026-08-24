@@ -26,6 +26,23 @@ _ABSENT: Final = object()
 
 
 @dataclass(frozen=True, slots=True)
+class Baseline:
+    """What the working tree looked like when a run started.
+
+    Two halves, and neither stands in for the other. `commit` is what a change
+    is measured *against*, so a repairer that commits its edit stays as visible
+    as one that leaves it unstaged. `dirty` is what was already changed at that
+    moment and must not be laid at the repairer's door.
+
+    Frozen and carried in the run marker, because the question "what did this
+    run start from" has one right answer and it comes into being at the start.
+    """
+
+    commit: str
+    dirty: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
 class FlowContext:
     """What a flow needs to know about the run it is being built for.
 
@@ -34,17 +51,19 @@ class FlowContext:
     for on the command line. All three arrive here rather than through import
     time magic, so a flow stays a function of its inputs.
 
-    `baseline` is the fourth: what was already changed in the working tree when
-    this *run* started. Beside `options` rather than inside it, because it is
-    not something a caller asked for and a flow that validates its options
-    should not have to know about it. `None` means the run recorded none --
-    older runs did not -- which is a different answer from "the tree was clean".
+    `baseline` is the fourth: where this *run* started from, in both halves --
+    the commit a change is measured against, and what was already changed in
+    the working tree at that moment. Beside `options` rather than inside it,
+    because it is not something a caller asked for and a flow that validates
+    its options should not have to know about it. `None` means the run recorded
+    none -- older runs did not -- which is a different answer from "the tree
+    was clean".
     """
 
     root: Path
     config: Config
     options: Mapping[str, str] = field(default_factory=dict)
-    baseline: frozenset[str] | None = None
+    baseline: Baseline | None = None
 
 
 @dataclass(frozen=True, slots=True)
