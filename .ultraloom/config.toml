@@ -35,8 +35,16 @@ precommit = ["lint", "types", "test", "coverage"]
 # Both shells are covered by one rule: `Bash` and `PowerShell` alike yield a
 # subject of kind `commands`, so nothing here needs saying twice.
 [[policy.paths.rules]]
-match  = [".ultraloom/runs/*", ".ultraloom/hooks/*", "uv.lock", ".coverage"]
+match  = [".ultraloom/runs/*", "uv.lock", ".coverage"]
 reason = "An edited journal destroys what replay exists for; the lock belongs to uv."
+
+# A rule of its own rather than another pattern on the one above: the reason is
+# what an agent reads when it is refused, and being told about journals and
+# lock files while reaching for its own block counter would send it looking in
+# the wrong place.
+[[policy.paths.rules]]
+match  = ".ultraloom/hooks/*"
+reason = "This is the stop gate's own block counter; resetting it abolishes the gate."
 
 [[policy.commands.rules]]
 regex  = '(^|[\n;&|(`])\s*git\s+push(?![\w-])'
