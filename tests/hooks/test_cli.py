@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from ultraloom.cli import main
+from ultraloom.hooks.stop import MARKER
 
 
 def test_session_start_reads_the_payload_from_stdin(
@@ -39,6 +40,20 @@ def test_post_edit_reads_the_payload_from_stdin(
     monkeypatch.setattr("sys.stdin", io.StringIO(payload))
 
     assert main(["hook", "post-edit", "--root", str(tmp_path)]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_stop_reads_the_payload_from_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With the marker in place, so the wiring is tested and not the chain."""
+    marker = tmp_path / MARKER
+    marker.parent.mkdir(parents=True)
+    marker.write_text("", encoding="utf-8")
+    payload = json.dumps({"session_id": "s1", "hook_event_name": "Stop"})
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+
+    assert main(["hook", "stop", "--root", str(tmp_path)]) == 0
     assert capsys.readouterr().err == ""
 
 

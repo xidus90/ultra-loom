@@ -17,10 +17,15 @@ STATE_DIR = ".ultraloom/hooks"
 
 @dataclass(frozen=True, slots=True)
 class SessionState:
-    """The counter and the snapshots one session carries."""
+    """The counter, the snapshots and the base commit one session carries."""
 
     blocks: int = 0
     snapshots: Mapping[str, str] = field(default_factory=dict)
+    # The commit everything the stop gate measures is measured against: set at
+    # session start, moved forward by every green pass. None means nobody ever
+    # set one -- the hook was switched on mid-session -- and the gate then
+    # falls back to the working tree alone and says so.
+    base: str | None = None
 
 
 def read(root: Path, session_id: str) -> SessionState:
@@ -35,18 +40,28 @@ def read(root: Path, session_id: str) -> SessionState:
         raw = json.loads(path.read_text(encoding="utf-8"))
         blocks = raw["blocks"]
         snapshots = raw["snapshots"]
+        # `get` and not `[...]`, unlike the two above: a session that was
+        # already running when this field arrived has a file without it, and
+        # reading that as damaged would throw away its block counter.
+        base = raw.get("base")
         if not isinstance(blocks, int) or not isinstance(snapshots, dict):
+            raise TypeError("state file has the wrong shape")
+        if base is not None and not isinstance(base, str):
             raise TypeError("state file has the wrong shape")
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return SessionState()
-    return SessionState(blocks=blocks, snapshots=snapshots)
+    return SessionState(blocks=blocks, snapshots=snapshots, base=base)
 
 
 def write(root: Path, session_id: str, state: SessionState) -> None:
     """Keep this state for the next call."""
     path = _path(root, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"blocks": state.blocks, "snapshots": dict(state.snapshots)}
+    payload = {
+        "blocks": state.blocks,
+        "snapshots": dict(state.snapshots),
+        "base": state.base,
+    }
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 

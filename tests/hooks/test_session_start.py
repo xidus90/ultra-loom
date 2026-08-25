@@ -4,9 +4,23 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from pathlib import Path
 
 from ultraloom.hooks.session_start import run
+from ultraloom.hooks.state import read as read_state
+from ultraloom.worktree import head_commit
+
+
+def _git(root: Path, *arguments: str) -> None:
+    """A real repository, never a stand-in: what git answers is the point."""
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *arguments],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
 
 
 def _journal(root: Path, run_id: str, *lines: dict[str, object]) -> None:
@@ -100,3 +114,34 @@ def test_a_damaged_journal_does_not_hide_the_others(tmp_path: Path) -> None:
 def test_an_unreadable_payload_is_an_internal_error(tmp_path: Path) -> None:
     out, err = io.StringIO(), io.StringIO()
     assert run(io.StringIO("nonsense"), tmp_path, out, err) == 1
+
+
+def test_it_records_the_commit_the_session_starts_on(tmp_path: Path) -> None:
+    """The stop gate has no other chance to learn it.
+
+    Taken here and not at the first Stop: by then the turn has already run,
+    and anything it committed would be part of the baseline that is supposed
+    to expose it.
+    """
+    _git(tmp_path, "init")
+    (tmp_path / "a.py").write_text("one\n", encoding="utf-8")
+    _git(tmp_path, "add", "a.py")
+    _git(tmp_path, "commit", "-m", "first")
+
+    out, err = io.StringIO(), io.StringIO()
+    assert run(_payload(), tmp_path, out, err) == 0
+    assert read_state(tmp_path, "s1").base == head_commit(tmp_path)
+
+
+def test_a_directory_without_a_commit_leaves_the_base_unset(tmp_path: Path) -> None:
+    """Not every project is a repository, and none of them may fail to start."""
+    out, err = io.StringIO(), io.StringIO()
+    assert run(_payload(), tmp_path, out, err) == 0
+    assert read_state(tmp_path, "s1").base is None
+
+
+def test_a_payload_without_a_session_id_still_starts_the_session(tmp_path: Path) -> None:
+    """There is nowhere to file the base, and that is no reason to refuse."""
+    payload = io.StringIO(json.dumps({"hook_event_name": "SessionStart"}))
+    out, err = io.StringIO(), io.StringIO()
+    assert run(payload, tmp_path, out, err) == 0

@@ -28,6 +28,12 @@ def dispatch(args: argparse.Namespace, root: Path) -> int:
         from ultraloom.hooks import subagent_start
 
         return subagent_start.run(sys.stdin, root, sys.stderr)
+    if args.hook_name == "stop":
+        # Local like the others, and this one carries the check chain: a
+        # session-start that only reads a directory must not import it.
+        from ultraloom.hooks import stop
+
+        return stop.run(sys.stdin, root, sys.stderr)
     if args.hook_name == "subagent-stop":
         from ultraloom.hooks import subagent_stop
 

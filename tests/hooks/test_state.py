@@ -58,3 +58,28 @@ def test_a_state_file_of_the_wrong_shape_reads_as_empty(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True)
     path.write_text('{"blocks": "two", "snapshots": {}}', encoding="utf-8")
     assert read(tmp_path, "s1") == SessionState(blocks=0, snapshots={})
+
+
+def test_the_base_commit_survives_a_round_trip(tmp_path: Path) -> None:
+    """The stop gate measures against it; a base that is forgotten is no base."""
+    write(tmp_path, "s1", SessionState(base="deadbeef"))
+    assert read(tmp_path, "s1").base == "deadbeef"
+
+
+def test_a_state_written_before_the_base_existed_reads_without_one(tmp_path: Path) -> None:
+    """A session already running when the field arrived must not read as damaged.
+
+    None is the honest answer -- the stop gate says out loud that it is
+    measuring with a blind spot rather than pretending to a base it never had.
+    """
+    path = tmp_path / STATE_DIR / "s1.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"blocks": 1, "snapshots": {}}', encoding="utf-8")
+    assert read(tmp_path, "s1") == SessionState(blocks=1, snapshots={}, base=None)
+
+
+def test_a_base_of_the_wrong_type_reads_as_empty(tmp_path: Path) -> None:
+    path = tmp_path / STATE_DIR / "s1.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"blocks": 1, "snapshots": {}, "base": 7}', encoding="utf-8")
+    assert read(tmp_path, "s1") == SessionState()
