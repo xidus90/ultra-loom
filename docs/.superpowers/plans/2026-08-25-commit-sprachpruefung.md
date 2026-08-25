@@ -694,7 +694,9 @@ _MESSAGES = (
 def test_a_higher_threshold_refuses_fewer() -> None:
     result = calibrate(_MESSAGES, "en", (1, 2, 3))
     assert 3 in result[2]
-    assert result[3] <= result[2]
+    # Sets, not tuples: comparing tuples with <= is lexicographic and would
+    # pass on orderings that have nothing to do with "refuses a subset".
+    assert set(result[3]) <= set(result[2])
     assert set(result[2]) <= set(result[1])
 
 
