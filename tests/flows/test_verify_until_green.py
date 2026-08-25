@@ -379,8 +379,9 @@ def test_a_committed_test_file_with_an_umlaut_does_not_escape_the_guard(tmp_path
 
     Without -z on the diff, git answers '"tests/test_gr\\303\\274n.py"', whose
     first segment is '"tests' rather than 'tests' -- and the guard waves it
-    through. `docs/abläufe/` is in this project's own tree, so non-ASCII in a
-    path is nothing exotic.
+    through. This project's prose is German — its flow pages lived under
+    `docs/abläufe/` until they moved to `docs/flows/` — so non-ASCII in a path
+    is nothing exotic.
     """
     repo = _repo(tmp_path)
     base = head_commit(repo)

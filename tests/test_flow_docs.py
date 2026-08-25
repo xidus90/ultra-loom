@@ -16,7 +16,7 @@ from ultraloom.discovery import FlowContext, find_flow, list_flows
 from ultraloom.graph import END, Graph
 
 ROOT = Path(__file__).resolve().parents[1]
-DOC_DIR = ROOT / "docs" / "abläufe"
+DOC_DIR = ROOT / "docs" / "flows"
 
 # The pages document the graph, not one project's configuration. These values
 # only have to be good enough for `build` to assemble a graph at all.
@@ -91,7 +91,7 @@ def _edge_drawn(diagram: str, source: str, target: str) -> bool:
 
 def test_every_bundled_flow_has_a_documentation_page() -> None:
     for name in _bundled_names():
-        assert _page_for(name).is_file(), f"{name} has no page under docs/abläufe/"
+        assert _page_for(name).is_file(), f"{name} has no page under docs/flows/"
 
 
 def test_every_language_variant_is_checked_too() -> None:

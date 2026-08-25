@@ -432,7 +432,7 @@ only `Bash` was no rule at all on Windows.
 script: `ultraloom policy check commands "git push origin master"`. `--tool`
 says which tool name a `tools` filter should see; it defaults to `Write`.
 
-The decision is drawn, in German, in `docs/abläufe/policy.md`.
+The decision is drawn in `docs/flows/policy.md`.
 
 ## Session hooks
 
@@ -582,7 +582,7 @@ reset each other's counter.
 It belongs in `.gitignore`, and it belongs in the policy's path rules: an agent
 that resets its own block counter has abolished the gate.
 
-The decision is drawn in `docs/abläufe/session-hooks.md`.
+The decision is drawn in `docs/flows/session-hooks.md`.
 
 ## The harness (optional)
 
@@ -645,7 +645,7 @@ approval point, `4` the run was stopped over the protected test paths — either
 the repairer touched one, or the working tree could not be read to tell.
 
 The flow is described at length — in English and German, side by side — in
-`docs/abläufe/verify-until-green.md`.
+`docs/flows/verify-until-green.md`.
 
 ### Writing a flow
 

@@ -473,7 +473,7 @@ Skript: `ultraloom policy check commands "git push origin master"`. `--tool`
 sagt, welchen Werkzeugnamen ein `tools`-Filter sehen soll; voreingestellt ist
 `Write`.
 
-Die Entscheidung ist gezeichnet in `docs/abläufe/policy.md`.
+Die Entscheidung ist gezeichnet in `docs/flows/policy.de.md`.
 
 ## Sitzungs-Hooks
 
@@ -632,7 +632,7 @@ im selben Checkout sich nicht gegenseitig den Zähler verstellen.
 Es gehört in `.gitignore` und in die Pfadregeln der Policy: Ein Agent, der
 seinen eigenen Block-Zähler zurücksetzt, hat das Gate abgeschafft.
 
-Die Entscheidung ist gezeichnet in `docs/abläufe/session-hooks.de.md`.
+Die Entscheidung ist gezeichnet in `docs/flows/session-hooks.de.md`.
 
 ## Der Harness (optional)
 
@@ -700,7 +700,7 @@ gestoppt — entweder hat der Reparateur einen angefasst, oder der Arbeitsbaum
 ließ sich nicht lesen, um es festzustellen.
 
 Der Ablauf ist ausführlich beschrieben in
-`docs/abläufe/verify-until-green.md`.
+`docs/flows/verify-until-green.de.md`.
 
 ### Einen Ablauf schreiben
 

@@ -282,8 +282,9 @@ C-quoted — `"tests/test_gr\303\274n.py"`. Its first segment is named `"tests`
 rather than `tests`, so no configured path matches it, it survives the prefix
 cut no better, and the guard lets it through. For a while this was true only
 of the status query; the diff asked without `-z` and had exactly this hole,
-even though `docs/abläufe/` sits in the project's own tree, so umlauts in
-paths are hardly exotic.
+even though this project's own prose is German — its flow pages lived
+under `docs/abläufe/` until they moved to `docs/flows/` — so umlauts in paths
+are hardly exotic.
 
 On the status side, `-uall` is added because the default collapses a whole
 untracked directory into a single entry pointing at no file. And a rename is

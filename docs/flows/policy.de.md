@@ -1,5 +1,7 @@
 # policy
 
+[English](policy.md)
+
 Kein Ablauf des Harness, sondern der Weg einer einzelnen Entscheidung: Claude
 Code fragt vor einem Werkzeugaufruf, und `ultraloom policy hook` antwortet mit
 einem Exit-Code. Die Verzweigung aus Art, Modus, Voreinstellungen und Treffern

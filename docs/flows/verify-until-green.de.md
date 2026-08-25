@@ -289,8 +289,9 @@ standardmäßig an, also gibt git jeden Pfad mit einem Nicht-ASCII-Byte
 C-zitiert zurück — `"tests/test_gr\303\274n.py"`. Dessen erstes Segment heißt
 `"tests` und nicht `tests`, damit trifft ihn kein konfigurierter Pfad, er
 überlebt den Präfix-Schnitt ebensowenig, und die Wache lässt ihn durch. Das galt eine Zeit lang nur für den Status; der Diff fragte
-ohne `-z` und hatte damit genau diese Lücke, obwohl `docs/abläufe/` im eigenen
-Baum liegt und Umlaute in Pfaden also nicht exotisch sind.
+ohne `-z` und hatte damit genau diese Lücke, obwohl die Prosa dieses Projekts
+deutsch ist — die Ablaufseiten lagen unter `docs/abläufe/`, bis sie nach
+`docs/flows/` zogen — Umlaute in Pfaden also nicht exotisch sind.
 
 Beim Status steht zusätzlich `-uall`, weil die Vorgabe ein ganzes unverfolgtes
 Verzeichnis zu einem Eintrag zusammenzieht, der auf keine Datei zeigt. Und eine

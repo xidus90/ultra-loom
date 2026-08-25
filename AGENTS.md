@@ -3,7 +3,7 @@
 ## Where things live
 
 Specs, plans and SDD live under `docs/.superpowers/`. Flows, each with its
-graph picture and an explanation, live under `docs/abläufe/`.
+graph picture and an explanation, live under `docs/flows/`.
 
 ## Languages
 
@@ -19,7 +19,7 @@ comment that explains a regex belongs to the code it sits in, whoever wrote it.
 
 The documentation is bilingual instead: the file without a suffix is the
 English variant and the standard, the German one carries `.de.md` right beside
-it — `README.md` / `README.de.md`, `docs/abläufe/verify-until-green.md` /
+it — `README.md` / `README.de.md`, `docs/flows/verify-until-green.md` /
 `verify-until-green.de.md`. Each variant links to the other under its heading.
 
 Exempt from both rules are the working papers under `docs/.superpowers/`: specs
