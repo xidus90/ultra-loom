@@ -255,3 +255,36 @@ def test_session_start_pulls_in_neither_the_harness_nor_the_check_chain(tmp_path
     assert leaked == ["ultraloom.gate", "ultraloom.journal"], output
     assert "CHECKS: False" in output, output
     assert code == 1, output
+
+
+# The same probe once more, for the gate that runs on every commit. It reads
+# one file and one config section; the check chain would be pure overhead.
+RUN_COMMIT_MSG = (
+    _PREAMBLE
+    + """
+from ultraloom.cli import main
+
+code = main(sys.argv[1:])
+print("EXIT:", code)
+report()
+print("CHECKS:", "ultraloom.checks" in sys.modules)
+"""
+)
+
+
+def test_commit_msg_pulls_in_neither_the_harness_nor_the_check_chain(tmp_path: Path) -> None:
+    """A language gate that loads the check chain pays for it at every commit."""
+    (tmp_path / ".ultraloom").mkdir()
+    (tmp_path / ".ultraloom" / "config.toml").write_text(
+        '[commit]\nlanguage = "en"\n', encoding="utf-8"
+    )
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text("Let the gate run one profile\n", encoding="utf-8")
+
+    code, leaked, output = _probe(
+        RUN_COMMIT_MSG, "commit-msg", str(message), "--root", str(tmp_path)
+    )
+
+    assert leaked == [], output
+    assert "CHECKS: False" in output, output
+    assert code == 0, output

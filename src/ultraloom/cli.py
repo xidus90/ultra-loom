@@ -74,6 +74,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         return hooks_cli.dispatch(args, root)
 
+    if args.command == "commit-msg":
+        # Before load_config and imported here, like the policy and the hooks:
+        # this runs on every commit, it reads [commit] itself, and a mistake in
+        # [verify] is none of its business -- answering one with exit 1 here
+        # would block the commit for a reason it has nothing to do with.
+        from ultraloom.commit import cli as commit_cli
+
+        return commit_cli.run(Path(args.path), root, sys.stderr)
+
     try:
         config = load_config(root)
     except ConfigError as error:
@@ -168,6 +177,11 @@ def _parser() -> argparse.ArgumentParser:
     hook_subs.add_parser(
         "subagent-stop", parents=[common], help="report what a subagent changed"
     )
+
+    commit_msg = subparsers.add_parser(
+        "commit-msg", parents=[common], help="check a commit message's language"
+    )
+    commit_msg.add_argument("path", help="the message file git passes to the hook")
 
     return parser
 

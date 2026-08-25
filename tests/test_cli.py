@@ -1273,3 +1273,17 @@ def test_the_model_is_built_from_what_the_project_configured(
 
     assert seen["setting_sources"] == ("local",)
     assert seen["settings_file"] == named
+
+
+def test_commit_msg_reaches_the_gate_and_returns_its_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The wiring only: what counts as the wrong language is tested next door."""
+    write_config(tmp_path, '[commit]\nlanguage = "en"\n')
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text("Das Ergebnis und der Bericht fehlen\n", encoding="utf-8")
+
+    code = main(["commit-msg", str(message), "--root", str(tmp_path)])
+
+    assert code == 2
+    assert "line 1" in capsys.readouterr().err
