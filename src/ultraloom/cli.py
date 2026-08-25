@@ -56,6 +56,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         # project is broken -- which is often exactly why you are reading it.
         return _show(root, args.run_id)
 
+    if args.command == "policy":
+        # Before load_config, and imported here: the policy runs before every
+        # tool call, so what it loads is its price, and it reads [policy.*]
+        # itself. A mistake in [verify] is none of its business -- reading the
+        # whole config here would answer one with exit 1, which by this
+        # command's protocol means "do not block".
+        from ultraloom.policy import cli as policy_cli
+
+        return policy_cli.dispatch(args, root)
+
     try:
         config = load_config(root)
     except ConfigError as error:
@@ -117,6 +127,18 @@ def _parser() -> argparse.ArgumentParser:
     check = subparsers.add_parser("check", parents=[common], help="run one or all of the checks")
     check.add_argument("kind", choices=("lint", "types", "test", "coverage", "all"))
     check.add_argument("--threshold", type=int, default=None, help="coverage threshold in percent")
+
+    policy = subparsers.add_parser(
+        "policy", parents=[common], help="check a tool call against the project's policy"
+    )
+    policy_subs = policy.add_subparsers(dest="policy_command")
+    policy_subs.add_parser("hook", parents=[common], help="read a Claude Code payload from stdin")
+    manual = policy_subs.add_parser("check", parents=[common], help="check one value by hand")
+    # Spelled out rather than taken from policy.rules.KINDS: building the
+    # parser must not import the policy, or `--help` would pay for it.
+    manual.add_argument("kind", choices=("paths", "commands", "content"))
+    manual.add_argument("value")
+    manual.add_argument("--tool", default="Write", help="the tool name a rule may filter on")
 
     return parser
 
