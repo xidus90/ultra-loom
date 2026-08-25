@@ -24,6 +24,8 @@ precommit = ["lint", "types", "test", "coverage"]
 # This repo under its own policy. Both rules have a history here: a subagent
 # once pushed `master` without being asked, and a journal edited after the fact
 # takes replay's whole point away.
+# The hook state joins them for the same kind of reason: an agent that resets
+# its own block counter has abolished the stop gate.
 # The expressions sit in TOML literal strings ('...'): in a basic string every
 # backslash would have to be doubled, and a forgotten one quietly turns `\s`
 # into `s` -- the rule would then only bite on exactly one space.
@@ -33,7 +35,7 @@ precommit = ["lint", "types", "test", "coverage"]
 # Both shells are covered by one rule: `Bash` and `PowerShell` alike yield a
 # subject of kind `commands`, so nothing here needs saying twice.
 [[policy.paths.rules]]
-match  = [".ultraloom/runs/*", "uv.lock", ".coverage"]
+match  = [".ultraloom/runs/*", ".ultraloom/hooks/*", "uv.lock", ".coverage"]
 reason = "An edited journal destroys what replay exists for; the lock belongs to uv."
 
 [[policy.commands.rules]]

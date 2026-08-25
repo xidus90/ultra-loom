@@ -16,3 +16,7 @@ htmlcov/
 
 # Run journals are traces of single runs, not source.
 .ultraloom/runs/
+
+# Per-session hook state: a block counter and remote snapshots, worthless to
+# anyone but the session that wrote them.
+.ultraloom/hooks/
