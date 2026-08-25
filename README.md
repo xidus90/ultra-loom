@@ -265,6 +265,150 @@ period. What came back is then a prefix — and a threshold or a failure count
 may be in the part that did not. A check whose output nobody could read in full
 is not a passed check. The report says so in its own words.
 
+## Policy
+
+    ultraloom policy check <kind> <value>   # by hand, or from a script
+    ultraloom policy hook                   # reads Claude Code's payload from stdin
+
+Rules about what an agent must not touch usually live as prose in a CLAUDE.md
+or as a hand-written hook script in one repository. Prose enforces nothing, and
+a script per repo drifts. The policy answers the second question of the same
+family the check chain answers: not *is this project green*, but *may this tool
+call happen at all* — with the same tool everywhere, and with a reason the agent
+gets to read.
+
+It refuses on three kinds of subject: the **path** a file tool writes to, the
+**command** line `Bash` would run, and the **content** a file tool would put on
+disk. Tool names themselves are deliberately not a kind — Claude Code's own
+`permissions` do that, and a second place with the same job is a source of
+contradictions.
+
+### The rules
+
+Every kind gets its own section in `.ultraloom/config.toml`, and every section
+its own mode:
+
+```toml
+[policy.paths]
+mode = "deny"        # "allow" turns it around: only what is named may be written
+defaults = true      # false throws the built-in rules away
+
+[[policy.paths.rules]]
+match  = [".ultraloom/runs/*", "uv.lock"]
+reason = "An edited journal destroys what replay exists for."
+
+[[policy.commands.rules]]
+regex  = "^\s*git\s+push\b"
+reason = "Whether commits reach the remote is a human's decision."
+
+[[policy.content.rules]]
+regex  = "type:\s*ignore(?!\s*#)"
+tools  = ["Write", "Edit"]
+reason = "No type: ignore without a reason behind it."
+```
+
+A rule carries `match` (a glob) or `regex`, exactly one of the two — both at
+once would be the question whether AND or OR is meant, and is refused when the
+file is read. Either takes a string or a list of them, several patterns sharing
+one reason, OR between them; an empty list is refused rather than kept as a rule
+that never fires. `tools` is an optional filter, not a kind of its own: left
+out, the rule holds for every tool of its kind. `reason` is mandatory, because a
+block without one produces exactly the sort of message an agent argues with or
+works around.
+
+Paths are matched as paths and everything else as flat text. A path pattern goes
+through `PurePosixPath.full_match`, which is the only thing here that knows `**`
+across directory boundaries — without it `.aws/**` is not a useful pattern — and
+which keeps `config/*` from reaching `config/a/b`. For a command line that rule
+would be wrong: the slash in `rm -rf a/b` separates no levels, so commands and
+content go through `fnmatch`. Claude Code sends absolute paths; the hook makes
+them relative to the project root and normalises separators to `/`, so one
+pattern hits the same thing on Windows and on POSIX. What lies outside the root
+stays absolute, and a rule aiming there has to spell the whole path.
+
+The mode sits on the kind and not on the whole policy. A global `mode = "allow"`
+would, along with the paths, forbid every command nobody happened to name —
+useful for paths, unusable for commands.
+
+In `deny` mode **every** matching rule is reported, not just the first: with
+first-hit-wins the agent clears one reason, runs into the next, and needs a
+round per rule for a decision it could have made completely the first time. In
+`allow` mode the first permission ends the check, and a subject nothing permits
+is refused with the note that the mode is `allow`.
+
+### What is blocked without any configuration
+
+With no `.ultraloom/config.toml` at all, the built-in rules still apply — a repo
+is protected without anyone having set anything up. They are security only, and
+they live as a constant in `ultraloom.policy.config`, not in a shipped TOML
+file: a file can go missing, a constant cannot.
+
+Paths, reason *secrets are not written by an agent*:
+
+    .env   .env.*   *.pem   *.key   id_rsa*   *.p12
+    .npmrc   .pypirc   credentials.json   .aws/**
+
+Content, reason *this looks like a credential in plain text*:
+
+    -----BEGIN [A-Z ]*PRIVATE KEY-----
+    \bAKIA[0-9A-Z]{16}\b
+    \bsk-[A-Za-z0-9]{20,}\b
+
+Commands: none. `git push` and `pip` instead of `uv` are house rules, not
+security, and belong in the project file where they can be seen. A built-in rule
+nobody reads gets killed with `defaults = false` at the first friction, and
+takes the real ones with it.
+
+The built-ins come first in the list of reasons, then the project's rules in the
+order of the file. They apply **only in `deny` mode**: whoever turns a kind
+around to `allow` gets the allowlist and nothing else, the built-ins included.
+Turning the mode around means taking the responsibility whole.
+
+### Exit codes
+
+    0  allowed, or the tool touches no rule at all
+    1  internal error — never blocks; a broken policy must not lock up a session
+    2  refused; every reason on stderr
+
+**A broken configuration is exit 2, not exit 1.** A policy that passes silently
+when its own configuration is unreadable is the same failure this README warns
+about beside the coverage check: a line reading "ok" for something nobody
+checked. Exit 1 stays reserved for real internal faults — an unreadable payload,
+empty stdin.
+
+As a Claude Code hook, in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR}/.venv/Scripts/ultraloom.exe\" policy hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook reads `tool_name` first and exits 0 before touching a configuration
+when the tool concerns no kind — it runs before every `Write`, `Edit` and
+`Bash`, so its own cost is a requirement. `Write`, `Edit` and `MultiEdit` yield
+a path subject; the content comes from `content` for `Write` and from
+`new_string` for the two edit tools. `Bash` yields its `command`.
+
+`policy check` is the same decision without a payload around it, for a hand or a
+script: `ultraloom policy check commands "git push origin master"`. `--tool`
+says which tool name a `tools` filter should see; it defaults to `Write`.
+
+The decision is drawn, in German, in `docs/abläufe/policy.md`.
+
 ## The harness (optional)
 
     uv add "ultraloom[agent]"

@@ -293,6 +293,162 @@ in dem Teil stecken, der fehlt. Eine Prüfung, deren Ausgabe niemand
 vollständig lesen konnte, ist keine bestandene Prüfung. Der Bericht sagt
 das mit eigenen Worten.
 
+## Policy
+
+    ultraloom policy check <art> <wert>   # von Hand oder aus einem Skript
+    ultraloom policy hook                 # liest Claude Codes Payload von stdin
+
+Regeln darüber, was ein Agent nicht anfassen darf, stehen üblicherweise als
+Prosa in einer CLAUDE.md oder als handgeschriebenes Hook-Skript in einem
+einzelnen Repository. Prosa erzwingt nichts, und ein Skript pro Repo driftet.
+Die Policy beantwortet die zweite Frage derselben Art, die auch die Prüfkette
+beantwortet: nicht *ist dieses Projekt grün*, sondern *darf dieser
+Werkzeugaufruf überhaupt stattfinden* — überall mit demselben Werkzeug und mit
+einer Begründung, die der Agent zu lesen bekommt.
+
+Sie verweigert über drei Arten von Subjekt: den **Pfad**, auf den ein
+Dateiwerkzeug schreibt, die **Kommandozeile**, die `Bash` ausführen würde, und
+den **Inhalt**, den ein Dateiwerkzeug auf die Platte legen würde. Werkzeugnamen
+selbst sind bewusst keine Art — das leisten Claude Codes eigene `permissions`,
+und eine zweite Stelle mit derselben Zuständigkeit ist eine Quelle für
+Widersprüche.
+
+### Die Regeln
+
+Jede Art bekommt ihren eigenen Abschnitt in `.ultraloom/config.toml` und jeder
+Abschnitt seinen eigenen Modus:
+
+```toml
+[policy.paths]
+mode = "deny"        # "allow" dreht um: nur Genanntes ist schreibbar
+defaults = true      # false wirft die eingebauten Regeln ab
+
+[[policy.paths.rules]]
+match  = [".ultraloom/runs/*", "uv.lock"]
+reason = "An edited journal destroys what replay exists for."
+
+[[policy.commands.rules]]
+regex  = "^\s*git\s+push\b"
+reason = "Whether commits reach the remote is a human's decision."
+
+[[policy.content.rules]]
+regex  = "type:\s*ignore(?!\s*#)"
+tools  = ["Write", "Edit"]
+reason = "No type: ignore without a reason behind it."
+```
+
+Die Begründungen stehen englisch in der Konfiguration, weil sie als
+Fehlermeldung beim Agenten landen und dieses Projekt seine Meldungen englisch
+schreibt.
+
+Eine Regel trägt `match` (ein Glob) oder `regex`, genau eines von beiden —
+beides zugleich wäre die Frage, ob UND oder ODER gilt, und wird beim Lesen der
+Datei abgelehnt. Beide nehmen eine Zeichenkette oder eine Liste davon, mehrere
+Muster teilen sich dann eine Begründung, ODER dazwischen; eine leere Liste wird
+abgelehnt, statt als Regel zu bleiben, die nie greift. `tools` ist ein
+optionaler Filter und keine eigene Art: fehlt er, gilt die Regel für jedes
+Werkzeug ihrer Art. `reason` ist Pflicht, weil eine Sperre ohne Begründung genau
+die Sorte Meldung erzeugt, gegen die ein Agent argumentiert oder die er umgeht.
+
+Pfade werden als Pfade gematcht und alles andere als flacher Text. Ein
+Pfadmuster geht durch `PurePosixPath.full_match` — als einziges hier kennt es
+`**` über Verzeichnisgrenzen hinweg, ohne das ist `.aws/**` kein sinnvolles
+Muster, und es hält `config/*` von `config/a/b` fern. Für eine Kommandozeile
+wäre dieselbe Regel falsch: der Schrägstrich in `rm -rf a/b` trennt keine
+Ebenen, also gehen Kommandos und Inhalte durch `fnmatch`. Claude Code liefert
+absolute Pfade; der Hook macht sie relativ zur Projektwurzel und normalisiert
+die Trennzeichen auf `/`, damit ein Muster unter Windows und POSIX dasselbe
+trifft. Was außerhalb der Wurzel liegt, bleibt absolut, und eine Regel, die
+dorthin zielt, muss den ganzen Pfad nennen.
+
+Der Modus sitzt an der Art und nicht an der ganzen Policy. Ein globales
+`mode = "allow"` würde mit den Pfaden auch jedes Kommando verbieten, das niemand
+genannt hat — für Pfade nützlich, für Kommandos unbenutzbar.
+
+Im Modus `deny` werden **alle** treffenden Regeln gemeldet, nicht nur die erste:
+gewänne der erste Treffer, räumte der Agent einen Grund aus, liefe in den
+nächsten und bräuchte eine Runde je Regel für eine Entscheidung, die er beim
+ersten Mal vollständig hätte treffen können. Im Modus `allow` beendet die erste
+Erlaubnis die Prüfung, und ein Subjekt, das nichts erlaubt, wird mit dem Hinweis
+abgelehnt, dass der Modus `allow` ist.
+
+### Was ohne jede Konfiguration gesperrt ist
+
+Ohne `.ultraloom/config.toml` greifen die eingebauten Regeln trotzdem — ein Repo
+ist geschützt, ohne dass jemand etwas eingerichtet hat. Sie sind ausschließlich
+sicherheitsrelevant und stehen als Konstante in `ultraloom.policy.config`, nicht
+in einer mitgelieferten TOML-Datei: eine Datei kann fehlen, eine Konstante
+nicht.
+
+Pfade, Begründung *secrets are not written by an agent*:
+
+    .env   .env.*   *.pem   *.key   id_rsa*   *.p12
+    .npmrc   .pypirc   credentials.json   .aws/**
+
+Inhalte, Begründung *this looks like a credential in plain text*:
+
+    -----BEGIN [A-Z ]*PRIVATE KEY-----
+    \bAKIA[0-9A-Z]{16}\b
+    \bsk-[A-Za-z0-9]{20,}\b
+
+Kommandos: keine. `git push` und `pip` statt `uv` sind Politik, nicht
+Sicherheit, und gehören in die Projektkonfiguration, wo man sie sieht. Eine
+eingebaute Regel, die niemand nachliest, wird bei der ersten Reibung mit
+`defaults = false` erschlagen — und nimmt die echten mit.
+
+Die eingebauten stehen zuerst in der Liste der Begründungen, danach die
+Projektregeln in der Reihenfolge der Datei. Sie gelten **nur im Modus `deny`**:
+wer eine Art auf `allow` dreht, bekommt die Allowlist und sonst nichts, die
+Voreinstellungen eingeschlossen. Den Modus umzudrehen heißt, die Verantwortung
+ganz zu übernehmen.
+
+### Exit-Codes
+
+    0  erlaubt, oder das Werkzeug berührt keine Regel
+    1  interner Fehler — blockt nie; eine defekte Policy darf keine Sitzung einsperren
+    2  verweigert; alle Begründungen auf stderr
+
+**Eine kaputte Konfiguration ist Exit 2, nicht Exit 1.** Eine Policy, die
+stillschweigend durchlässt, wenn ihre eigene Konfiguration unlesbar ist, ist
+derselbe Fehlermodus, vor dem diese README neben der Coverage-Prüfung warnt:
+eine Zeile „ok" für etwas, das niemand geprüft hat. Exit 1 bleibt echten
+Innenfehlern vorbehalten — unlesbare Payload, leeres stdin.
+
+Als Claude-Code-Hook, in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR}/.venv/Scripts/ultraloom.exe\" policy hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Der Hook liest zuerst `tool_name` und endet mit 0, bevor er eine Konfiguration
+anfasst, wenn das Werkzeug keine Art berührt — er läuft vor jedem `Write`,
+`Edit` und `Bash`, sein eigener Aufwand ist deshalb eine Anforderung. `Write`,
+`Edit` und `MultiEdit` ergeben ein Pfad-Subjekt; der Inhalt kommt bei `Write`
+aus `content` und bei den beiden Edit-Werkzeugen aus `new_string`. `Bash` ergibt
+sein `command`.
+
+`policy check` ist dieselbe Entscheidung ohne Payload darum herum, für Hand und
+Skript: `ultraloom policy check commands "git push origin master"`. `--tool`
+sagt, welchen Werkzeugnamen ein `tools`-Filter sehen soll; voreingestellt ist
+`Write`.
+
+Die Entscheidung ist gezeichnet in `docs/abläufe/policy.md`.
+
 ## Der Harness (optional)
 
     uv add "ultraloom[agent]"
