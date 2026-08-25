@@ -58,21 +58,29 @@ STOPWORDS: Mapping[Language, frozenset[str]] = {
 SCISSORS = re.compile(r"^#\s*-+\s*>8\s*-+")
 
 # Shapes that carry the other language inside an otherwise fine message. All
-# four are removed from a line before it is scored, because a gate with false
+# five are removed from a line before it is scored, because a gate with false
 # positives gets routed around with --no-verify and then protects nothing.
 TRAILER = re.compile(r"^[A-Za-z-]+:\s")
 CODE_SPAN = re.compile(r"`[^`]*`")
 QUOTED_SPAN = re.compile(r"\"[^\"]*\"")
 PATH_TOKEN = re.compile(r"\S*(?:[/\\]\S*|\.[A-Za-z0-9]{1,5})(?=\s|$)")
 
-# Words may carry umlauts even where the stopword list spells them out:
-# a real German commit writes "fuer" or "für", and both must be found. The
-# list is ASCII, so the text is folded to match it -- see _fold.
+# A name particle, not a function word: "von Neumann", "van Gogh",
+# "de Broglie". The lowercase particle followed by a capitalised word is the
+# shape, and German prose almost never has it -- there the particle is
+# followed by an article or a lowercase noun. Without this, a paper citing
+# two such names reaches the threshold on its own.
+NAME_PARTICLE = re.compile(r"\b(?:von|van|de|du|della|di)\s+[A-Z]\w+")
+
+# Words may carry umlauts even where the stopword list spells them out: a
+# real German commit writes the ASCII-transcribed form or the native one
+# with an umlaut, and both must be found. The list is ASCII, so the text is
+# folded to match it -- see _FOLD.
 _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 
-# The stopword lists are ASCII because this file is. German text is not:
-# "für" and "über" are the normal spellings. Folding the text rather than
-# doubling every entry keeps one list instead of two that can drift.
+# The stopword lists are ASCII because this file is. German text is not: it
+# uses the native umlaut spellings. Folding the text rather than doubling
+# every entry keeps one list instead of two that can drift.
 _FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 
 
@@ -118,6 +126,8 @@ def _hits(line: str, stopwords: frozenset[str]) -> tuple[str, ...]:
     """The stopwords in one line, after the exempt shapes are removed."""
     if TRAILER.match(line):
         return ()
-    stripped = PATH_TOKEN.sub(" ", QUOTED_SPAN.sub(" ", CODE_SPAN.sub(" ", line)))
+    stripped = PATH_TOKEN.sub(
+        " ", QUOTED_SPAN.sub(" ", CODE_SPAN.sub(" ", NAME_PARTICLE.sub(" ", line)))
+    )
     folded = stripped.lower().translate(_FOLD)
     return tuple(word for word in _WORD.findall(folded) if word in stopwords)

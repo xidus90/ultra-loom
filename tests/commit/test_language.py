@@ -58,6 +58,16 @@ def test_a_trailer_does_not_count() -> None:
     assert scan(text, "en", 2) == ()
 
 
+def test_a_name_particle_does_not_count() -> None:
+    text = "The paper by von Neumann and von Braun describes the algorithm"
+    assert scan(text, "en", 2) == ()
+
+
+def test_von_without_a_capitalised_name_still_counts() -> None:
+    text = "Das Ergebnis von dem Bericht und von der Pruefung"
+    assert scan(text, "en", 2) != ()
+
+
 def test_the_diff_below_the_scissors_is_ignored() -> None:
     """`git commit --verbose` appends the whole diff, uncommented.
 
