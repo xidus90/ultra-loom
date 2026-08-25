@@ -474,9 +474,17 @@ Exit 2 is not one thing, and getting it wrong is silent:
 - At `SubagentStop` it never happens **on purpose**. By the time it runs, the
   push has happened; stopping the subagent from stopping does not undo it.
 
-A chain that could not run at all is exit 1, never exit 2. The distinction
-matters more here than anywhere: these hooks check ultraloom with ultraloom,
-and a broken `checks.py` must not lock a session in.
+A chain that could not run at all is exit 1, never exit 2 — but only if it
+delivered *no* usable verdict, meaning **every** red result is `unavailable`.
+One unavailable check beside a real finding is still exit 2. The narrower rule
+was paid for: a GDScript project configures no `types` command, because the
+language has no typechecker, so every run carried one unavailable result. Under
+the older "any" reading the gate ran the full chain, found a genuine violation,
+and exited 1 anyway — it could never block there. Missing check kinds are still
+reported, they just no longer mask the findings beside them.
+
+The distinction matters more here than anywhere: these hooks check ultraloom
+with ultraloom, and a broken `checks.py` must not lock a session in.
 
 ### The stop gate
 

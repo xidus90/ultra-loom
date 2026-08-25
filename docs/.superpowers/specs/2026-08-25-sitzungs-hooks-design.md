@@ -186,6 +186,18 @@ Unterscheidung ist in diesem Repo besonders heikel, weil die Hooks ultraloom
 mit ultraloom prüfen: ein kaputtes `checks.py` darf die Sitzung nicht
 einsperren, aber eine rote Kette muss sie anhalten.
 
+**Exit 1 nur, wenn die Kette gar kein verwertbares Urteil geliefert hat**, also
+**jedes** rote Ergebnis `unavailable` ist. Ein unavailable neben einem echten
+Befund ergibt Exit 2. Die ursprüngliche Fassung fragte `any` statt `all` und
+traf damit auch den Fall „diese Prüfart gibt es in diesem Projekt legitim
+nicht": Ein GDScript-Projekt hat keinen Typechecker und konfiguriert kein
+`types`-Kommando, trug also in jedem einzelnen Lauf ein unavailable. Das Gate
+fuhr dort am 2026-08-25 die volle Kette über 565 s, fand einen echten Verstoß
+und beendete mit Exit 1 und „the chain could not run" — es konnte strukturell
+nie blockieren und setzte nie etwas durch. Die unavailable-Ergebnisse werden
+weiter mitgemeldet, damit der Agent die fehlende Prüfart sieht; sie verdecken
+die Befunde daneben nicht mehr.
+
 ## Kosten
 
 Gemessen am 2026-08-25, Hauptcheckout:

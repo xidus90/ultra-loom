@@ -271,3 +271,24 @@ def test_a_formatter_that_never_finishes_is_an_internal_error(
 
     assert run(_payload("Write", _written(tmp_path, "a.py")), tmp_path, errors) == 1
     assert "timed out" in errors.getvalue()
+
+
+def test_a_real_finding_blocks_even_beside_a_check_that_cannot_run(tmp_path: Path) -> None:
+    """The case from a GDScript project: no typechecker exists, lint is genuinely red.
+
+    `types` is configured nowhere and resolves to nothing, so every single run
+    carries one unavailable result. If that alone decided the exit code, the
+    hook could never block in such a project -- it would pay for the whole
+    chain and enforce nothing.
+    """
+    _config(
+        tmp_path,
+        f"[verify]\nlint = '{_PYTHON} {_fails('lint said')}'\n"
+        '\n[verify.profiles]\nedit = ["lint", "types"]\n',
+    )
+    errors = io.StringIO()
+
+    assert run(_payload("Write", _written(tmp_path)), tmp_path, errors) == 2
+    assert "lint said" in errors.getvalue()
+    # Still named: the agent has to see that a kind of check is missing.
+    assert "types" in errors.getvalue()

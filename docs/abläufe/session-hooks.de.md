@@ -44,7 +44,7 @@ flowchart TD
     advance --> pass
     chain -->|red| block["blocks + 1, every finding on stderr"]
     block --> held["exit 2 -- the turn is held"]
-    chain -->|could not run| internal
+    chain -->|only unavailable| internal
 ```
 
 Die Reihenfolge der Stufen ist nicht beliebig. Die Payload kommt zuerst, denn
@@ -166,6 +166,16 @@ Exit 2 hält bei `Stop` den Zug an, überbringt bei `PostToolUse` eine Meldung u
 kommt bei den anderen drei nie vor. Eine Kette, die gar nicht laufen konnte, ist
 Exit 1, nie Exit 2: Diese Hooks prüfen ultraloom mit ultraloom, und ein kaputtes
 `checks.py` darf keine Sitzung einsperren.
+
+„Gar nicht laufen konnte" ist wörtlich gemeint: **jedes** rote Ergebnis muss
+`unavailable` sein. Ein einzelnes unavailable neben einem echten Befund ist
+Exit 2, und der Befund entscheidet. Die engere Regel ist in einem
+GDScript-Projekt teuer bezahlt worden, das kein `types`-Kommando konfiguriert,
+weil die Sprache keinen Typechecker hat: Jeder Lauf trug ein unavailable, und
+nach der alten „irgendeines"-Lesart fuhr das Gate die volle Kette, fand einen
+echten Verstoß und gab trotzdem Exit 1 zurück — es konnte dort nie blockieren.
+Fehlende Prüfarten werden weiter gemeldet; sie verdecken die Befunde daneben
+nur nicht mehr.
 
 ## Der Zustand
 

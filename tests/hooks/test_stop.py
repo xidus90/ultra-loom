@@ -290,3 +290,27 @@ def test_a_filesystem_that_refuses_the_marker_leaves_the_gate_on(
     write_state(tmp_path, "s1", SessionState(base="abc123"))
     errors = io.StringIO()
     assert run(_payload(), tmp_path, errors, _clean, _never_chain) == 0
+
+
+def _red_beside_unavailable(_config: Config) -> tuple[CheckResult, ...]:
+    return (
+        CheckResult("lint", False, "a.py:1 unused import", "preset"),
+        CheckResult("types", False, "no mypy anywhere", UNAVAILABLE),
+    )
+
+
+def test_a_real_finding_blocks_even_beside_a_check_that_cannot_run(tmp_path: Path) -> None:
+    """The case from a GDScript project: no typechecker exists, lint is genuinely red.
+
+    Such a project carries an unavailable `types` on *every* run. If one
+    unavailable result decided the exit code, the gate could never block there:
+    it would run the whole chain and let real findings through.
+    """
+    errors = io.StringIO()
+    assert run(_payload(), tmp_path, errors, _dirty, _red_beside_unavailable) == 2
+    said = errors.getvalue()
+    assert "unused import" in said
+    # Still named: the agent has to see that a kind of check is missing.
+    assert "no mypy anywhere" in said
+    assert "could not run" not in said
+    assert read_state(tmp_path, "s1").blocks == 1

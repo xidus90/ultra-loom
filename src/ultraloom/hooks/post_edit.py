@@ -114,9 +114,13 @@ def _check(written: Path, config: Config, stderr: TextIO) -> int:
         return EXIT_OK
     for result in red:
         print(f"{result.kind}: {result.output}", file=stderr)
-    if any(result.source == UNAVAILABLE for result in red):
-        # A chain that could not run is no verdict about the file. Reported
-        # with the rest above, because the agent still has to see which check
+    if all(result.source == UNAVAILABLE for result in red):
+        # `all`, not `any`: only a chain that said nothing usable at all is no
+        # verdict about the file. One unavailable check beside a real finding
+        # must not swallow it -- a project that legitimately has no such check
+        # (GDScript has no typechecker, so `types` resolves to nothing on every
+        # single run) would otherwise never be able to block. Reported with the
+        # rest above either way, because the agent still has to see which check
         # is missing -- but not as a finding it could repair.
         return EXIT_INTERNAL
     return EXIT_BLOCKED

@@ -212,9 +212,14 @@ def _verify(
     for result in red:
         print(f"{result.kind}: {result.output}", file=stderr)
 
-    if any(result.source == UNAVAILABLE for result in red):
-        # A chain that could not run is no verdict about the work, so it is
-        # neither a block nor something to count. Reported with the rest above,
+    if all(result.source == UNAVAILABLE for result in red):
+        # `all`, not `any`: only a chain that said nothing usable at all is no
+        # verdict about the work, and so neither a block nor something to
+        # count. One unavailable check beside a real finding must not swallow
+        # it -- a project that legitimately has no such check (GDScript has no
+        # typechecker, so `types` resolves to nothing on every single run)
+        # would otherwise never be able to block, paying for the whole chain
+        # and enforcing nothing. Reported with the rest above either way,
         # because the agent still has to see which check is missing.
         print("ultraloom hook stop: the chain could not run; nothing was verified", file=stderr)
         return EXIT_INTERNAL

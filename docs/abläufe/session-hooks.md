@@ -43,7 +43,7 @@ flowchart TD
     advance --> pass
     chain -->|red| block["blocks + 1, every finding on stderr"]
     block --> held["exit 2 -- the turn is held"]
-    chain -->|could not run| internal
+    chain -->|only unavailable| internal
 ```
 
 The order of the stages is not free. The payload comes first, because without
@@ -155,6 +155,15 @@ Exit 2 holds the turn at `Stop`, delivers a message at `PostToolUse`, and never
 occurs at the other three. A chain that could not run at all is exit 1, never
 exit 2: these hooks check ultraloom with ultraloom, and a broken `checks.py`
 must not lock a session in.
+
+"Could not run at all" is literal: **every** red result must be `unavailable`.
+One unavailable check beside a real finding is exit 2, and the finding is what
+decides. The narrower rule was paid for in a GDScript project, which configures
+no `types` command because the language has no typechecker: every run carried an
+unavailable result, so under the older "any" reading the gate ran the full
+chain, found a genuine violation, and exited 1 regardless — it could never block
+there. Missing check kinds are still reported; they no longer mask the findings
+beside them.
 
 ## The state
 

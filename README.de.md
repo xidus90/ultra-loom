@@ -518,9 +518,19 @@ Exit 2 ist nicht überall dasselbe, und ein Irrtum darüber ist still:
   Zeitpunkt geschehen; den Subagenten am Aufhören zu hindern, macht ihn nicht
   rückgängig.
 
-Eine Kette, die gar nicht laufen konnte, ist Exit 1, nie Exit 2. Diese
-Unterscheidung wiegt hier schwerer als anderswo: Die Hooks prüfen ultraloom mit
-ultraloom, und ein kaputtes `checks.py` darf keine Sitzung einsperren.
+Eine Kette, die gar nicht laufen konnte, ist Exit 1, nie Exit 2 — aber nur,
+wenn sie *gar kein* verwertbares Urteil geliefert hat, also **jedes** rote
+Ergebnis `unavailable` ist. Ein einzelnes unavailable neben einem echten Befund
+bleibt Exit 2. Die engere Regel ist teuer bezahlt: Ein GDScript-Projekt
+konfiguriert kein `types`-Kommando, weil die Sprache keinen Typechecker hat, und
+trug damit in jedem Lauf ein unavailable. Nach der alten „irgendeines"-Lesart
+fuhr das Gate die volle Kette, fand einen echten Verstoß und gab trotzdem Exit 1
+zurück — es konnte dort strukturell nie blockieren. Fehlende Prüfarten werden
+weiter gemeldet, sie verdecken die Befunde daneben nur nicht mehr.
+
+Diese Unterscheidung wiegt hier schwerer als anderswo: Die Hooks prüfen
+ultraloom mit ultraloom, und ein kaputtes `checks.py` darf keine Sitzung
+einsperren.
 
 ### Das Stop-Gate
 
