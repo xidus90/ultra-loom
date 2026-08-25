@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ultraloom.config import CONFIG_NAME, Config, ConfigError, load_config
+from ultraloom.config import CONFIG_NAME, Config, ConfigError, kinds_for, load_config
 
 
 def write_config(root: Path, body: str) -> None:
@@ -789,3 +789,49 @@ def test_managed_settings_are_named_rather_than_read_as_a_path(tmp_path: Path) -
 
     with pytest.raises(ConfigError, match="managed settings always apply"):
         load_config(tmp_path)
+
+
+def test_kinds_for_resolves_a_profile_name(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, profiles={"edit": ("lint", "types")})
+
+    assert kinds_for(config, "edit") == ("lint", "types")
+
+
+def test_kinds_for_resolves_a_comma_separated_list(tmp_path: Path) -> None:
+    config = Config(root=tmp_path)
+
+    assert kinds_for(config, "lint, types") == ("lint", "types")
+
+
+def test_kinds_for_refuses_a_name_that_is_neither_profile_nor_kind(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, profiles={"edit": ("lint",)})
+
+    with pytest.raises(ConfigError, match="unknown check 'spelling'") as caught:
+        kinds_for(config, "spelling")
+
+    # Both lists, because the caller cannot tell from the name alone which of
+    # the two it meant to hit.
+    assert "known checks: lint, types, test, coverage" in str(caught.value)
+    assert "profiles: edit" in str(caught.value)
+
+
+def test_kinds_for_names_no_profiles_when_there_are_none(tmp_path: Path) -> None:
+    config = Config(root=tmp_path)
+
+    with pytest.raises(ConfigError, match="profiles: none"):
+        kinds_for(config, "edit")
+
+
+def test_kinds_for_refuses_an_empty_list(tmp_path: Path) -> None:
+    """A run that checks nothing must not pass as a run that found nothing."""
+    config = Config(root=tmp_path)
+
+    with pytest.raises(ConfigError, match="names no check"):
+        kinds_for(config, ",")
+
+
+def test_kinds_for_refuses_a_profile_configured_as_an_empty_list(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, profiles={"nothing": ()})
+
+    with pytest.raises(ConfigError, match="names no check"):
+        kinds_for(config, "nothing")

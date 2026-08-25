@@ -242,6 +242,48 @@ def load_config(root: Path) -> Config:
     )
 
 
+def kinds_for(config: Config, requested: str) -> tuple[str, ...]:
+    """The check kinds behind a profile name or a comma-separated list.
+
+    Here and not in the flow that asked first: the flow sits above the harness
+    boundary, and a hook below it needs the same answer. Two readings of one
+    table would drift in exactly the details this function exists for.
+
+    Raises:
+        ConfigError: if a name is neither a profile nor a check kind, or if
+            what it resolves to is empty -- a profile configured as an empty
+            list would otherwise pass as "everything was checked".
+    """
+    # The profile's kinds go through the emptiness check below like any other
+    # answer: returning them here would leave a profile configured as an empty
+    # list the one way to start a run that checks nothing.
+    kinds = (
+        config.profiles[requested]
+        if requested in config.profiles
+        else tuple(part.strip() for part in requested.split(",") if part.strip())
+    )
+    unknown = [kind for kind in kinds if kind not in _CHECK_KINDS]
+    if unknown:
+        known = ", ".join(_CHECK_KINDS)
+        profiles = ", ".join(sorted(config.profiles)) or "none"
+        raise ConfigError(
+            f"unknown check {unknown[0]!r}; known checks: {known}; profiles: {profiles}"
+        )
+    if not kinds:
+        # An empty answer passes the name check above -- there is no name to
+        # object to -- and would start a run that verifies nothing and reports
+        # success. "" and "," take this path, and so does a profile configured
+        # as an empty list: load_config validates the names in a profile, not
+        # that it holds any.
+        # The wording still names `--checks` because that is where the string
+        # comes from in every case but the hooks', and it is the message the
+        # flow's callers already know.
+        raise ConfigError(
+            f"--checks {requested!r} names no check to run; known checks: {', '.join(_CHECK_KINDS)}"
+        )
+    return kinds
+
+
 def _cli_path(configured: object, path: Path) -> Path | None:
     """What the machine says, else what the file says, else nothing.
 

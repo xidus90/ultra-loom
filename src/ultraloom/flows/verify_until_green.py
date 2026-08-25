@@ -23,7 +23,7 @@ from ultraloom.checks import (
     run_check,
     run_kinds,
 )
-from ultraloom.config import Config, ConfigError
+from ultraloom.config import Config, ConfigError, kinds_for
 from ultraloom.discovery import Baseline, FlowContext, LoadedFlow
 from ultraloom.graph import END, AgentNode, CodeNode, Graph
 from ultraloom.runner import FlowExit
@@ -594,34 +594,14 @@ def build(context: FlowContext) -> LoadedFlow:
 
 
 def _kinds_from(requested: str | None, config: Config) -> tuple[str, ...]:
-    """What `--checks` asked for: a profile name, a list, or everything."""
+    """What `--checks` asked for: a profile name, a list, or everything.
+
+    The resolution itself lives in `config`, not here: a hook below the harness
+    boundary cannot import this module, and one table read twice drifts.
+    """
     if requested is None:
         return KINDS
-    # The profile's kinds go through the emptiness check below like any other
-    # answer: returning them here would leave a profile configured as an empty
-    # list the one way to start a run that checks nothing.
-    kinds = (
-        config.profiles[requested]
-        if requested in config.profiles
-        else tuple(part.strip() for part in requested.split(",") if part.strip())
-    )
-    unknown = [kind for kind in kinds if kind not in KINDS]
-    if unknown:
-        known = ", ".join(KINDS)
-        profiles = ", ".join(sorted(config.profiles)) or "none"
-        raise ValueError(
-            f"unknown check {unknown[0]!r}; known checks: {known}; profiles: {profiles}"
-        )
-    if not kinds:
-        # An empty answer passes the name check above -- there is no name to
-        # object to -- and would start a run that verifies nothing and reports
-        # success. "" and "," take this path, and so does a profile configured
-        # as an empty list: config.py validates the names in a profile, not
-        # that it holds any.
-        raise ValueError(
-            f"--checks {requested!r} names no check to run; known checks: {', '.join(KINDS)}"
-        )
-    return kinds
+    return kinds_for(config, requested)
 
 
 def _max_rounds_from(requested: str | None) -> int:

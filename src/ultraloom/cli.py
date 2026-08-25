@@ -151,6 +151,9 @@ def _parser() -> argparse.ArgumentParser:
     hook = subparsers.add_parser("hook", parents=[common], help="run one of the session hooks")
     hook_subs = hook.add_subparsers(dest="hook_name")
     hook_subs.add_parser("session-start", parents=[common], help="report runs waiting at a gate")
+    hook_subs.add_parser(
+        "post-edit", parents=[common], help="format and check the file that was just written"
+    )
 
     return parser
 
