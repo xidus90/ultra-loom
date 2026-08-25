@@ -1202,6 +1202,29 @@ exit 2 and does, because a policy that passes silently is worse than
 one that refuses loudly.
 ```
 
+**Nachtrag nach der Umsetzung (Commit `84312d2`).** Fünf Stellen dieses Tasks
+waren im Plan falsch oder unvollständig; so steht es jetzt im Code:
+
+- **Kein `type: ignore` in `policy/cli.py`.** `KINDS` ist als `tuple[Kind, ...]`
+  deklariert, also ist `KINDS[KINDS.index(kind)]` für mypy bereits ein `Kind`.
+  Der vorgeschlagene Kommentar war eine Entschuldigung für ein Problem, das es
+  nicht gibt.
+- **Der Boundary-Test-Schnipsel oben stimmt nicht.** `main(["policy", "hook"])`
+  wirft kein `SystemExit` — `main` gibt den Code zurück, und argparse steigt nur
+  bei einem Benutzungsfehler aus. Maßgeblich ist das `_probe`-Muster, das die
+  Datei schon benutzt.
+- **Der `policy`-Zweig steht in `main()` vor `load_config`**, nicht dahinter. Ein
+  Fehler in `[verify]` geht die Policy nichts an; würde sie ihn lesen, endete
+  der Hook mit Exit 1 — was nach ihrem eigenen Protokoll "nicht blockieren"
+  heißt, also genau der schädliche Ausgang.
+- **`args.policy_command is None`** war eine Lücke: `dispatch` wäre auf
+  `run(sys.stdin, …)` durchgefallen und hätte am Terminal auf eine Eingabe
+  gewartet, die nie kommt. Jetzt eine Meldung und Exit 1 — kein argparse
+  `required=True`, weil dessen Exit 2 bei diesem Kommando "verweigert" bedeutet.
+- **`tests/policy/test_cli.py` fehlte in der Dateiliste.** Ohne sie hätten
+  `policy/cli.py` und die Verdrahtung in `main()` keine Deckung, und
+  `fail_under = 100` wäre gefallen.
+
 ---
 
 ### Task 5: README, README.de und Ablaufbild
