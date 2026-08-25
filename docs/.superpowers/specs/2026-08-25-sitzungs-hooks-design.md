@@ -174,19 +174,30 @@ werden darf.
 
 100 % Coverage wie im übrigen Repo.
 
-## Offene Punkte
+## Gemessen statt vermutet
 
-1. **`stop_hook_active` ist nicht belegt.** Die abgerufene Doku nennt das Feld
-   im Zusammenhang mit Schleifen, zeigt es aber nicht in der Payload. Vor der
-   Umsetzung einmal empirisch nachsehen: einen Stop-Hook registrieren, der
-   seine Payload wegschreibt, und nachlesen, was wirklich ankommt. Dasselbe für
-   `agent_id` bei `SubagentStop`.
-2. **Reihenfolge mehrerer Stop-Hooks.** Ob `.claude/settings.json` mehrere
-   Einträge desselben Ereignisses nacheinander oder gleichzeitig fährt, ändert,
-   ob der Zähler verlässlich ist. Ebenfalls empirisch zu klären.
+Die beiden offenen Punkte sind beantwortet. Die vollständigen Feldlisten stehen
+in `docs/.superpowers/specs/2026-08-25-sitzungs-hooks-payloads.md`; hier nur,
+was der Entwurf daraus braucht:
 
-Beides sind Messungen, keine Entwurfsfragen — aber sie gehören vor die erste
-Zeile Code, nicht dahinter.
+1. **`stop_hook_active` gibt es.** In jeder `Stop`- und `SubagentStop`-Payload,
+   beim ersten Aufruf `false`, beim durch Exit 2 erzwungenen zweiten `true`.
+   Der Block-Zähler kann sich darauf stützen; er ersetzt ihn nicht, weil das
+   Feld nur „schon einmal geblockt" sagt und nicht „wie oft".
+2. **`agent_id` und `agent_type` gibt es** bei `SubagentStop`, dazu
+   `agent_transcript_path`. Die `session_id` dort ist die der Muttersitzung —
+   je Subagent unterscheidet nur `agent_id`.
+3. **`SubagentStart` existiert** und trägt dieselbe `agent_id`. Der
+   Schnappschuss für `subagent-stop` wird deshalb je Subagent in einem eigenen
+   Hook `subagent-start` genommen, nicht gröber je Sitzung in `session-start`.
+4. **Mehrere Einträge desselben Ereignisses laufen gleichzeitig**, nicht
+   nacheinander: zwei `Stop`-Einträge mit je zwei Sekunden Verweildauer
+   starteten 2 ms auseinander und überlappten vollständig. Der Block-Zähler
+   gehört deshalb in **einen** Eintrag; zwei Hooks, die ihn beide fortschreiben,
+   verlieren Hochzählungen.
+
+Die Sitzungskennung heißt `session_id` und ist über alle Aufrufe einer Sitzung
+hinweg stabil.
 
 ## Ausdrücklich nicht in diesem Vorhaben
 
