@@ -95,8 +95,8 @@ def _allow(item: Mapping[str, Any], path: Path, index: int) -> re.Pattern[str]:
     # zero or more "P".
     if "match" in item:
         raise ConfigError(
-            f"{path}: {where} needs a `regex`; unlike the policy's path rules there is "
-            "no `match`, because a glob has no clear meaning against a line of text"
+            f"{path}: {where} has no `match` -- remove it and write a `regex`; unlike "
+            "the policy's path rules a glob has no clear meaning against a line of text"
         )
     if "regex" not in item:
         raise ConfigError(

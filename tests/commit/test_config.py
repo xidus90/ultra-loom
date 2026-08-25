@@ -91,7 +91,12 @@ reason = "Trailer, not prose."
         (
             '[commit]\nlanguage = "en"\n[[commit.allow]]\n'
             'match = "a"\nreason = "x"',
-            "needs a `regex`; unlike the policy's path rules there is no `match`",
+            "has no `match` -- remove it and write a `regex`",
+        ),
+        (
+            '[commit]\nlanguage = "en"\n[[commit.allow]]\n'
+            'match = "a"\nregex = "^b"\nreason = "x"',
+            "has no `match` -- remove it and write a `regex`",
         ),
         ('[commit]\nlanguage = "en"\nallow = "no list"', "must be a list of tables"),
         (
