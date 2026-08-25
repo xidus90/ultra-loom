@@ -491,6 +491,11 @@ reason = "Write only"
         ('[[policy.commands.rules]]\nregex = "["\nreason = "x"', "invalid regex"),
         ('[policy.paths]\nrules = "no list"', "must be a list of tables"),
         ('policy = "no table"', r"\[policy\] must be a table"),
+        # Diese beiden erreichen je einen `raise`, den die übrigen Fälle liegen
+        # lassen: eine *Art*, die keine Tabelle ist, und eine TOML-Datei, die
+        # gar nicht parst. Ohne sie bleibt das Modul bei 96 %.
+        ('[policy]\npaths = "no table"', r"\[policy\.paths\] must be a table"),
+        ("[policy", r"config\.toml"),
     ],
 )
 def test_a_broken_schema_is_refused_by_name(tmp_path: Path, body: str, message: str) -> None:
