@@ -78,3 +78,17 @@ def test_subagent_stop_reads_the_payload_from_stdin(
 
     assert main(["hook", "subagent-stop", "--root", str(tmp_path)]) == 0
     assert capsys.readouterr().out.startswith("subagent a1: no snapshot")
+
+
+def test_stop_takes_a_check_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The argument reaches the hook; the marker keeps the chain out of it."""
+    marker = tmp_path / MARKER
+    marker.parent.mkdir(parents=True)
+    marker.write_text("", encoding="utf-8")
+    payload = json.dumps({"session_id": "s1", "hook_event_name": "Stop"})
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+
+    assert main(["hook", "stop", "--root", str(tmp_path), "--checks", "lint"]) == 0
+    assert capsys.readouterr().err == ""

@@ -78,8 +78,8 @@ nicht geraten.
 
 ### Stop — `hook stop`
 
-Fährt `check all` (nach der Umsetzung gemessen: 60 bis 62 s) und blockt mit
-Exit 2, bis alles grün ist.
+Fährt `check all` (nach der Umsetzung gemessen: 60 bis 62 s) — oder mit
+`--checks` nur ein Profil — und blockt mit Exit 2, bis alles grün ist.
 
 **Kurzschluss zuerst:** Ist seit der letzten grünen Prüfung nichts dazugekommen,
 endet der Hook sofort mit 0 — gemessen rund 300 ms. Ein Zug, der nur gelesen und
@@ -100,6 +100,22 @@ Die Basis einer Sitzung entsteht in zwei Schritten, und beide werden gebraucht:
    `head_commit` fort. Ein einmal grün geprüfter Commit taucht damit nie
    wieder auf — ohne das liefe nach dem ersten Commit jeder weitere Zug der
    Sitzung die volle Kette.
+
+**`--checks` fährt ein Profil statt der ganzen Kette.** Das Argument nimmt,
+was `ultraloom run --checks` nimmt — einen Profilnamen aus `[verify.profiles]`
+oder eine kommagetrennte Liste von Arten — und wird von demselben `kinds_for`
+aufgelöst; ohne das Argument bleibt es bei allen Arten. Der Grund ist die
+Trennung zwischen Prüfungen, die den Quelltext lesen, und solchen, die ihn
+ausführen: In einem Spielprojekt gemessen kostete ein Zugende mit dem Stop-Gate
+36 Minuten, fast alles davon die Godot-Suite (639 s seriell) und der
+Coverage-Bericht — fällig am Ende jedes Zuges. Suite und Coverage-Schwelle
+gehören ans Commit-Gate, das Gate am Zug fährt die statischen Prüfungen.
+
+Ein Durchgang unter `--checks` schreibt die Basis **nicht** fort. Die Basis
+heißt „alles bis hierher ist geprüft"; ein Profil ohne Suite hat das nicht
+geprüft, und eine fortgeschriebene Basis versteckte die ungeprüfte Arbeit vor
+jedem späteren Zug. Ein unbekannter Name ist Exit 1 mit der Meldung von
+`kinds_for` — eine kaputte Konfiguration ist kein Urteil über die Arbeit.
 
 Nach einem **roten** Durchgang bleibt die Basis stehen. Sie fortzuschreiben
 hieße, den nächsten Zug kurzzuschließen — das Gate hätte sich selbst

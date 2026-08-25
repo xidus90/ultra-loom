@@ -496,7 +496,7 @@ stdin, genau wie `ultraloom policy hook`.
 | `PostToolUse` | `post-edit` | Fährt `ruff format` über die geschriebene Datei, danach das Profil `edit`. |
 | `SubagentStart` | `subagent-start` | Hält fest, wo `origin` und der lokale `HEAD` vor dem Lauf des Subagenten standen. |
 | `SubagentStop` | `subagent-stop` | Nennt jede Remote-Referenz, die sich bewegt hat, neu ist oder verschwunden ist, und jeden Commit, den `HEAD` dazubekommen hat. |
-| `Stop` | `stop` | Fährt die ganze Kette und hält den Zug an, solange etwas rot ist. |
+| `Stop` | `stop` | Fährt die Kette — oder mit `--checks` ein Profil — und hält den Zug an, solange etwas rot ist. |
 
 ### Was Exit 2 je Ereignis bedeutet
 
@@ -561,6 +561,35 @@ vollständige aussehen.
 Das Gate zieht seine eigenen Zustandsdateien von dem ab, was es sieht. Ohne das
 sähe jeder Zug nach dem ersten geändert aus — wegen der Datei, die das Gate
 selbst geschrieben hat.
+
+### Ein Profil statt der ganzen Kette
+
+    ultraloom hook stop --checks edit
+
+`--checks` nimmt, was `ultraloom run --checks` nimmt: einen Profilnamen aus
+`[verify.profiles]` oder eine kommagetrennte Liste von Prüfarten. Ohne das
+Argument fährt das Gate alle Arten — das bisherige Verhalten.
+
+Der Grund, warum ein Projekt das braucht, ist die Trennung zwischen Prüfungen,
+die den Quelltext nur *lesen*, und solchen, die ihn *ausführen*. In einem
+Spielprojekt kostete ein Zugende 36 Minuten, fast alles davon die Godot-Suite
+(639 s seriell) und der Coverage-Bericht — fällig am Ende jedes einzelnen
+Zuges, auch bei einem Zug, der eine Zeile Dokumentation geändert hat. Statische
+Prüfungen gehören zum Edit und zum Zug; Suite und Coverage-Schwelle führen das
+Projekt aus und gehören zum Commit, wo das Commit-Gate jenes Projekts sie
+ohnehin fährt.
+
+**Ein Lauf mit Profil schreibt die Basis nicht fort.** Die Basis ist das Wort
+des Gates für „alles bis hierher ist geprüft“, und ein Profil, das die Suite
+auslässt, hat sie nicht geprüft. Würde die Basis trotzdem weiterrücken, hielte
+der nächste Zug die ungeprüfte Arbeit für erledigt, und die Suite liefe an
+keinem Gate je. Unter `--checks` wächst die Spanne also nur — bezahlbar genau
+deshalb, weil das Profil wegen seiner Billigkeit gewählt wurde.
+
+Ein unbekanntes Profil oder eine unbekannte Prüfart ist Exit 1 mit der
+Meldung von `kinds_for`, derselben, die `ultraloom run --checks` druckt. Der
+Zug wird davon nie gehalten: eine kaputte Konfiguration ist kein Urteil über
+die Arbeit.
 
 ### Verdrahtung
 

@@ -38,8 +38,12 @@ flowchart TD
     warn --> diff
     base -->|yes| diff{"anything changed since base"}
     diff -->|nothing| pass
-    diff -->|something| chain["run the whole check chain"]
-    chain -->|green| advance["move the base to HEAD"]
+    diff -->|something| kinds{"--checks given"}
+    kinds -->|no| chain
+    kinds -->|unknown name| internal
+    kinds -->|profile or list| chain["run the requested check kinds"]
+    chain -->|green, whole chain| advance["move the base to HEAD"]
+    chain -->|green, profile only| pass
     advance --> pass
     chain -->|red| block["blocks + 1, every finding on stderr"]
     block --> held["exit 2 -- the turn is held"]
@@ -135,6 +139,25 @@ next turn nothing to measure, and the gate would have switched itself off after
 a single finding. The counter is deliberately not cleared by a pass: a session
 alternating red and green would otherwise never reach the cap, and the cap is
 what keeps a disagreement between agent and gate from running forever.
+
+`--checks` narrows what the gate runs: a profile name from `[verify.profiles]`
+or a comma-separated list of kinds, the same argument `ultraloom run --checks`
+takes and resolved by the same `kinds_for`. Without it every kind runs, as
+before. What a project buys with it is the split between checks that only read
+the source and checks that execute it: measured in one game project, a turn's
+end cost 36 minutes, nearly all of it the Godot suite (639 s serially) and the
+coverage report — paid at the end of every turn, however small. Those two
+belong to the commit gate, which that project already has; the gate at the turn
+runs the static ones.
+
+A pass under `--checks` does **not** move the base. The base means "everything
+up to here has been verified", and a profile that skips the suite has not
+verified it; moving it would hide the untested work from every later turn as
+well, so the suite would never run at any gate. Left where it is, the range
+only grows — affordable exactly because the profile was chosen for being cheap.
+An unknown name is exit 1 with `kinds_for`'s own message: a broken
+configuration is not a verdict about the work, and a turn held over one could
+not be repaired from inside the session.
 
 The gate subtracts its own state files from what it sees. It writes one on
 every block and every pass, and left in the answer that file would make every

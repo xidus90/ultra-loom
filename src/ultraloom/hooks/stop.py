@@ -14,13 +14,13 @@ passes and stays put when it does not.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import TextIO
 
-from ultraloom.checks import UNAVAILABLE, CheckResult, run_all
-from ultraloom.config import Config, ConfigError, load_config
+from ultraloom.checks import KINDS, UNAVAILABLE, CheckResult, run_kinds
+from ultraloom.config import Config, ConfigError, kinds_for, load_config
 from ultraloom.hooks.payload import EXIT_BLOCKED, EXIT_INTERNAL, EXIT_OK, PayloadError
 from ultraloom.hooks.payload import read as read_payload
 from ultraloom.hooks.state import STATE_DIR, SessionState
@@ -43,7 +43,7 @@ MARKER = ".claude/.no-verify"
 # syscalls come from outside so a test can put a red chain in front of the
 # decision without waiting forty-five seconds for a real one.
 type Differ = Callable[[Path, str | None], tuple[str, ...]]
-type Chain = Callable[[Config], tuple[CheckResult, ...]]
+type Chain = Callable[[Sequence[str], Config], tuple[CheckResult, ...]]
 
 
 def changed(root: Path, base: str | None) -> tuple[str, ...]:
@@ -69,9 +69,19 @@ def run(
     root: Path,
     stderr: TextIO,
     differ: Differ = changed,
-    chain: Chain = run_all,
+    chain: Chain = run_kinds,
+    checks: str | None = None,
 ) -> int:
     """Whether this turn may end. Exit 2 holds it, everything else lets it go.
+
+    `checks` is a profile name from [verify.profiles] or a comma-separated
+    list of check kinds, spelled exactly as `ultraloom run --checks` spells
+    it. It is a plain parameter and not an injected one like `differ` and
+    `chain`: those two exist so a test can put a syscall-free answer in front
+    of the decision, while this is what the caller *asked for*, and it stays a
+    string until `_verify` has the config -- resolving it earlier would mean
+    reading [verify.profiles] a second time, before the load that reports a
+    broken table.
 
     The order of the five stages below is not free:
 
@@ -139,7 +149,7 @@ def run(
     if not touched:
         return EXIT_OK
 
-    return _verify(root, session_id, state, chain, stderr)
+    return _verify(root, session_id, state, chain, checks, stderr)
 
 
 def _not_our_own(touched: tuple[str, ...]) -> tuple[str, ...]:
@@ -183,6 +193,7 @@ def _verify(
     session_id: str,
     state: SessionState,
     chain: Chain,
+    checks: str | None,
     stderr: TextIO,
 ) -> int:
     """Run the chain and turn what it said into an exit code."""
@@ -196,7 +207,18 @@ def _verify(
         return EXIT_INTERNAL
 
     try:
-        results = chain(config)
+        kinds = KINDS if checks is None else kinds_for(config, checks)
+    except ConfigError as error:
+        # Exit 1, like every other ultraloom-side failure here: a profile name
+        # nobody configured is not a finding about the work, and a turn held
+        # over one could not be repaired from inside the session. The message
+        # is `kinds_for`'s own, so a mistyped profile reads the same here as it
+        # does at `ultraloom run --checks`.
+        print(f"ultraloom hook stop: {error}", file=stderr)
+        return EXIT_INTERNAL
+
+    try:
+        results = chain(kinds, config)
     except ConfigError as error:
         # The scheduler is the first reader of the effective check order, so a
         # ring between the project's edges and the preset's surfaces here and
@@ -206,7 +228,8 @@ def _verify(
 
     red = tuple(result for result in results if not result.ok)
     if not red:
-        _advance(root, session_id, state)
+        if checks is None:
+            _advance(root, session_id, state)
         return EXIT_OK
 
     for result in red:
@@ -230,6 +253,16 @@ def _verify(
 
 def _advance(root: Path, session_id: str, state: SessionState) -> None:
     """Move the base to what was just verified, and leave the counter alone.
+
+    Called only when the whole chain ran. A pass under `--checks` says less
+    than the base means: the base is this hook's word for "everything up to
+    here has been verified", and a profile that skips the suite has not
+    verified it. Moving the base after a narrowed pass would hide every
+    untested change from the *next* turn as well, so a project running the
+    static profile at the gate would end up with a chain of turns none of which
+    ever ran the suite and none of which could still see the work. Left where
+    it was, the range only grows, and the profile is cheap by construction --
+    that is why somebody chose it.
 
     The base moves only here, on a pass. Moving it after a block would leave
     the next turn with nothing to measure and the gate would have switched

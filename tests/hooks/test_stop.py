@@ -9,16 +9,17 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from ultraloom.checks import UNAVAILABLE, CheckResult
+from ultraloom.checks import KINDS, UNAVAILABLE, CheckResult
 from ultraloom.config import Config, ConfigError
 from ultraloom.hooks.state import SessionState
 from ultraloom.hooks.state import read as read_state
 from ultraloom.hooks.state import write as write_state
-from ultraloom.hooks.stop import MARKER, MAX_BLOCKS, run
+from ultraloom.hooks.stop import MARKER, MAX_BLOCKS, Chain, run
 from ultraloom.worktree import WorktreeError, head_commit
 
 
@@ -48,18 +49,18 @@ def _repo(tmp_path: Path) -> Path:
     return work
 
 
-def _green(_config: Config) -> tuple[CheckResult, ...]:
+def _green(_kinds: Sequence[str], _config: Config) -> tuple[CheckResult, ...]:
     return (CheckResult("lint", True, "", "preset"),)
 
 
-def _red(_config: Config) -> tuple[CheckResult, ...]:
+def _red(_kinds: Sequence[str], _config: Config) -> tuple[CheckResult, ...]:
     return (
         CheckResult("lint", False, "a.py:1 unused import", "preset"),
         CheckResult("types", False, "a.py:2 needs a type", "preset"),
     )
 
 
-def _unavailable(_config: Config) -> tuple[CheckResult, ...]:
+def _unavailable(_kinds: Sequence[str], _config: Config) -> tuple[CheckResult, ...]:
     return (CheckResult("types", False, "no mypy anywhere", UNAVAILABLE),)
 
 
@@ -75,7 +76,7 @@ def _never_differ(_root: Path, _base: str | None) -> tuple[str, ...]:
     raise AssertionError("the working tree must not be read at this point")
 
 
-def _never_chain(_config: Config) -> tuple[CheckResult, ...]:
+def _never_chain(_kinds: Sequence[str], _config: Config) -> tuple[CheckResult, ...]:
     raise AssertionError("the chain must not run at this point")
 
 
@@ -150,7 +151,7 @@ def test_a_chain_that_could_not_run_is_not_a_block(tmp_path: Path) -> None:
 
 
 def test_a_chain_that_refuses_to_be_scheduled_is_an_internal_error(tmp_path: Path) -> None:
-    def _cycle(_config: Config) -> tuple[CheckResult, ...]:
+    def _cycle(_kinds: Sequence[str], _config: Config) -> tuple[CheckResult, ...]:
         raise ConfigError("lint and types wait for each other")
 
     errors = io.StringIO()
@@ -200,9 +201,9 @@ def test_a_red_turn_leaves_the_next_one_with_the_same_question(tmp_path: Path) -
 
     runs: list[int] = []
 
-    def _counting_red(config: Config) -> tuple[CheckResult, ...]:
+    def _counting_red(kinds: Sequence[str], config: Config) -> tuple[CheckResult, ...]:
         runs.append(1)
-        return _red(config)
+        return _red(kinds, config)
 
     assert run(_payload(), work, io.StringIO(), chain=_counting_red) == 2
     assert run(_payload(), work, io.StringIO(), chain=_counting_red) == 2
@@ -221,9 +222,9 @@ def test_a_committed_change_is_still_visible_to_the_gate(tmp_path: Path) -> None
 
     seen: list[int] = []
 
-    def _counting_green(config: Config) -> tuple[CheckResult, ...]:
+    def _counting_green(kinds: Sequence[str], config: Config) -> tuple[CheckResult, ...]:
         seen.append(1)
-        return _green(config)
+        return _green(kinds, config)
 
     assert run(_payload(), work, io.StringIO(), chain=_counting_green) == 0
     assert seen == [1]
@@ -292,7 +293,7 @@ def test_a_filesystem_that_refuses_the_marker_leaves_the_gate_on(
     assert run(_payload(), tmp_path, errors, _clean, _never_chain) == 0
 
 
-def _red_beside_unavailable(_config: Config) -> tuple[CheckResult, ...]:
+def _red_beside_unavailable(_kinds: Sequence[str], _config: Config) -> tuple[CheckResult, ...]:
     return (
         CheckResult("lint", False, "a.py:1 unused import", "preset"),
         CheckResult("types", False, "no mypy anywhere", UNAVAILABLE),
@@ -314,3 +315,64 @@ def test_a_real_finding_blocks_even_beside_a_check_that_cannot_run(tmp_path: Pat
     assert "no mypy anywhere" in said
     assert "could not run" not in said
     assert read_state(tmp_path, "s1").blocks == 1
+
+
+def _profiled(root: Path) -> None:
+    """A project whose `edit` profile names the static checks only."""
+    (root / ".ultraloom").mkdir(exist_ok=True)
+    (root / ".ultraloom" / "config.toml").write_text(
+        '[verify.profiles]\nedit = ["lint", "types"]\n', encoding="utf-8"
+    )
+
+
+def _recording(seen: list[tuple[str, ...]]) -> Chain:
+    def _chain(kinds: Sequence[str], _config: Config) -> tuple[CheckResult, ...]:
+        seen.append(tuple(kinds))
+        return (CheckResult("lint", True, "", "preset"),)
+
+    return _chain
+
+
+def test_a_profile_narrows_what_the_gate_runs(tmp_path: Path) -> None:
+    """The measured reason this exists: the suite belongs to the commit, not the turn."""
+    _profiled(tmp_path)
+    seen: list[tuple[str, ...]] = []
+    assert run(_payload(), tmp_path, io.StringIO(), _dirty, _recording(seen), checks="edit") == 0
+    assert seen == [("lint", "types")]
+
+
+def test_a_comma_separated_list_narrows_it_too(tmp_path: Path) -> None:
+    """The same spelling `ultraloom run --checks` has, and the same reader behind it."""
+    seen: list[tuple[str, ...]] = []
+    assert run(_payload(), tmp_path, io.StringIO(), _dirty, _recording(seen), checks="lint") == 0
+    assert seen == [("lint",)]
+
+
+def test_without_the_argument_every_kind_still_runs(tmp_path: Path) -> None:
+    """Today's behaviour, unchanged: no profile means the whole chain."""
+    seen: list[tuple[str, ...]] = []
+    assert run(_payload(), tmp_path, io.StringIO(), _dirty, _recording(seen)) == 0
+    assert seen == [KINDS]
+
+
+def test_an_unknown_profile_never_holds_the_turn(tmp_path: Path) -> None:
+    """A broken configuration is not a verdict about the work."""
+    errors = io.StringIO()
+    assert run(_payload(), tmp_path, errors, _dirty, _never_chain, checks="nope") == 1
+    assert "unknown check 'nope'" in errors.getvalue()
+
+
+def test_a_narrowed_pass_leaves_the_base_where_it_was(tmp_path: Path) -> None:
+    """A profile checked part of the work, so the rest must stay in the question.
+
+    Moving the base here would let the next turn treat everything up to this
+    commit as verified -- including the suite that never ran.
+    """
+    work = _repo(tmp_path)
+    _profiled(work)
+    base = head_commit(work)
+    write_state(work, "s1", SessionState(base=base))
+    (work / "b.py").write_text('"""Two."""\n', encoding="utf-8")
+
+    assert run(_payload(), work, io.StringIO(), _dirty, _green, checks="edit") == 0
+    assert read_state(work, "s1").base == base

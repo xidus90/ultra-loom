@@ -454,7 +454,7 @@ Claude Code's payload from stdin, exactly like `ultraloom policy hook`.
 | `PostToolUse` | `post-edit` | Runs `ruff format` over the file that was written, then the `edit` profile. |
 | `SubagentStart` | `subagent-start` | Records where `origin` and the local `HEAD` stood before the subagent ran. |
 | `SubagentStop` | `subagent-stop` | Names every remote ref that moved, appeared or vanished, and every commit `HEAD` gained. |
-| `Stop` | `stop` | Runs the whole chain and holds the turn while anything is red. |
+| `Stop` | `stop` | Runs the chain -- or one profile, with `--checks` -- and holds the turn while anything is red. |
 
 ### What exit 2 means, per event
 
@@ -514,6 +514,33 @@ must not look like a complete one.
 The gate subtracts its own state files from what it sees. Without that, every
 turn after the first would look changed because of the file the gate itself
 wrote.
+
+### Running a profile instead of the whole chain
+
+    ultraloom hook stop --checks edit
+
+`--checks` takes what `ultraloom run --checks` takes: a profile name from
+`[verify.profiles]`, or a comma-separated list of check kinds. Without it the
+gate runs every kind, which is what it has always done.
+
+The reason a project needs this is the split between checks that only *read*
+the source and checks that *execute* it. In one game project a turn's end cost
+36 minutes, almost all of it the Godot suite (639 s serially) and the coverage
+report — paid again at the end of every single turn, including turns that
+changed one line of documentation. Static checks belong to the edit and to the
+turn; the suite and the coverage threshold execute the project and belong to
+the commit, where that project's commit gate already runs them.
+
+**A narrowed pass does not move the base.** The base is the gate's word for
+"everything up to here has been verified", and a profile that skips the suite
+has not verified it. Were the base moved anyway, the next turn would treat the
+untested work as done and the suite would never run at any gate. So under
+`--checks` the range only grows — which is affordable exactly because the
+profile was chosen for being cheap.
+
+An unknown profile or check kind is exit 1 with `kinds_for`'s own message, the
+same one `ultraloom run --checks` prints. It never holds the turn: a broken
+configuration is not a verdict about the work.
 
 ### Wiring
 

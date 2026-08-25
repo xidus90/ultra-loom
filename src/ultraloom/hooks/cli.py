@@ -33,7 +33,11 @@ def dispatch(args: argparse.Namespace, root: Path) -> int:
         # session-start that only reads a directory must not import it.
         from ultraloom.hooks import stop
 
-        return stop.run(sys.stdin, root, sys.stderr)
+        # Read off the namespace here and passed as a value, the way
+        # `policy check` hands its arguments down: the hook's own signature
+        # then says what it needs, and a test can call it without building an
+        # argparse namespace.
+        return stop.run(sys.stdin, root, sys.stderr, checks=args.checks)
     if args.hook_name == "subagent-stop":
         from ultraloom.hooks import subagent_stop
 

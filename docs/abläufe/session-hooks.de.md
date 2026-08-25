@@ -39,8 +39,12 @@ flowchart TD
     warn --> diff
     base -->|yes| diff{"anything changed since base"}
     diff -->|nothing| pass
-    diff -->|something| chain["run the whole check chain"]
-    chain -->|green| advance["move the base to HEAD"]
+    diff -->|something| kinds{"--checks given"}
+    kinds -->|no| chain
+    kinds -->|unknown name| internal
+    kinds -->|profile or list| chain["run the requested check kinds"]
+    chain -->|green, whole chain| advance["move the base to HEAD"]
+    chain -->|green, profile only| pass
     advance --> pass
     chain -->|red| block["blocks + 1, every finding on stderr"]
     block --> held["exit 2 -- the turn is held"]
@@ -144,6 +148,27 @@ einem grünen Durchgang bewusst **nicht** zurückgesetzt: Eine Sitzung, die
 zwischen rot und grün wechselt, erreichte die Grenze sonst nie, und die Grenze
 ist es, die eine Uneinigkeit zwischen Agent und Gate davon abhält, ewig zu
 laufen.
+
+`--checks` verengt, was das Gate fährt: ein Profilname aus
+`[verify.profiles]` oder eine kommagetrennte Liste von Arten — dasselbe
+Argument, das `ultraloom run --checks` nimmt, aufgelöst von demselben
+`kinds_for`. Ohne das Argument laufen alle Arten, wie bisher. Was ein Projekt
+damit kauft, ist die Trennung zwischen Prüfungen, die den Quelltext nur lesen,
+und solchen, die ihn ausführen: In einem Spielprojekt gemessen kostete ein
+Zugende 36 Minuten, fast alles davon die Godot-Suite (639 s seriell) und der
+Coverage-Bericht — fällig am Ende jedes Zuges, wie klein er auch war. Diese
+beiden gehören ans Commit-Gate, das jenes Projekt ohnehin hat; das Gate am Zug
+fährt die statischen.
+
+Ein Durchgang unter `--checks` schreibt die Basis **nicht** fort. Die Basis
+heißt „alles bis hierher ist geprüft", und ein Profil, das die Suite auslässt,
+hat sie nicht geprüft; sie fortzuschreiben verstecke die ungeprüfte Arbeit auch
+vor jedem späteren Zug, und die Suite liefe an keinem Gate je. Bleibt sie
+stehen, wächst die Spanne nur — bezahlbar genau deshalb, weil das Profil wegen
+seiner Billigkeit gewählt wurde. Ein unbekannter Name ist Exit 1 mit der
+Meldung von `kinds_for`: Eine kaputte Konfiguration ist kein Urteil über die
+Arbeit, und ein darüber gehaltener Zug wäre aus der Sitzung heraus nicht zu
+reparieren.
 
 Das Gate zieht seine eigenen Zustandsdateien von dem ab, was es sieht. Es
 schreibt bei jeder Blockade und jedem Durchgang eine, und in der Antwort
