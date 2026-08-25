@@ -120,8 +120,9 @@ Nur Sicherheitsrelevantes, und überschreibbar über `defaults = false`.
 
 - Pfade: `.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`, `*.p12`, `.npmrc`,
   `.pypirc`, `credentials.json`, `.aws/**`
-- Inhalte: Header privater Schlüssel, AWS-Zugriffsschlüsselmuster,
-  `sk-`-Präfixe
+- Inhalte: `-----BEGIN [A-Z ]*PRIVATE KEY-----`, `\bAKIA[0-9A-Z]{16}\b`,
+  `\bsk-[A-Za-z0-9]{20,}\b` — die Muster stehen wörtlich in `DEFAULTS`, und die
+  README schreibt sie von dort ab, nicht von hier
 - Kommandos: keine
 
 `git push` und `pip` statt `uv` sind Politik, nicht Sicherheit, und gehören in
@@ -212,8 +213,15 @@ die Konfiguration selbst parst — die Verdopplung, gegen die `worktree.py` in
 seinem eigenen Docstring argumentiert.
 
 **Kurzschluss:** Der Adapter liest `tool_name` und beendet sich mit 0, bevor eine
-Konfiguration angefasst wird, wenn das Werkzeug keine Regelart berührt. Reguläre
-Ausdrücke werden nur für die betroffene Art kompiliert.
+Konfiguration angefasst wird, wenn das Werkzeug keine Regelart berührt.
+
+Ein zweiter Kurzschluss stand hier ursprünglich auch — reguläre Ausdrücke nur
+für die betroffene Art zu kompilieren — und ist bei der Umsetzung *nicht*
+entstanden: `load_ruleset` baut alle drei Gruppen, und `Rule.__post_init__`
+kompiliert dabei jedes Muster, auch die der unbeteiligten Arten. Das ist der
+Preis dafür, dass ein kaputter Ausdruck beim Lesen auffällt und nicht erst beim
+ersten Treffer. Gemessen fällt es nicht ins Gewicht; sollte eine Konfiguration
+je so viele Regeln tragen, dass es das tut, ist das die Stelle.
 
 ## Exit-Protokoll
 
