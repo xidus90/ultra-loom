@@ -74,11 +74,36 @@ nicht geraten.
 Fährt `check all` (gemessen rund 45 s) und blockt mit Exit 2, bis alles grün
 ist.
 
-**Kurzschluss zuerst:** Hat die Sitzung nichts am Arbeitsbaum geändert, endet
-der Hook sofort mit 0. Ein Zug, der nur gelesen und geantwortet hat, kostet
-sonst 45 Sekunden für eine Antwort, die schon feststeht. Gemessen wird das über
-`worktree.changed_files` gegen den Basis-Commit — dieselbe Mechanik, die der
-`guard`-Knoten des Flows benutzt, nicht eine zweite daneben.
+**Kurzschluss zuerst:** Ist seit der letzten grünen Prüfung nichts dazugekommen,
+endet der Hook sofort mit 0. Ein Zug, der nur gelesen und geantwortet hat,
+kostet sonst 45 Sekunden für eine Antwort, die schon feststeht.
+
+Gemessen wird das mit `worktree.changed_since(root, base)` — **nicht** mit
+`changed_files`, das gar keine Basis nimmt. Der Unterschied ist derselbe, den
+`2026-08-23-guard-basis-commit-design.md` für den `guard`-Knoten beschreibt: was
+ein Zug *committet* hat, verschwindet aus `git status`, und ein Gate auf
+`changed_files` schwiege genau dann, wenn jemand committet hat.
+
+Die Basis einer Sitzung entsteht in zwei Schritten, und beide werden gebraucht:
+
+1. `session-start` legt `head_commit` als Anfangsbasis ab, damit schon der
+   **erste** Zug eine hat.
+2. `stop` schreibt sie nach jedem **grünen** Durchgang auf das aktuelle
+   `head_commit` fort. Ein einmal grün geprüfter Commit taucht damit nie
+   wieder auf — ohne das liefe nach dem ersten Commit jeder weitere Zug der
+   Sitzung die volle Kette.
+
+Nach einem **roten** Durchgang bleibt die Basis stehen. Sie fortzuschreiben
+hieße, den nächsten Zug kurzzuschließen — das Gate hätte sich selbst
+abgeschaltet.
+
+Fehlt die Basis, weil der Hook mitten in einer Sitzung eingeschaltet wurde,
+fällt `stop` auf `changed_files` zurück **und sagt das**: eine Messung mit
+bekannter Blindstelle darf nicht wie eine vollständige aussehen.
+
+Damit beantwortet das Gate nicht „ist alles seit Sitzungsbeginn grün", sondern
+„ist alles grün, was seit der letzten grünen Prüfung dazugekommen ist" — die
+Frage, die es beantworten kann, ohne jeden Zug 45 Sekunden zu kosten.
 
 **Block-Zähler:** Höchstens drei Blockaden je Sitzung, danach eskaliert der Hook
 an den Menschen und lässt den Zug enden. Der Zähler löst zugleich das
@@ -123,8 +148,8 @@ Sichtbarkeit, und die braucht kein Blockieren.
 ## Zustand
 
 `.ultraloom/hooks/<session_id>.json` hält, was zwischen zwei Aufrufen überdauern
-muss: den Block-Zähler des Stop-Gates und die Remote-Schnappschüsse je
-`agent_id`. Eine Datei je Sitzung, damit zwei gleichzeitige Sitzungen im selben
+muss: den Block-Zähler des Stop-Gates, den Basis-Commit der Sitzung und die
+Remote-Schnappschüsse je `agent_id`. Eine Datei je Sitzung, damit zwei gleichzeitige Sitzungen im selben
 Checkout sich nicht gegenseitig den Zähler verstellen.
 
 Das Verzeichnis gehört in `.gitignore` und in die Pfadregeln der Policy: ein
