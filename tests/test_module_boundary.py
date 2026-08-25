@@ -220,3 +220,38 @@ def test_the_policy_pulls_in_neither_the_harness_nor_the_check_chain(tmp_path: P
     # 25 ms the policy would pay on every single tool call all the same.
     assert "CHECKS: False" in output, output
     assert code == 1, output
+
+
+# The same probe again, for the hook that runs once per session. The empty
+# stdin makes it exit 1; what is tested is what the call loaded.
+RUN_SESSION_START = (
+    _PREAMBLE
+    + """
+import io
+
+sys.stdin = io.StringIO("")
+
+from ultraloom.cli import main
+
+code = main(sys.argv[1:])
+print("EXIT:", code)
+report()
+print("CHECKS:", "ultraloom.checks" in sys.modules)
+"""
+)
+
+
+def test_session_start_pulls_in_neither_the_harness_nor_the_check_chain(tmp_path: Path) -> None:
+    """It reads a directory; paying for the check chain would be absurd."""
+    code, leaked, output = _probe(
+        RUN_SESSION_START, "hook", "session-start", "--root", str(tmp_path)
+    )
+
+    # Not the empty list the other probes assert, and deliberately: finding a
+    # paused run *is* reading the journal, so those two are this hook's work
+    # and not a leak. Spelled out rather than struck from _FORBIDDEN, because
+    # everything else on that list would still be one here -- and because the
+    # day this hook starts pulling in the runner, this line says so.
+    assert leaked == ["ultraloom.gate", "ultraloom.journal"], output
+    assert "CHECKS: False" in output, output
+    assert code == 1, output

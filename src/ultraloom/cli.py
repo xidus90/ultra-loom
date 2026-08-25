@@ -66,6 +66,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         return policy_cli.dispatch(args, root)
 
+    if args.command == "hook":
+        # Imported here, like the policy, and before load_config for the same
+        # reason: a hook that only reads the journal must not pay for the check
+        # chain, and `check` must not pay for the hooks.
+        from ultraloom.hooks import cli as hooks_cli
+
+        return hooks_cli.dispatch(args, root)
+
     try:
         config = load_config(root)
     except ConfigError as error:
@@ -139,6 +147,10 @@ def _parser() -> argparse.ArgumentParser:
     manual.add_argument("kind", choices=("paths", "commands", "content"))
     manual.add_argument("value")
     manual.add_argument("--tool", default="Write", help="the tool name a rule may filter on")
+
+    hook = subparsers.add_parser("hook", parents=[common], help="run one of the session hooks")
+    hook_subs = hook.add_subparsers(dest="hook_name")
+    hook_subs.add_parser("session-start", parents=[common], help="report runs waiting at a gate")
 
     return parser
 
