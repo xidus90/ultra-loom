@@ -49,8 +49,13 @@ def waiting(root: Path, stderr: TextIO) -> tuple[str, ...]:
             continue
         if gate is None:
             continue
+        # ASCII on purpose, down to the placeholder: this line is printed to
+        # whatever console the harness happens to hand over, and on Windows
+        # that is cp1252 by default. A single "…" there does not merely show
+        # up wrong -- print raises UnicodeEncodeError, and the hook dies with
+        # a code the exit protocol does not describe.
         lines.append(
             f"run {run_id} is waiting at {gate.node}: {gate.question}\n"
-            f'  answer it with: ultraloom resume {run_id} --answer "…"'
+            f'  answer it with: ultraloom resume {run_id} --answer "your answer"'
         )
     return tuple(lines)
