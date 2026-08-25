@@ -1033,9 +1033,54 @@ Kernpunkte, die der Code tragen muss — der Rest folgt dem Muster der anderen H
 - `run` liest den Schnappschuss zu `agent_id` aus dem Sitzungszustand. Fehlt er, wird das gesagt: „no snapshot for this subagent; nothing to compare". Schweigen wäre eine Aussage, die niemand geprüft hat.
 - **Nie Exit 2.** Der Push ist geschehen; den Subagenten am Aufhören zu hindern, macht ihn nicht rückgängig. Der Kommentar im Code sagt das.
 
-- [ ] **Step 4: Take the snapshot somewhere**
+- [ ] **Step 4: Take the snapshot in `subagent-start`**
 
-`SubagentStop` allein hat kein Davor. Prüfe anhand der Messung aus Task 1, ob es ein `SubagentStart`-Ereignis mit derselben `agent_id` gibt. Wenn ja: einen zweiten Hook `subagent-start` ergänzen, der nur den Schnappschuss schreibt. Wenn nein: den Schnappschuss in `session-start` nehmen und je Sitzung statt je Subagent führen — dann meldet der Hook, was seit **Sitzungsbeginn** passiert ist, was gröber, aber ehrlich ist. **Diese Entscheidung im Bericht nennen**, samt dem, was die Messung hergab.
+Die Messung aus Task 1 hat es entschieden: **`SubagentStart` existiert** und trägt dieselbe `agent_id` wie das zugehörige `SubagentStop` (siehe `docs/.superpowers/specs/2026-08-25-sitzungs-hooks-payloads.md`). Der Schnappschuss geht damit je Subagent, nicht gröber je Sitzung.
+
+Ein fünftes, sehr kleines Modul `src/ultraloom/hooks/subagent_start.py`:
+
+```python
+"""Remembers where the remote stood before a subagent ran.
+
+Its own event and its own module, because SubagentStop has no "before" of its
+own: without a snapshot taken here it could only say that it cannot tell.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TextIO
+
+from ultraloom.hooks.payload import EXIT_INTERNAL, EXIT_OK, PayloadError
+from ultraloom.hooks.payload import read as read_payload
+from ultraloom.hooks.state import read as read_state
+from ultraloom.hooks.state import write as write_state
+from ultraloom.hooks.subagent_stop import remote_refs
+
+
+def run(stdin: TextIO, root: Path, stderr: TextIO) -> int:
+    """Store the remote's refs under this subagent's id. Never blocks."""
+    try:
+        payload = read_payload(stdin)
+    except PayloadError as error:
+        print(f"ultraloom hook subagent-start: {error}", file=stderr)
+        return EXIT_INTERNAL
+
+    agent_id = payload.get("agent_id")
+    session_id = payload.get("session_id")
+    if not isinstance(agent_id, str) or not isinstance(session_id, str):
+        # Without both there is nothing to file the snapshot under. Saying so
+        # beats writing it somewhere it will never be looked for.
+        print("ultraloom hook subagent-start: payload carries no agent_id", file=stderr)
+        return EXIT_INTERNAL
+
+    state = read_state(root, session_id)
+    snapshots = {**state.snapshots, agent_id: remote_refs(root)}
+    write_state(root, session_id, replace(state, snapshots=snapshots))
+    return EXIT_OK
+```
+
+`replace` kommt aus `dataclasses`. Tests dazu in `tests/hooks/test_subagent_start.py`: Schnappschuss landet unter der `agent_id`; ein zweiter Subagent überschreibt den ersten nicht; fehlende `agent_id` ergibt Exit 1; kaputte Payload ergibt Exit 1.
 
 - [ ] **Step 5: Wire up, run, and check**
 
@@ -1194,9 +1239,11 @@ changed nothing skips the chain entirely.
 - Consumes: alle vier Hooks.
 - Produces: nichts für Code.
 
-- [ ] **Step 1: Wire the four events**
+- [ ] **Step 1: Wire the five events**
 
-`.claude/settings.json` um `PostToolUse` (Matcher `Write|Edit|NotebookEdit`, Timeout 60), `Stop` (Timeout 300), `SessionStart` (Timeout 20) und `SubagentStop` (Timeout 30) ergänzen. Der vorhandene `PreToolUse`-Eintrag der Policy bleibt unangetastet. Aufrufform wie dort: `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook <name> --root "${CLAUDE_PROJECT_DIR}"`.
+`.claude/settings.json` um `PostToolUse` (Matcher `Write|Edit|NotebookEdit`, Timeout 60), `Stop` (Timeout 300), `SessionStart` (Timeout 20), `SubagentStart` (Timeout 30) und `SubagentStop` (Timeout 30) ergänzen.
+
+**Je Ereignis genau ein Eintrag.** Task 1 hat gemessen, dass mehrere Einträge desselben Ereignisses **gleichzeitig** starten, nicht nacheinander — zwei `Stop`-Einträge lagen 2 ms auseinander und liefen voll überlappend. Ein Block-Zähler, der auf zwei Einträge verteilt ist, verliert Hochzählungen; wer hier später etwas ergänzt, hängt es in denselben Eintrag oder rechnet mit einem Gate, das nicht zählt. Der vorhandene `PreToolUse`-Eintrag der Policy bleibt unangetastet. Aufrufform wie dort: `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook <name> --root "${CLAUDE_PROJECT_DIR}"`.
 
 - [ ] **Step 2: Write the README section**
 
