@@ -154,13 +154,22 @@ Gemessen am 2026-08-25, Hauptcheckout:
 
 | Hook | Aufwand |
 | --- | --- |
-| `post-edit` | rund 1 s (lint 337 ms + types 664 ms) |
+| `post-edit` | **1,5 bis 2 s** im Median, einzelne Läufe bis 7 s |
 | `stop` | rund 45 s bei geänderten Dateien, sonst der Prozessstart allein |
 | `session-start` | Lesen eines Verzeichnisses |
 | `subagent-stop` | ein `git ls-remote`, also netzabhängig — mit knappem Timeout, und ein Fehlschlag ist Exit 1 |
 
 Timeouts in `.claude/settings.json`: `post-edit` 60 s, `stop` 300 s,
 `session-start` 20 s, `subagent-stop` 30 s.
+
+Der Wert für `post-edit` stand hier zuerst mit „rund 1 s" — das war die Summe
+der beiden Prüfungen (lint 337 ms, types 664 ms) ohne den Prozessstart und ohne
+`ruff format`. Nach der Umsetzung gemessen: Median 1,5 bis 2 s, einzelne Läufe
+bis 7 s, wobei die Ausreißer aus der Auflösung von `uv` kommen und nicht aus
+dem Formatierer (der misst allein 131 bis 137 ms). Das ist der Preis nach
+**jedem** Schreibvorgang — spürbar, aber innerhalb des Timeouts. Fällt er
+jemandem zur Last, ist der nächste Hebel nicht der Formatierer, sondern der
+Prozessstart.
 
 ## Tests
 
