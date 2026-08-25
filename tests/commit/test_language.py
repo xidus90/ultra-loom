@@ -118,14 +118,16 @@ def test_german_words_that_are_also_english_never_count(word: str) -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "Das Ergebnis und der Bericht fehlen",
-        "Für das Ergebnis und über den Bericht",
+        "Für alles über allem",
+        "Über die Katze, für sich genommen",
     ],
 )
 def test_umlauts_are_found_although_the_list_is_ascii(text: str) -> None:
-    """A real German commit writes "für", the list spells "fuer".
+    """A real German commit writes "fuer" with an umlaut; the list is ASCII.
 
-    Without folding, the check would miss exactly the messages it exists for
-    while passing their ASCII-transcribed cousins.
+    The texts here are chosen so that only the umlaut words can reach the
+    threshold: strike the folding and this test goes red, which is the whole
+    point of having it. An earlier version used a sentence whose plain-ASCII
+    stopwords carried the count on their own, and passed without the folding.
     """
     assert scan(text, "en", 2) != ()
