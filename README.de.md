@@ -328,11 +328,11 @@ match  = [".ultraloom/runs/*", "uv.lock"]
 reason = "An edited journal destroys what replay exists for."
 
 [[policy.commands.rules]]
-regex  = "^\s*git\s+push\b"
+regex  = '(^|[\n;&|(`])\s*git\s+push(?![\w-])'
 reason = "Whether commits reach the remote is a human's decision."
 
 [[policy.content.rules]]
-regex  = "type:\s*ignore(?!\s*#)"
+regex  = 'type:\s*ignore(?!\s*#)'
 tools  = ["Write", "Edit"]
 reason = "No type: ignore without a reason behind it."
 ```
@@ -349,6 +349,20 @@ abgelehnt, statt als Regel zu bleiben, die nie greift. `tools` ist ein
 optionaler Filter und keine eigene Art: fehlt er, gilt die Regel für jedes
 Werkzeug ihrer Art. `reason` ist Pflicht, weil eine Sperre ohne Begründung genau
 die Sorte Meldung erzeugt, gegen die ein Agent argumentiert oder die er umgeht.
+
+Schreib Ausdrücke als TOML-Literalstrings ('...'). In einem Basic-String muss
+jeder Backslash doppelt stehen, und ein vergessener macht aus `\s` still ein
+`s` — eine Regel, die weiterhin lädt und weiterhin trifft, nur eben etwas
+anderes.
+
+An der Verankerung wird eine Kommando-Regel umgangen. Dem Vergleich wird die
+ganze Kommandozeile gereicht, `re.search` läuft ohne `MULTILINE`, und damit
+meint `^` deren Anfang und sonst nichts: `^git push` blockt `git push` und
+lässt `git commit -m x && git push` durch — also genau die Form, für die die
+Regel geschrieben wurde. Nimm die Alternativen mit auf und beende das Wort
+selbst: `` (^|[\n;&|(`])\s*git\s+push(?![\w-]) `` fängt `;`, `&&`, eine Pipe,
+eine Subshell und eine zweite Zeile, während `(?![\w-])` `git pushd` und `git
+push-notes` draußen hält, wo ein bloßes ``\b`` sie hereinnähme.
 
 Pfade werden als Pfade gematcht und alles andere als flacher Text. Ein
 Pfadmuster geht durch `PurePosixPath.full_match` — als einziges hier kennt es

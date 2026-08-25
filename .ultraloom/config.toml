@@ -28,14 +28,17 @@ precommit = ["lint", "types", "test", "coverage"]
 # Die Ausdrücke stehen in TOML-Literalstrings ('...'): in einem Basic-String
 # müsste jeder Backslash doppelt stehen, und ein vergessener macht aus `\s`
 # still ein `s` — die Regel griffe dann nur noch bei genau einem Leerzeichen.
+# Und sie sind nicht mit `^` allein verankert: geprüft wird die ganze
+# Kommandozeile ohne `MULTILINE`, `^git push` ließe also genau die Form
+# durch, um die es geht — `git commit -m … && git push`.
 [[policy.paths.rules]]
 match  = [".ultraloom/runs/*", "uv.lock", ".coverage"]
 reason = "An edited journal destroys what replay exists for; the lock belongs to uv."
 
 [[policy.commands.rules]]
-regex  = '^\s*git\s+push\b'
+regex  = '(^|[\n;&|(`])\s*git\s+push(?![\w-])'
 reason = "Whether commits reach the remote is a human's decision (CLAUDE.md)."
 
 [[policy.commands.rules]]
-regex  = '^\s*pip\s+install\b'
+regex  = '(^|[\n;&|(`])\s*pip\s+install(?![\w-])'
 reason = "This project uses uv, never pip."
