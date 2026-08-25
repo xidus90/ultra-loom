@@ -21,3 +21,21 @@ threshold = 100
 [verify.profiles]
 edit      = ["lint", "types"]
 precommit = ["lint", "types", "test", "coverage"]
+
+# Dieses Repo unter seiner eigenen Policy. Beide Regeln haben hier eine
+# Geschichte: ein Subagent hat `master` einmal ungefragt gepusht, und ein
+# nachträglich bearbeitetes Journal nimmt dem Replay seinen Sinn.
+# Die Ausdrücke stehen in TOML-Literalstrings ('...'): in einem Basic-String
+# müsste jeder Backslash doppelt stehen, und ein vergessener macht aus `\s`
+# still ein `s` — die Regel griffe dann nur noch bei genau einem Leerzeichen.
+[[policy.paths.rules]]
+match  = [".ultraloom/runs/*", "uv.lock", ".coverage"]
+reason = "An edited journal destroys what replay exists for; the lock belongs to uv."
+
+[[policy.commands.rules]]
+regex  = '^\s*git\s+push\b'
+reason = "Whether commits reach the remote is a human's decision (CLAUDE.md)."
+
+[[policy.commands.rules]]
+regex  = '^\s*pip\s+install\b'
+reason = "This project uses uv, never pip."
