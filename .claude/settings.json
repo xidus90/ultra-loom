@@ -2,11 +2,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|Bash",
+        "matcher": "Write|Edit|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PROJECT_DIR}/.venv/Scripts/ultraloom.exe\" policy hook --root \"${CLAUDE_PROJECT_DIR}\"",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom policy hook --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 10
           }
         ]

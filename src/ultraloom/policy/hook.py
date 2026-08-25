@@ -21,17 +21,18 @@ EXIT_DENIED = 2
 
 # Which tool touches which kinds. A tool that is not listed here ends the run
 # before any configuration is read.
-_PATH_TOOLS = ("Write", "Edit", "MultiEdit")
-# MultiEdit is missing here on purpose: it is the one tool whose replacements do
-# not sit flat in `tool_input`, so it gets `_multiedit_contents` instead. Left in
-# this table it would silently find nothing, and every content rule -- including
-# the built-in credential patterns -- would be skipped for that tool alone.
+_PATH_TOOLS = ("Write", "Edit")
 _CONTENT_KEYS = {"Write": "content", "Edit": "new_string"}
+# Both shells run commands, and both carry the command line under `command`, so
+# one rule of kind `commands` covers them. PowerShell used to be missing here,
+# and on Windows -- where it is the shell Claude Code reaches for -- every
+# command rule, `git push` included, was silently skipped.
+_COMMAND_TOOLS = ("Bash", "PowerShell")
 
 
 def subjects(tool: str, tool_input: Mapping[str, Any], root: Path) -> tuple[Subject, ...]:
     """What is to be checked about this tool call. Empty means nothing."""
-    if tool == "Bash":
+    if tool in _COMMAND_TOOLS:
         command = tool_input.get("command")
         if not isinstance(command, str):
             return ()
@@ -45,33 +46,10 @@ def subjects(tool: str, tool_input: Mapping[str, Any], root: Path) -> tuple[Subj
     if isinstance(raw_path, str):
         found.append(Subject("paths", _relative(raw_path, root), tool))
 
-    if tool == "MultiEdit":
-        found.extend(Subject("content", text, tool) for text in _multiedit_contents(tool_input))
-    else:
-        content = tool_input.get(_CONTENT_KEYS[tool])
-        if isinstance(content, str):
-            found.append(Subject("content", content, tool))
+    content = tool_input.get(_CONTENT_KEYS[tool])
+    if isinstance(content, str):
+        found.append(Subject("content", content, tool))
     return tuple(found)
-
-
-def _multiedit_contents(tool_input: Mapping[str, Any]) -> list[str]:
-    """Every replacement a MultiEdit would write, in the order it sends them.
-
-    Claude Code carries them in a list `edits`, one table per replacement. A
-    shape we do not recognise yields nothing rather than raising: an unreadable
-    payload must not lock up a session, and the path is checked either way.
-    """
-    edits = tool_input.get("edits")
-    if not isinstance(edits, list):
-        return []
-    texts: list[str] = []
-    for edit in edits:
-        if not isinstance(edit, Mapping):
-            continue
-        new_string = edit.get("new_string")
-        if isinstance(new_string, str):
-            texts.append(new_string)
-    return texts
 
 
 def _relative(raw: str, root: Path) -> str:

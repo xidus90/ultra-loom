@@ -39,15 +39,15 @@ flowchart TD
 
 **`tool_name` zuerst.** Der Hook liest den Werkzeugnamen und endet mit 0, bevor
 er eine Konfigurationsdatei anfasst, wenn das Werkzeug keine Regelart berührt.
-Er läuft vor jedem `Write`, `Edit` und `Bash`; sein eigener Aufwand ist deshalb
+Er läuft vor jedem `Write`, `Edit`, `Bash` und `PowerShell`; sein Aufwand ist
 eine Anforderung und keine Nebensache. Aus demselben Grund liegt der Import der
 Prüfkette in `cli.py` in den Funktionen und nicht im Modulkopf.
 
-**Ein Aufruf, mehrere Subjects.** `Write`, `Edit` und `MultiEdit` ergeben ein
-Pfad-Subjekt; der Inhalt kommt bei `Write` aus `content`, bei `Edit` aus
-`new_string` und bei `MultiEdit` aus jedem `new_string` in `edits` -- ein
-Inhalts-Subjekt je Ersetzung. `Bash` ergibt sein `command`. Geprüft werden
-alle, und die Begründungen aller landen zusammen auf stderr.
+**Ein Aufruf, mehrere Subjects.** `Write` und `Edit` ergeben ein Pfad-Subjekt;
+der Inhalt kommt bei `Write` aus `content` und bei `Edit` aus `new_string`.
+`Bash` und `PowerShell` ergeben beide ihr `command` — dieselbe Art `commands`,
+derselbe Weg, denn beide führen Kommandos aus. Geprüft werden alle, und die
+Begründungen aller landen zusammen auf stderr.
 
 **Die kaputte Konfiguration blockt.** Sie ist Exit 2 und nicht Exit 1. Eine
 Policy, die stillschweigend durchlässt, sobald ihre eigene Konfiguration

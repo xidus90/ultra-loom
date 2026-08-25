@@ -1,18 +1,17 @@
-# ultraloom prüft sich mit seinem eigenen Werkzeug. Nur `lint` steht hier: das
-# Preset greift zu `uvx ruff` und bekommt damit die Version, die uvx gerade
-# holt, während `uv run` die Entwicklungsabhängigkeit auflöst, die dieses
-# Projekt festnagelt — dieselbe ruff-Version also, die auch die Gates fahren.
-# `types` und `test` fehlen mit Absicht: das Preset trifft dort bereits zu, und
-# ein Eintrag, der es wiederholt, verliert stillschweigend, was daran hängt —
-# bei `test` die Messung, die `coverage` im selben Lauf mitnimmt.
+# ultraloom checks itself with its own tool. Only `lint` stands here: the preset
+# reaches for `uvx ruff` and thereby gets whichever version uvx happens to
+# fetch, whereas `uv run` resolves the development dependency this project
+# pins -- the same ruff version the gates run, then.
+# `types` and `test` are absent on purpose: the preset already gets those right,
+# and an entry repeating it silently loses whatever hangs off it -- for `test`,
+# the measurement `coverage` picks up in the same run.
 [verify]
 lint = "uv run ruff check ."
 
-# Was der Reparateur nicht anfassen darf. `pyproject.toml` steht neben den
-# Tests, weil dort die Schwellen wohnen: eine gelockerte ruff-Regel oder ein
-# gesenktes `fail_under` ist derselbe Betrug wie ein abgeschwächter Test. Der
-# Prompt verbietet das zwar, aber ein Verbot im Prompt ist eine Bitte --
-# `guard` ist die Mechanik.
+# What the repairer must not touch. `pyproject.toml` stands beside the tests
+# because the thresholds live there: a loosened ruff rule or a lowered
+# `fail_under` is the same cheat as a weakened test. The prompt forbids it, yes,
+# but a prohibition in a prompt is a request -- `guard` is the mechanism.
 tests = ["tests/", "pyproject.toml"]
 
 [verify.coverage]
@@ -22,15 +21,17 @@ threshold = 100
 edit      = ["lint", "types"]
 precommit = ["lint", "types", "test", "coverage"]
 
-# Dieses Repo unter seiner eigenen Policy. Beide Regeln haben hier eine
-# Geschichte: ein Subagent hat `master` einmal ungefragt gepusht, und ein
-# nachträglich bearbeitetes Journal nimmt dem Replay seinen Sinn.
-# Die Ausdrücke stehen in TOML-Literalstrings ('...'): in einem Basic-String
-# müsste jeder Backslash doppelt stehen, und ein vergessener macht aus `\s`
-# still ein `s` — die Regel griffe dann nur noch bei genau einem Leerzeichen.
-# Und sie sind nicht mit `^` allein verankert: geprüft wird die ganze
-# Kommandozeile ohne `MULTILINE`, `^git push` ließe also genau die Form
-# durch, um die es geht — `git commit -m … && git push`.
+# This repo under its own policy. Both rules have a history here: a subagent
+# once pushed `master` without being asked, and a journal edited after the fact
+# takes replay's whole point away.
+# The expressions sit in TOML literal strings ('...'): in a basic string every
+# backslash would have to be doubled, and a forgotten one quietly turns `\s`
+# into `s` -- the rule would then only bite on exactly one space.
+# And they are not anchored with `^` alone: the whole command line is checked
+# without `MULTILINE`, so `^git push` would let through precisely the form this
+# is about -- `git commit -m … && git push`.
+# Both shells are covered by one rule: `Bash` and `PowerShell` alike yield a
+# subject of kind `commands`, so nothing here needs saying twice.
 [[policy.paths.rules]]
 match  = [".ultraloom/runs/*", "uv.lock", ".coverage"]
 reason = "An edited journal destroys what replay exists for; the lock belongs to uv."

@@ -435,11 +435,11 @@ Als Claude-Code-Hook, in `.claude/settings.json`:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|Bash",
+        "matcher": "Write|Edit|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PROJECT_DIR}/.venv/Scripts/ultraloom.exe\" policy hook",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom policy hook",
             "timeout": 10
           }
         ]
@@ -451,11 +451,12 @@ Als Claude-Code-Hook, in `.claude/settings.json`:
 
 Der Hook liest zuerst `tool_name` und endet mit 0, bevor er eine Konfiguration
 anfasst, wenn das Werkzeug keine Art berührt — er läuft vor jedem `Write`,
-`Edit` und `Bash`, sein eigener Aufwand ist deshalb eine Anforderung. `Write`,
-`Edit` und `MultiEdit` ergeben ein Pfad-Subjekt; der Inhalt kommt bei `Write`
-aus `content`, bei `Edit` aus `new_string` und bei `MultiEdit` aus jedem
-`new_string` in `edits` -- ein Inhalts-Subjekt je Ersetzung. `Bash` ergibt sein
-`command`.
+`Edit`, `Bash` und `PowerShell`, sein eigener Aufwand ist deshalb eine
+Anforderung. `Write` und `Edit` ergeben ein Pfad-Subjekt; der Inhalt kommt bei
+`Write` aus `content` und bei `Edit` aus `new_string`. `Bash` und `PowerShell`
+ergeben beide ihr `command`, eine Regel der Art `commands` deckt also beide
+Shells ab — eine `git push`-Regel, die nur `Bash` kannte, war unter Windows
+gar keine Regel.
 
 `policy check` ist dieselbe Entscheidung ohne Payload darum herum, für Hand und
 Skript: `ultraloom policy check commands "git push origin master"`. `--tool`

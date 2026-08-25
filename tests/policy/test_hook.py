@@ -37,73 +37,36 @@ def test_edit_reads_the_new_string(tmp_path: Path) -> None:
     assert [(s.kind, s.value) for s in found] == [("paths", "a.py"), ("content", "new")]
 
 
-def test_multiedit_reads_every_edit(tmp_path: Path) -> None:
-    """The real payload carries the replacements in `edits`, not flat."""
-    found = subjects(
-        "MultiEdit",
-        {
-            "file_path": str(tmp_path / "a.py"),
-            "edits": [
-                {"old_string": "a", "new_string": "one"},
-                {"old_string": "b", "new_string": "two"},
-            ],
-        },
-        tmp_path,
-    )
-    assert [(s.kind, s.value) for s in found] == [
-        ("paths", "a.py"),
-        ("content", "one"),
-        ("content", "two"),
-    ]
+def test_multiedit_is_no_longer_a_tool_and_yields_nothing(tmp_path: Path) -> None:
+    """Claude Code dropped MultiEdit; nothing here may still answer for it."""
+    tool_input = {
+        "file_path": str(tmp_path / "a.py"),
+        "edits": [{"old_string": "a", "new_string": "one"}],
+    }
+    assert subjects("MultiEdit", tool_input, tmp_path) == ()
 
 
-def test_multiedit_refuses_a_pattern_in_a_later_edit(tmp_path: Path) -> None:
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_a_command_tool_yields_a_command_subject(tmp_path: Path, tool: str) -> None:
+    """Both shells carry their command line under `command`, so both are read."""
+    found = subjects(tool, {"command": "git push"}, tmp_path)
+    assert [(s.kind, s.value, s.tool) for s in found] == [("commands", "git push", tool)]
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_a_command_tool_is_refused_by_the_same_rule(tmp_path: Path, tool: str) -> None:
+    """The gap this closes: `git push` used to slip through PowerShell."""
     root = _config(
         tmp_path,
         """
-[[policy.content.rules]]
-match = "*secret*"
-reason = "no secrets"
+[[policy.commands.rules]]
+regex = 'git\\s+push'
+reason = "a human decides about the remote"
 """,
     )
     errors = io.StringIO()
-    payload = _payload(
-        "MultiEdit",
-        {
-            "file_path": str(root / "a.py"),
-            "edits": [
-                {"old_string": "a", "new_string": "harmless"},
-                {"old_string": "b", "new_string": "a secret here"},
-            ],
-        },
-    )
-    assert run(payload, root, errors) == 2
-    assert "no secrets" in errors.getvalue()
-
-
-@pytest.mark.parametrize(
-    "edits",
-    [
-        None,
-        "new_string",
-        [["old", "new"]],
-        [{"old_string": "a"}],
-        [{"new_string": 7}],
-    ],
-    ids=["missing", "not-a-list", "not-a-table", "no-new-string", "not-a-string"],
-)
-def test_multiedit_survives_an_unexpected_edits_shape(tmp_path: Path, edits: Any) -> None:
-    """A shape we do not recognise yields no content -- but the path still counts."""
-    tool_input: dict[str, Any] = {"file_path": str(tmp_path / "a.py")}
-    if edits is not None:
-        tool_input["edits"] = edits
-    found = subjects("MultiEdit", tool_input, tmp_path)
-    assert [(s.kind, s.value) for s in found] == [("paths", "a.py")]
-
-
-def test_bash_yields_a_command_subject(tmp_path: Path) -> None:
-    found = subjects("Bash", {"command": "git push"}, tmp_path)
-    assert [(s.kind, s.value) for s in found] == [("commands", "git push")]
+    assert run(_payload(tool, {"command": "git push origin master"}), root, errors) == 2
+    assert "a human decides about the remote" in errors.getvalue()
 
 
 def test_an_absolute_path_is_made_relative_to_the_project(tmp_path: Path) -> None:
@@ -126,6 +89,7 @@ def test_a_path_outside_the_project_stays_absolute(tmp_path: Path) -> None:
 def test_a_tool_input_without_the_expected_keys_yields_nothing(tmp_path: Path) -> None:
     """A payload shape we do not recognise is not a reason to block."""
     assert subjects("Bash", {}, tmp_path) == ()
+    assert subjects("PowerShell", {}, tmp_path) == ()
     assert subjects("Write", {}, tmp_path) == ()
 
 
