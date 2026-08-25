@@ -475,6 +475,126 @@ sagt, welchen Werkzeugnamen ein `tools`-Filter sehen soll; voreingestellt ist
 
 Die Entscheidung ist gezeichnet in `docs/abläufe/policy.md`.
 
+## Sitzungs-Hooks
+
+    ultraloom hook session-start    # SessionStart
+    ultraloom hook post-edit        # PostToolUse
+    ultraloom hook subagent-start   # SubagentStart
+    ultraloom hook subagent-stop    # SubagentStop
+    ultraloom hook stop             # Stop
+
+Die Policy beantwortet, *ob dieser Werkzeugaufruf geschehen darf*. Diese fünf
+Hooks beantworten, was sie nicht sieht: ob die eben geschriebene Datei in
+Ordnung ist, ob die Arbeit dieses Zuges grün ist, bevor der Zug endet, ob ein
+pausierter Lauf noch auf eine Antwort wartet, und was ein Subagent getan hat,
+das sein Bericht verschweigt. Jeder liest die Payload von Claude Code über
+stdin, genau wie `ultraloom policy hook`.
+
+| Ereignis | Hook | Was er tut |
+| -------- | ---- | ---------- |
+| `SessionStart` | `session-start` | Nennt jeden an einem Gate pausierten Lauf samt Frage und der `ultraloom resume`-Zeile, die sie beantwortet. Schreibt den Commit auf, mit dem die Sitzung beginnt. |
+| `PostToolUse` | `post-edit` | Fährt `ruff format` über die geschriebene Datei, danach das Profil `edit`. |
+| `SubagentStart` | `subagent-start` | Hält fest, wo `origin` und der lokale `HEAD` vor dem Lauf des Subagenten standen. |
+| `SubagentStop` | `subagent-stop` | Nennt jede Remote-Referenz, die sich bewegt hat, neu ist oder verschwunden ist, und jeden Commit, den `HEAD` dazubekommen hat. |
+| `Stop` | `stop` | Fährt die ganze Kette und hält den Zug an, solange etwas rot ist. |
+
+### Was Exit 2 je Ereignis bedeutet
+
+    0  in Ordnung, oder bewusst übersprungen
+    1  interner Fehler — hält nie etwas auf
+    2  ein Befund; was er bewirkt, hängt am Ereignis
+
+Exit 2 ist nicht überall dasselbe, und ein Irrtum darüber ist still:
+
+- Bei `Stop` **hält er den Zug an**. Der Agent bekommt die Befunde und wird
+  gebeten, noch einmal zu gehen.
+- Bei `PostToolUse` blockiert er nichts — das Werkzeug ist längst gelaufen. Er
+  ist nur der Weg, auf dem der Befund die Datei erreicht, die ihn ausgelöst
+  hat, statt eine Minute später im Stop-Gate aufzutauchen, wo ihn nichts mehr
+  mit ihr verbindet.
+- Bei `SessionStart` und `SubagentStart` kommt er nie vor; beide melden und
+  geben 0 zurück.
+- Bei `SubagentStop` kommt er **mit Absicht** nie vor. Der Push ist zu diesem
+  Zeitpunkt geschehen; den Subagenten am Aufhören zu hindern, macht ihn nicht
+  rückgängig.
+
+Eine Kette, die gar nicht laufen konnte, ist Exit 1, nie Exit 2. Diese
+Unterscheidung wiegt hier schwerer als anderswo: Die Hooks prüfen ultraloom mit
+ultraloom, und ein kaputtes `checks.py` darf keine Sitzung einsperren.
+
+### Das Stop-Gate
+
+Drei Dinge halten es davon ab, zur Falle zu werden:
+
+- **Der Marker.** Solange `.claude/.no-verify` existiert, endet das Gate mit 0,
+  ohne irgendetwas zu lesen oder zu fahren. Für einen Zug, den jemand bewusst
+  rot abgeben will.
+- **Der Block-Zähler.** Höchstens `MAX_BLOCKS` = 3 Blockaden je Sitzung; danach
+  sagt das Gate, dass es aufgegeben hat, und lässt den Zug enden. Ein Gate, das
+  nie nachgibt, sperrt die Sitzung ein, die es schützen sollte, und aus dieser
+  Sitzung heraus gibt es keinen Ausweg. Ein grüner Durchgang setzt den Zähler
+  *nicht* zurück — sonst erreichte eine Sitzung, die zwischen rot und grün
+  wechselt, die Grenze nie.
+- **Der Kurzschluss.** Ein Zug, der nichts geändert hat, endet mit 0 nach rund
+  300 ms, statt eine Minute für ein Ergebnis auszugeben, das schon feststeht.
+
+Was als *geändert* zählt, misst `changed_since(root, base)` und nicht der
+Arbeitsbaum: Was ein Zug **committet**, verschwindet aus `git status`, und ein
+Gate allein auf dem Arbeitsbaum schwiege genau dann, wenn jemand etwas
+Ungeprüftes committet hat. Die Basis schreibt `session-start`, und jeder grüne
+Durchgang schreibt sie fort — nie ein geblockter, das schaltete das Gate nach
+einem einzigen Befund ab. Wurde das Gate mitten in einer Sitzung eingeschaltet,
+gibt es keine Basis; `stop` fällt dann auf den Arbeitsbaum zurück **und sagt
+das**, denn eine Messung mit bekannter Blindstelle darf nicht wie eine
+vollständige aussehen.
+
+Das Gate zieht seine eigenen Zustandsdateien von dem ab, was es sieht. Ohne das
+sähe jeder Zug nach dem ersten geändert aus — wegen der Datei, die das Gate
+selbst geschrieben hat.
+
+### Verdrahtung
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook stop --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`PostToolUse` bekommt den Matcher `Write|Edit|NotebookEdit`; die anderen vier
+greifen auf alles. Timeouts: `post-edit` 60, `stop` 300, `session-start` 20,
+`subagent-start` 30, `subagent-stop` 30.
+
+**Je Ereignis genau ein Eintrag, und das ist keine Geschmacksfrage.** Mehrere
+Einträge desselben Ereignisses starten *gleichzeitig*, nicht nacheinander —
+zwei gemessene `Stop`-Einträge starteten 2 ms auseinander und überlappten
+vollständig. Ein Block-Zähler, der auf zwei Einträge verteilt ist, verliert
+Hochzählungen, und das ist ein Gate, das nicht zählt. Wer hier später etwas
+ergänzt, hängt es in denselben Eintrag.
+
+### Das Zustandsverzeichnis
+
+`.ultraloom/hooks/<session_id>.json` hält, was zwischen zwei Aufrufen
+überdauern muss: den Block-Zähler, den Basis-Commit der Sitzung und je einen
+Remote-Schnappschuss pro Subagent. Eine Datei je Sitzung, damit zwei Sitzungen
+im selben Checkout sich nicht gegenseitig den Zähler verstellen.
+
+Es gehört in `.gitignore` und in die Pfadregeln der Policy: Ein Agent, der
+seinen eigenen Block-Zähler zurücksetzt, hat das Gate abgeschafft.
+
+Die Entscheidung ist gezeichnet in `docs/abläufe/session-hooks.de.md`.
+
 ## Der Harness (optional)
 
     uv add "ultraloom[agent]"

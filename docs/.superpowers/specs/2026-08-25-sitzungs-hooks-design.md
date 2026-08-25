@@ -180,12 +180,19 @@ Gemessen am 2026-08-25, Hauptcheckout:
 | Hook | Aufwand |
 | --- | --- |
 | `post-edit` | **1,5 bis 2 s** im Median, einzelne Läufe bis 7 s |
-| `stop` | rund 45 s bei geänderten Dateien, sonst der Prozessstart allein |
+| `stop` | **60 bis 62 s** bei geänderten Dateien, **rund 300 ms** im Kurzschluss |
 | `session-start` | Lesen eines Verzeichnisses |
-| `subagent-stop` | ein `git ls-remote`, also netzabhängig — mit knappem Timeout, und ein Fehlschlag ist Exit 1 |
+| `subagent-stop` | ein `git ls-remote`, also netzabhängig — Timeout 10 s, und ein Fehlschlag ist eine leere Antwort, kein Exit 1 |
 
 Timeouts in `.claude/settings.json`: `post-edit` 60 s, `stop` 300 s,
-`session-start` 20 s, `subagent-stop` 30 s.
+`session-start` 20 s, `subagent-start` 30 s, `subagent-stop` 30 s.
+
+Der Wert für `stop` stand hier zuerst mit „rund 45 s" — geschätzt aus der
+Prüfkette allein. Nachgemessen am 2026-08-25 im Hauptcheckout: **60 bis 62 s**
+für einen vollen Durchgang von `check all`, und **rund 300 ms**, wenn der
+Kurzschluss greift. Das Timeout von 300 s bleibt damit fünffach über dem
+gemessenen Wert; der Kurzschluss ist der Grund, dass ein Zug ohne Änderung
+nichts kostet.
 
 Der Wert für `post-edit` stand hier zuerst mit „rund 1 s" — das war die Summe
 der beiden Prüfungen (lint 337 ms, types 664 ms) ohne den Prozessstart und ohne

@@ -434,6 +434,121 @@ says which tool name a `tools` filter should see; it defaults to `Write`.
 
 The decision is drawn, in German, in `docs/abläufe/policy.md`.
 
+## Session hooks
+
+    ultraloom hook session-start    # SessionStart
+    ultraloom hook post-edit        # PostToolUse
+    ultraloom hook subagent-start   # SubagentStart
+    ultraloom hook subagent-stop    # SubagentStop
+    ultraloom hook stop             # Stop
+
+The policy answers *may this tool call happen*. These five hooks answer the
+questions it cannot see: is the file that was just written in order, is the
+work of this turn green before the turn ends, does a paused run still wait for
+an answer, and what did a subagent do that its report left out. Each reads
+Claude Code's payload from stdin, exactly like `ultraloom policy hook`.
+
+| Event | Hook | What it does |
+| ----- | ---- | ------------ |
+| `SessionStart` | `session-start` | Names every run paused at a gate, with the question and the `ultraloom resume` line that answers it. Writes down the commit the session starts on. |
+| `PostToolUse` | `post-edit` | Runs `ruff format` over the file that was written, then the `edit` profile. |
+| `SubagentStart` | `subagent-start` | Records where `origin` and the local `HEAD` stood before the subagent ran. |
+| `SubagentStop` | `subagent-stop` | Names every remote ref that moved, appeared or vanished, and every commit `HEAD` gained. |
+| `Stop` | `stop` | Runs the whole chain and holds the turn while anything is red. |
+
+### What exit 2 means, per event
+
+    0  in order, or deliberately skipped
+    1  internal error — never holds anything up
+    2  a finding; what that causes depends on the event
+
+Exit 2 is not one thing, and getting it wrong is silent:
+
+- At `Stop` it **holds the turn**. The agent is handed the findings and asked
+  to go again.
+- At `PostToolUse` it blocks nothing — the tool has already run. It is only
+  how the finding reaches the file that caused it, instead of surfacing a
+  minute later in the stop gate with nothing to connect it to.
+- At `SessionStart` and `SubagentStart` it never happens; those two report and
+  return 0.
+- At `SubagentStop` it never happens **on purpose**. By the time it runs, the
+  push has happened; stopping the subagent from stopping does not undo it.
+
+A chain that could not run at all is exit 1, never exit 2. The distinction
+matters more here than anywhere: these hooks check ultraloom with ultraloom,
+and a broken `checks.py` must not lock a session in.
+
+### The stop gate
+
+Three things keep it from becoming a trap:
+
+- **The marker.** While `.claude/.no-verify` exists, the gate exits 0 without
+  reading or running anything. For a turn somebody wants to end red on
+  purpose.
+- **The block counter.** At most `MAX_BLOCKS` = 3 blocks per session; after
+  that the gate says it gave up and lets the turn end. A gate that never
+  yields locks the session it was meant to protect, and from inside that
+  session there is no way out. The counter is *not* cleared by a green pass —
+  otherwise a session alternating red and green would never reach the cap.
+- **The short circuit.** A turn that changed nothing exits 0 in about
+  300 ms instead of spending a minute on a verdict that is already known.
+
+What counts as *changed* is measured with `changed_since(root, base)`, not
+against the working tree: a turn that **commits** its work leaves `git status`
+with nothing to report, and a gate built on the working tree alone would go
+quiet at exactly the moment somebody committed something unverified. The base
+is written by `session-start` and moved forward by every green pass — never by
+a blocked one, which would switch the gate off after a single finding. Was the
+gate switched on mid-session, there is no base; `stop` then falls back to the
+working tree **and says so**, because a measurement with a known blind spot
+must not look like a complete one.
+
+The gate subtracts its own state files from what it sees. Without that, every
+turn after the first would look changed because of the file the gate itself
+wrote.
+
+### Wiring
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook stop --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`PostToolUse` takes the matcher `Write|Edit|NotebookEdit`; the other four match
+everything. Timeouts: `post-edit` 60, `stop` 300, `session-start` 20,
+`subagent-start` 30, `subagent-stop` 30.
+
+**One entry per event, and this is not a matter of taste.** Several entries for
+the same event start *concurrently*, not one after another — two measured
+`Stop` entries started 2 ms apart and overlapped completely. A block counter
+split across two entries loses increments, which is a gate that does not count.
+Anything added later belongs in the same entry.
+
+### The state directory
+
+`.ultraloom/hooks/<session_id>.json` holds what has to survive between two
+calls: the block counter, the session's base commit, and one remote snapshot
+per subagent. One file per session, so two sessions in the same checkout do not
+reset each other's counter.
+
+It belongs in `.gitignore`, and it belongs in the policy's path rules: an agent
+that resets its own block counter has abolished the gate.
+
+The decision is drawn in `docs/abläufe/session-hooks.md`.
+
 ## The harness (optional)
 
     uv add "ultraloom[agent]"

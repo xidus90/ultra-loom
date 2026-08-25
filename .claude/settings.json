@@ -11,6 +11,62 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook post-edit --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook session-start --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook subagent-start --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook subagent-stop --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook stop --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 300
+          }
+        ]
+      }
     ]
   }
 }
