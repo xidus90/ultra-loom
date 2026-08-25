@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, NamedTuple, TextIO
 
 from ultraloom.config import ConfigError
 from ultraloom.policy.config import load_ruleset
@@ -19,10 +19,33 @@ EXIT_OK = 0
 EXIT_INTERNAL = 1
 EXIT_DENIED = 2
 
+class _FileTool(NamedTuple):
+    """Where one tool keeps the path it writes to and the text it writes.
+
+    Every file tool has both, but each spells the two keys its own way, so the
+    names belong to the tool and not to the code that reads them. That is the
+    whole reason this is a table: a new tool is a row, never a branch.
+    """
+
+    path_key: str
+    content_key: str
+    # The content key is meaningless while this other key holds this value.
+    # NotebookEdit declares `new_source` required even for `edit_mode =
+    # "delete"`, where it carries whatever the caller happened to pass -- an
+    # empty string or a leftover. Refusing a deletion because of a content rule
+    # would be a false alarm about text that is never written, so the content
+    # is skipped there and only there; `replace` and `insert` do write it and
+    # stay checked.
+    content_moot_when: tuple[str, str] | None = None
+
+
 # Which tool touches which kinds. A tool that is not listed here ends the run
 # before any configuration is read.
-_PATH_TOOLS = ("Write", "Edit")
-_CONTENT_KEYS = {"Write": "content", "Edit": "new_string"}
+_FILE_TOOLS = {
+    "Write": _FileTool("file_path", "content"),
+    "Edit": _FileTool("file_path", "new_string"),
+    "NotebookEdit": _FileTool("notebook_path", "new_source", ("edit_mode", "delete")),
+}
 # Both shells run commands, and both carry the command line under `command`, so
 # one rule of kind `commands` covers them. PowerShell used to be missing here,
 # and on Windows -- where it is the shell Claude Code reaches for -- every
@@ -38,18 +61,27 @@ def subjects(tool: str, tool_input: Mapping[str, Any], root: Path) -> tuple[Subj
             return ()
         return (Subject("commands", command, tool),)
 
-    if tool not in _PATH_TOOLS:
+    keys = _FILE_TOOLS.get(tool)
+    if keys is None:
         return ()
 
     found: list[Subject] = []
-    raw_path = tool_input.get("file_path")
+    raw_path = tool_input.get(keys.path_key)
     if isinstance(raw_path, str):
         found.append(Subject("paths", _relative(raw_path, root), tool))
 
-    content = tool_input.get(_CONTENT_KEYS[tool])
-    if isinstance(content, str):
+    content = tool_input.get(keys.content_key)
+    if isinstance(content, str) and not _content_is_moot(keys, tool_input):
         found.append(Subject("content", content, tool))
     return tuple(found)
+
+
+def _content_is_moot(keys: _FileTool, tool_input: Mapping[str, Any]) -> bool:
+    """Whether this call carries its content key without meaning it."""
+    if keys.content_moot_when is None:
+        return False
+    key, value = keys.content_moot_when
+    return tool_input.get(key) == value
 
 
 def _relative(raw: str, root: Path) -> str:

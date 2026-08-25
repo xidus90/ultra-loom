@@ -396,7 +396,7 @@ As a Claude Code hook, in `.claude/settings.json`:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|Bash|PowerShell",
+        "matcher": "Write|Edit|NotebookEdit|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -411,10 +411,20 @@ As a Claude Code hook, in `.claude/settings.json`:
 ```
 
 The hook reads `tool_name` first and exits 0 before touching a configuration
-when the tool concerns no kind — it runs before every `Write`, `Edit`, `Bash`
-and `PowerShell`, so its own cost is a requirement. `Write` and `Edit` yield a
-path subject; the content comes from `content` for `Write` and from
-`new_string` for `Edit`. `Bash` and `PowerShell` both yield their `command`, so
+when the tool concerns no kind — it runs before every `Write`, `Edit`,
+`NotebookEdit`, `Bash` and `PowerShell`, so its own cost is a requirement.
+Every file tool yields a path subject and a content subject, but each spells
+the two keys its own way:
+
+| Tool           | path            | content      |
+| -------------- | --------------- | ------------ |
+| `Write`        | `file_path`     | `content`    |
+| `Edit`         | `file_path`     | `new_string` |
+| `NotebookEdit` | `notebook_path` | `new_source` |
+
+`NotebookEdit` with `edit_mode = "delete"` yields the path only: its
+`new_source` is required by the schema but never written, so a content rule
+firing there would be a false alarm. `Bash` and `PowerShell` both yield their `command`, so
 one rule of kind `commands` covers either shell — a `git push` rule that knew
 only `Bash` was no rule at all on Windows.
 

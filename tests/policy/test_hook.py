@@ -37,6 +37,66 @@ def test_edit_reads_the_new_string(tmp_path: Path) -> None:
     assert [(s.kind, s.value) for s in found] == [("paths", "a.py"), ("content", "new")]
 
 
+def test_notebookedit_yields_a_path_and_a_content_subject(tmp_path: Path) -> None:
+    """Its keys are named differently: `notebook_path` and `new_source`."""
+    tool_input = {"notebook_path": str(tmp_path / "n.ipynb"), "new_source": "x = 1"}
+    found = subjects("NotebookEdit", tool_input, tmp_path)
+    assert [(s.kind, s.value, s.tool) for s in found] == [
+        ("paths", "n.ipynb", "NotebookEdit"),
+        ("content", "x = 1", "NotebookEdit"),
+    ]
+
+
+def test_a_notebook_path_is_made_relative_like_any_other(tmp_path: Path) -> None:
+    found = subjects("NotebookEdit", {"notebook_path": str(tmp_path / "sub" / "n.ipynb")}, tmp_path)
+    assert [(s.kind, s.value) for s in found] == [("paths", "sub/n.ipynb")]
+
+
+def test_a_notebookedit_without_the_expected_keys_yields_nothing(tmp_path: Path) -> None:
+    assert subjects("NotebookEdit", {}, tmp_path) == ()
+    assert subjects("NotebookEdit", {"notebook_path": 5, "new_source": 7}, tmp_path) == ()
+
+
+def test_deleting_a_cell_does_not_check_the_content(tmp_path: Path) -> None:
+    """`new_source` is required by the schema but meaningless for a deletion."""
+    tool_input = {
+        "notebook_path": str(tmp_path / "n.ipynb"),
+        "new_source": "",
+        "edit_mode": "delete",
+    }
+    found = subjects("NotebookEdit", tool_input, tmp_path)
+    assert [(s.kind, s.value) for s in found] == [("paths", "n.ipynb")]
+
+
+def test_inserting_a_cell_does_check_the_content(tmp_path: Path) -> None:
+    tool_input = {
+        "notebook_path": str(tmp_path / "n.ipynb"),
+        "new_source": "x = 1",
+        "edit_mode": "insert",
+    }
+    found = subjects("NotebookEdit", tool_input, tmp_path)
+    assert [(s.kind, s.value) for s in found] == [("paths", "n.ipynb"), ("content", "x = 1")]
+
+
+def test_a_denied_notebook_content_exits_two(tmp_path: Path) -> None:
+    """The gap this closes: an access key could be written into a `.ipynb`."""
+    root = _config(
+        tmp_path,
+        """
+[[policy.content.rules]]
+regex = 'SECRET_KEY'
+reason = "no key in a notebook"
+""",
+    )
+    errors = io.StringIO()
+    payload = _payload(
+        "NotebookEdit",
+        {"notebook_path": str(root / "n.ipynb"), "new_source": "SECRET_KEY = 'abc'"},
+    )
+    assert run(payload, root, errors) == 2
+    assert "no key in a notebook" in errors.getvalue()
+
+
 def test_multiedit_is_no_longer_a_tool_and_yields_nothing(tmp_path: Path) -> None:
     """Claude Code dropped MultiEdit; nothing here may still answer for it."""
     tool_input = {

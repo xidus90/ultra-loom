@@ -39,12 +39,19 @@ flowchart TD
 
 **`tool_name` zuerst.** Der Hook liest den Werkzeugnamen und endet mit 0, bevor
 er eine Konfigurationsdatei anfasst, wenn das Werkzeug keine Regelart berührt.
-Er läuft vor jedem `Write`, `Edit`, `Bash` und `PowerShell`; sein Aufwand ist
+Er läuft vor jedem `Write`, `Edit`, `NotebookEdit`, `Bash` und `PowerShell`;
+sein Aufwand ist
 eine Anforderung und keine Nebensache. Aus demselben Grund liegt der Import der
 Prüfkette in `cli.py` in den Funktionen und nicht im Modulkopf.
 
-**Ein Aufruf, mehrere Subjects.** `Write` und `Edit` ergeben ein Pfad-Subjekt;
-der Inhalt kommt bei `Write` aus `content` und bei `Edit` aus `new_string`.
+**Ein Aufruf, mehrere Subjects.** Jedes Dateiwerkzeug ergibt ein Pfad- und ein
+Inhalts-Subjekt, nur heißen die beiden Schlüssel je Werkzeug anders:
+`file_path`/`content` bei `Write`, `file_path`/`new_string` bei `Edit`,
+`notebook_path`/`new_source` bei `NotebookEdit`. Deshalb steht das im Code als
+Tabelle und nicht als Verzweigung — ein neues Werkzeug ist eine Zeile.
+`NotebookEdit` mit `edit_mode = "delete"` ergibt nur den Pfad: `new_source` ist
+laut Schema Pflicht, wird beim Löschen aber nie geschrieben, eine dort
+greifende Inhaltsregel wäre eine Falschmeldung.
 `Bash` und `PowerShell` ergeben beide ihr `command` — dieselbe Art `commands`,
 derselbe Weg, denn beide führen Kommandos aus. Geprüft werden alle, und die
 Begründungen aller landen zusammen auf stderr.

@@ -435,7 +435,7 @@ Als Claude-Code-Hook, in `.claude/settings.json`:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|Bash|PowerShell",
+        "matcher": "Write|Edit|NotebookEdit|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -451,9 +451,19 @@ Als Claude-Code-Hook, in `.claude/settings.json`:
 
 Der Hook liest zuerst `tool_name` und endet mit 0, bevor er eine Konfiguration
 anfasst, wenn das Werkzeug keine Art berührt — er läuft vor jedem `Write`,
-`Edit`, `Bash` und `PowerShell`, sein eigener Aufwand ist deshalb eine
-Anforderung. `Write` und `Edit` ergeben ein Pfad-Subjekt; der Inhalt kommt bei
-`Write` aus `content` und bei `Edit` aus `new_string`. `Bash` und `PowerShell`
+`Edit`, `NotebookEdit`, `Bash` und `PowerShell`, sein eigener Aufwand ist
+deshalb eine Anforderung. Jedes Dateiwerkzeug ergibt ein Pfad- und ein
+Inhalts-Subjekt, aber jedes benennt die beiden Schlüssel anders:
+
+| Werkzeug       | Pfad            | Inhalt       |
+| -------------- | --------------- | ------------ |
+| `Write`        | `file_path`     | `content`    |
+| `Edit`         | `file_path`     | `new_string` |
+| `NotebookEdit` | `notebook_path` | `new_source` |
+
+`NotebookEdit` mit `edit_mode = "delete"` ergibt nur den Pfad: sein
+`new_source` verlangt das Schema zwar, geschrieben wird es dabei nie, eine
+Inhaltsregel wäre dort also eine Falschmeldung. `Bash` und `PowerShell`
 ergeben beide ihr `command`, eine Regel der Art `commands` deckt also beide
 Shells ab — eine `git push`-Regel, die nur `Bash` kannte, war unter Windows
 gar keine Regel.
