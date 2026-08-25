@@ -400,8 +400,9 @@ As a Claude Code hook, in `.claude/settings.json`:
 The hook reads `tool_name` first and exits 0 before touching a configuration
 when the tool concerns no kind — it runs before every `Write`, `Edit` and
 `Bash`, so its own cost is a requirement. `Write`, `Edit` and `MultiEdit` yield
-a path subject; the content comes from `content` for `Write` and from
-`new_string` for the two edit tools. `Bash` yields its `command`.
+a path subject; the content comes from `content` for `Write`, from
+`new_string` for `Edit`, and from every `new_string` in `edits` for `MultiEdit`
+-- one content subject per replacement. `Bash` yields its `command`.
 
 `policy check` is the same decision without a payload around it, for a hand or a
 script: `ultraloom policy check commands "git push origin master"`. `--tool`

@@ -37,11 +37,68 @@ def test_edit_reads_the_new_string(tmp_path: Path) -> None:
     assert [(s.kind, s.value) for s in found] == [("paths", "a.py"), ("content", "new")]
 
 
-def test_multiedit_reads_the_new_string_too(tmp_path: Path) -> None:
+def test_multiedit_reads_every_edit(tmp_path: Path) -> None:
+    """The real payload carries the replacements in `edits`, not flat."""
     found = subjects(
-        "MultiEdit", {"file_path": str(tmp_path / "a.py"), "new_string": "new"}, tmp_path
+        "MultiEdit",
+        {
+            "file_path": str(tmp_path / "a.py"),
+            "edits": [
+                {"old_string": "a", "new_string": "one"},
+                {"old_string": "b", "new_string": "two"},
+            ],
+        },
+        tmp_path,
     )
-    assert [(s.kind, s.value) for s in found] == [("paths", "a.py"), ("content", "new")]
+    assert [(s.kind, s.value) for s in found] == [
+        ("paths", "a.py"),
+        ("content", "one"),
+        ("content", "two"),
+    ]
+
+
+def test_multiedit_refuses_a_pattern_in_a_later_edit(tmp_path: Path) -> None:
+    root = _config(
+        tmp_path,
+        """
+[[policy.content.rules]]
+match = "*secret*"
+reason = "no secrets"
+""",
+    )
+    errors = io.StringIO()
+    payload = _payload(
+        "MultiEdit",
+        {
+            "file_path": str(root / "a.py"),
+            "edits": [
+                {"old_string": "a", "new_string": "harmless"},
+                {"old_string": "b", "new_string": "a secret here"},
+            ],
+        },
+    )
+    assert run(payload, root, errors) == 2
+    assert "no secrets" in errors.getvalue()
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [
+        None,
+        "new_string",
+        [["old", "new"]],
+        [{"old_string": "a"}],
+        [{"new_string": 7}],
+    ],
+    ids=["missing", "not-a-list", "not-a-table", "no-new-string", "not-a-string"],
+)
+def test_multiedit_survives_an_unexpected_edits_shape(tmp_path: Path, edits: Any) -> None:
+    """A shape we do not recognise yields no content -- but the path still counts."""
+    tool_input: dict[str, Any] = {"file_path": str(tmp_path / "a.py")}
+    if edits is not None:
+        tool_input["edits"] = edits
+    found = subjects("MultiEdit", tool_input, tmp_path)
+    assert [(s.kind, s.value) for s in found] == [("paths", "a.py")]
 
 
 def test_bash_yields_a_command_subject(tmp_path: Path) -> None:

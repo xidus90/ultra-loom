@@ -439,8 +439,9 @@ Der Hook liest zuerst `tool_name` und endet mit 0, bevor er eine Konfiguration
 anfasst, wenn das Werkzeug keine Art berührt — er läuft vor jedem `Write`,
 `Edit` und `Bash`, sein eigener Aufwand ist deshalb eine Anforderung. `Write`,
 `Edit` und `MultiEdit` ergeben ein Pfad-Subjekt; der Inhalt kommt bei `Write`
-aus `content` und bei den beiden Edit-Werkzeugen aus `new_string`. `Bash` ergibt
-sein `command`.
+aus `content`, bei `Edit` aus `new_string` und bei `MultiEdit` aus jedem
+`new_string` in `edits` -- ein Inhalts-Subjekt je Ersetzung. `Bash` ergibt sein
+`command`.
 
 `policy check` ist dieselbe Entscheidung ohne Payload darum herum, für Hand und
 Skript: `ultraloom policy check commands "git push origin master"`. `--tool`
