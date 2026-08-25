@@ -15,13 +15,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ultraloom.checks import CheckResult, CheckUnavailableError, run_all, run_check
 from ultraloom.config import Config, ConfigError, load_config
 from ultraloom.worktree import RUN_DIR, WorktreeError, changed_files, head_commit
 
 if TYPE_CHECKING:
     # Type-only, so the check side still imports nothing from the harness at
     # runtime — the boundary is about sys.modules, not about annotations.
+    from ultraloom.checks import CheckResult
     from ultraloom.discovery import Baseline
     from ultraloom.graph import Graph
     from ultraloom.model.port import Model
@@ -122,6 +122,11 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _check(kind: str, config: Config, threshold: int | None) -> int:
+    # Imported here and not at the top: the policy path and `--help` would
+    # otherwise pay 25 ms for a chain they never touch. tests/test_cli_imports
+    # holds this.
+    from ultraloom.checks import CheckUnavailableError, run_all, run_check
+
     if threshold is not None:
         config = dataclasses.replace(config, coverage_threshold=threshold)
 

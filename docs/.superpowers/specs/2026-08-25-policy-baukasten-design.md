@@ -188,6 +188,23 @@ Maßnahmen, in dieser Reihenfolge:
    kostet Hilfetexte und gute Fehlermeldungen.
 3. Nachmessen und die Zahl hier eintragen.
 
+### Nachgemessen, 2026-08-25 (Schritt 1 erledigt)
+
+Fünf Läufe je Posten, dieselbe Schleife für beide Posten, unmittelbar
+nacheinander, Hauptcheckout. Die Grundlinie ist `python.exe -c "pass"`;
+aussagekräftig ist allein die Differenz:
+
+| Zustand | Grundlinie | `ultraloom.exe --help` | Differenz |
+| --- | --- | --- | --- |
+| vor den Lazy Imports | 112 ms / 117 ms | 169 ms / 178 ms | 57 ms / 61 ms |
+| nach den Lazy Imports | 128 ms / 125 ms | 175 ms / 172 ms | 47 ms / 47 ms |
+
+Gespart sind damit rund 12 ms, nicht die oben veranschlagten 25: der Anteil von
+`ultraloom.checks` war an dieser Messung kleiner als die Einzelmessung der
+Tabelle darüber ihn ausweist. Die verbleibende Differenz von 47 ms liegt unter
+der Schwelle von 60 ms, ab der Schritt 2 gerechtfertigt wäre — der Parserbau
+bleibt vorerst, wie er ist.
+
 Kein Aufruf über `python -m`: der Sinn des Werkzeugs ist, dass ein Projekt
 `ultraloom` aufruft und nicht Python. Darunter käme man nur, indem die Policy
 die Konfiguration selbst parst — die Verdopplung, gegen die `worktree.py` in
