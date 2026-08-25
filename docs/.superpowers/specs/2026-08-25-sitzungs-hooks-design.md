@@ -9,14 +9,19 @@ kann: sagen, ob die Arbeit am Ende grün ist, ob ein Fehler an der Datei
 auffällt, die gerade geschrieben wurde, ob ein pausierter Lauf auf eine Antwort
 wartet — oder ob ein Subagent etwas getan hat, das sein Bericht verschweigt.
 
-Vier Ereignisse, vier Fragen:
+Fünf Ereignisse, fünf Fragen:
 
 | Ereignis | Frage |
 | --- | --- |
 | `PostToolUse` | Ist die Datei, die gerade geschrieben wurde, für sich genommen in Ordnung? |
 | `Stop` | Ist die Arbeit dieses Zuges grün, bevor der Zug endet? |
 | `SessionStart` | Wartet aus einer früheren Sitzung noch etwas auf eine Antwort? |
+| `SubagentStart` | Wo stand das Remote, bevor der Subagent lief? |
 | `SubagentStop` | Was hat der Subagent getan, das in seinem Bericht fehlt? |
+
+(`SubagentStart` kam bei der Umsetzung dazu: `SubagentStop` allein hat kein
+Davor, und Task 1 hat gemessen, dass beide Ereignisse dieselbe `agent_id`
+tragen.)
 
 `SubagentStop` steht hier, weil der Vorfall, der in CLAUDE.md als Warnung
 festgehalten ist, genau diese Form hatte: ein Implementierer-Subagent hat
@@ -35,12 +40,13 @@ unter der 100-%-Regel, die Datei unter `.claude/` ist die Verdrahtung.
 
 ## Was gebaut wird
 
-Vier Unterkommandos unter `ultraloom hook <name>`:
+Fünf Unterkommandos unter `ultraloom hook <name>`:
 
-    ultraloom hook post-edit      # PostToolUse
-    ultraloom hook stop           # Stop
-    ultraloom hook session-start  # SessionStart
-    ultraloom hook subagent-stop  # SubagentStop
+    ultraloom hook post-edit       # PostToolUse
+    ultraloom hook stop            # Stop
+    ultraloom hook session-start   # SessionStart
+    ultraloom hook subagent-start  # SubagentStart
+    ultraloom hook subagent-stop   # SubagentStop
 
 Alle lesen ihre Payload von stdin, wie `ultraloom policy hook`, und benutzen
 denselben Adapterschnitt: eine Schicht, die Claude Code versteht, und darunter
@@ -55,15 +61,16 @@ denn diese Hooks *sind* Prüfläufe. Nichts aus dem Harness (`graph`, `state`,
 ohnehin; `session-start` und `subagent-stop` dürfen es nicht, und
 `test_module_boundary.py` hält das fest.
 
-## Die vier Hooks
+## Die fünf Hooks
 
 ### PostToolUse — `hook post-edit`
 
 Matcher `Write|Edit|NotebookEdit`. Formatiert die geschriebene Datei mit
-`ruff format` und fährt danach das Profil `edit` (lint + types, gemessen rund
-1 s). Befunde gehen per Exit 2 auf stderr; das Werkzeug ist zu diesem Zeitpunkt
-längst gelaufen, „blockieren" heißt hier also nur, dass der Befund an der Datei
-ankommt, die ihn ausgelöst hat, statt erst 40 Sekunden später im Stop-Gate.
+`ruff format` und fährt danach das Profil `edit` (lint + types, nach der
+Umsetzung gemessen: 1,5 bis 2 s). Befunde gehen per Exit 2 auf stderr; das
+Werkzeug ist zu diesem Zeitpunkt längst gelaufen, „blockieren" heißt hier also
+nur, dass der Befund an der Datei ankommt, die ihn ausgelöst hat, statt erst
+eine Minute später im Stop-Gate.
 
 Notebooks bekommen kein `ruff format` — `.ipynb` ist JSON, und ein Formatierer,
 der die Datei nicht versteht, macht sie kaputt. Der Pfad wird dann übersprungen,
@@ -71,12 +78,13 @@ nicht geraten.
 
 ### Stop — `hook stop`
 
-Fährt `check all` (gemessen rund 45 s) und blockt mit Exit 2, bis alles grün
-ist.
+Fährt `check all` (nach der Umsetzung gemessen: 60 bis 62 s) und blockt mit
+Exit 2, bis alles grün ist.
 
 **Kurzschluss zuerst:** Ist seit der letzten grünen Prüfung nichts dazugekommen,
-endet der Hook sofort mit 0. Ein Zug, der nur gelesen und geantwortet hat,
-kostet sonst 45 Sekunden für eine Antwort, die schon feststeht.
+endet der Hook sofort mit 0 — gemessen rund 300 ms. Ein Zug, der nur gelesen und
+geantwortet hat, kostet sonst eine volle Minute für eine Antwort, die schon
+feststeht.
 
 Gemessen wird das mit `worktree.changed_since(root, base)` — **nicht** mit
 `changed_files`, das gar keine Basis nimmt. Der Unterschied ist derselbe, den
@@ -108,10 +116,14 @@ Frage, die es beantworten kann, ohne jeden Zug 45 Sekunden zu kosten.
 **Block-Zähler:** Höchstens drei Blockaden je Sitzung, danach eskaliert der Hook
 an den Menschen und lässt den Zug enden. Der Zähler löst zugleich das
 Schleifenproblem: ein Stop-Hook, der immer wieder blockt, hält eine Sitzung
-sonst endlos in Bewegung. (Die Doku nennt für diesen Zweck ein Feld
-`stop_hook_active`; ich habe es in der abgerufenen Fassung **nicht** belegen
-können. Der eigene Zähler ist davon unabhängig und deshalb der Weg — falls das
-Feld existiert, wird es zusätzlich gelesen, aber nichts hängt daran.)
+sonst endlos in Bewegung.
+
+Das Feld `stop_hook_active` gibt es — Task 1 hat es gemessen: beim ersten
+Aufruf `false`, beim erzwungenen zweiten `true`. Gelesen wird es trotzdem
+**nicht**. Es sagt „schon einmal geblockt", nie *wie oft*, kann die Obergrenze
+also nicht tragen; und eine zweite Quelle, die dem Zähler widersprechen kann,
+macht das Gate genau dann unerklärlich, wenn jemand versucht, aus ihm
+herauszukommen.
 
 **Aushängen:** Die Datei `.claude/.no-verify` setzt das Gate aus, solange sie
 existiert. Für den Fall, dass jemand bewusst rot abgeben will.
@@ -164,8 +176,9 @@ Wie bei der Policy und aus demselben Grund:
     2  Befund; was das bewirkt, hängt am Ereignis
 
 Was Exit 2 je Ereignis bedeutet, ist nicht dasselbe, und die Spec hält es
-ausdrücklich fest, weil ein Irrtum hier still ist: bei `Stop` und
-`SubagentStop` verhindert es das Beenden, bei `PostToolUse` zeigt es nur den
+ausdrücklich fest, weil ein Irrtum hier still ist: bei `Stop` verhindert es das
+Beenden — bei `SubagentStop` täte es das auch, weshalb dieser Hook es nie
+zurückgibt (siehe seinen Abschnitt oben) —, bei `PostToolUse` zeigt es nur den
 Text an den Agenten, bei `SessionStart` nur an den Menschen.
 
 **Ein abgestürzter Prüflauf ist Exit 1, ein roter Prüflauf Exit 2.** Die
