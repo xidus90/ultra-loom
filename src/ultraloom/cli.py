@@ -123,8 +123,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def _check(kind: str, config: Config, threshold: int | None) -> int:
     # Imported here and not at the top: the policy path and `--help` would
-    # otherwise pay 25 ms for a chain they never touch. tests/test_cli_imports
-    # holds this.
+    # otherwise pay for a chain they never touch. Measured on 2026-08-25 that
+    # is 12 ms of wall clock -- less than the 25 ms `-X importtime` charges the
+    # module, because some of what it pulls in is loaded anyway.
+    # tests/test_cli_imports holds this.
     from ultraloom.checks import CheckUnavailableError, run_all, run_check
 
     if threshold is not None:

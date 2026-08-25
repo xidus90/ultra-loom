@@ -181,8 +181,9 @@ der Regelauswertung.
 Maßnahmen, in dieser Reihenfolge:
 
 1. **Lazy Imports in `cli.py`.** `checks` wandert aus dem Modulkopf in die
-   Funktionen, die es brauchen. Der Policy-Pfad spart damit 25 ms; `check`
-   verliert nichts.
+   Funktionen, die es brauchen. `-X importtime` schreibt dem Modul 25 ms zu;
+   an der Wanduhr wurden daraus 12 ms, weil ein Teil dessen, was es zieht,
+   ohnehin geladen wird. `check` verliert nichts.
 2. **Parserbau nur für den gewählten Zweig** — nur, wenn die Messung nach
    Schritt 1 es noch rechtfertigt. Vor argparse an `sys.argv` zu schneiden
    kostet Hilfetexte und gute Fehlermeldungen.
