@@ -55,6 +55,22 @@ reason = "Zitierte Quelle, keine Prosa."
     assert policy.allow[0].search("Quelle: der Bericht") is not None
 
 
+def test_an_allow_regex_matches_what_it_names(tmp_path: Path) -> None:
+    """Positive coverage for the accepted shape, not only its error cases."""
+    root = _write(tmp_path, """
+[commit]
+language = "en"
+
+[[commit.allow]]
+regex  = "^Co-Authored-By:"
+reason = "Trailer, not prose."
+""")
+    policy = load_commit_policy(root)
+    assert policy is not None
+    assert policy.allow[0].search("Co-Authored-By: Someone <someone@example.com>") is not None
+    assert policy.allow[0].search("Not a trailer line") is None
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [
@@ -67,16 +83,19 @@ reason = "Zitierte Quelle, keine Prosa."
         ('[commit]\nlanguage = "en"\n[[commit.allow]]\nregex = "["\nreason = "x"',
          "invalid regex"),
         ('[commit]\nlanguage = "en"\n[[commit.allow]]\nregex = "^x"', "needs a `reason`"),
-        ('[commit]\nlanguage = "en"\n[[commit.allow]]\nreason = "x"', "needs `match` or `regex`"),
+        (
+            '[commit]\nlanguage = "en"\n[[commit.allow]]\nreason = "x"',
+            "needs a `regex`; unlike the policy's path rules there is no `match`",
+        ),
         ('commit = "no table"', r"\[commit\] must be a table"),
         (
             '[commit]\nlanguage = "en"\n[[commit.allow]]\n'
-            'match = "a"\nregex = "b"\nreason = "x"',
-            "carries both `match` and `regex`",
+            'match = "a"\nreason = "x"',
+            "needs a `regex`; unlike the policy's path rules there is no `match`",
         ),
         ('[commit]\nlanguage = "en"\nallow = "no list"', "must be a list of tables"),
         (
-            '[commit]\nlanguage = "en"\n[[commit.allow]]\nmatch = 1\nreason = "x"',
+            '[commit]\nlanguage = "en"\n[[commit.allow]]\nregex = 1\nreason = "x"',
             "must be a string",
         ),
         # Unreadable TOML is a schema error too: it must name the file rather

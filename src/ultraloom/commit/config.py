@@ -87,18 +87,28 @@ def _allow(item: Mapping[str, Any], path: Path, index: int) -> re.Pattern[str]:
     """
     where = f"[[commit.allow]] #{index + 1}"
 
-    has_match = "match" in item
-    has_regex = "regex" in item
-    if has_match and has_regex:
-        raise ConfigError(f"{path}: {where} carries both `match` and `regex`; use exactly one")
-    if not has_match and not has_regex:
-        raise ConfigError(f"{path}: {where} needs `match` or `regex`")
+    # No `match`: the policy's path rules take a glob there, but a glob has no
+    # clear meaning against a line of text -- does "WIP*" mean the whole line
+    # or somewhere in it? A regex says exactly what it matches, so it is the
+    # only key here, and writing `match` is refused rather than silently
+    # compiled as a regex, where "WIP*" would quietly become "WIP" followed by
+    # zero or more "P".
+    if "match" in item:
+        raise ConfigError(
+            f"{path}: {where} needs a `regex`; unlike the policy's path rules there is "
+            "no `match`, because a glob has no clear meaning against a line of text"
+        )
+    if "regex" not in item:
+        raise ConfigError(
+            f"{path}: {where} needs a `regex`; unlike the policy's path rules there is "
+            "no `match`, because a glob has no clear meaning against a line of text"
+        )
 
     reason = item.get("reason")
     if not isinstance(reason, str) or not reason:
         raise ConfigError(f"{path}: {where} needs a `reason`")
 
-    pattern = item["regex"] if has_regex else item["match"]
+    pattern = item["regex"]
     if not isinstance(pattern, str):
         raise ConfigError(f"{path}: {where} must be a string")
     try:

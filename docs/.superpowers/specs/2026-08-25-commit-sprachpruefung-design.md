@@ -112,8 +112,13 @@ kalibriert ist und ein anderes Projekt anders schreibt. Wer sie ändert, soll
 das an seinen eigenen Commits messen können — dazu unten der Kalibriermodus.
 
 **`[[commit.allow]]`** nimmt **ganze Zeilen** aus der Wertung, deren Muster
-passt: Trailer, zitierte Pfade, Ausschnitte fremder Ausgaben. Aufbau wie die
-Regeln der Policy — `match` oder `regex`, genau eines, `reason` als Pflichtfeld.
+passt: Trailer, zitierte Pfade, Ausschnitte fremder Ausgaben. Anders als die
+Regeln der Policy nur **`regex`**, kein `match`: Ein Glob beschreibt einen Pfad
+oder Dateinamen, und auf eine Textzeile angewandt ist seine Bedeutung unklar —
+soll `WIP*` die ganze Zeile treffen oder irgendwo darin vorkommen? Genau diese
+Unklarheit hätte `match = "WIP*"` still als Regex gelesen und "WIP" gefolgt von
+null oder mehr "P" bedeutet, ohne Fehler und ohne Hinweis. `regex` bleibt
+Pflichtfeld, `reason` ebenso.
 
 Die Zeile fällt vollständig weg, nicht nur das getroffene Wort. Das ist die
 gröbere und die richtige Wahl: Wer eine Zeile ausnimmt, meint sie als Ganzes —

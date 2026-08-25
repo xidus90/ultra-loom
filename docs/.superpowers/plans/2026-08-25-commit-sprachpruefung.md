@@ -451,7 +451,10 @@ reason = "Zitierte Quelle, keine Prosa."
         ('[commit]\nlanguage = "en"\n[[commit.allow]]\nregex = "["\nreason = "x"',
          "invalid regex"),
         ('[commit]\nlanguage = "en"\n[[commit.allow]]\nregex = "^x"', "needs a `reason`"),
-        ('[commit]\nlanguage = "en"\n[[commit.allow]]\nreason = "x"', "needs `match` or `regex`"),
+        (
+            '[commit]\nlanguage = "en"\n[[commit.allow]]\nreason = "x"',
+            "needs a `regex`; unlike the policy's path rules there is no `match`",
+        ),
         ('commit = "no table"', r"\[commit\] must be a table"),
     ],
 )
@@ -468,7 +471,7 @@ Expected: FAIL mit `ModuleNotFoundError: No module named 'ultraloom.commit.confi
 
 - [ ] **Step 3: Write the implementation**
 
-Aufbau wie `src/ultraloom/policy/config.py` — lies es zuerst und folge seiner Machart: `tomllib.loads`, jede Meldung nennt die Stelle so, wie die Datei sie schreibt, `match` oder `regex` genau eines, `reason` als Pflichtfeld, `ConfigError` beim Lesen statt zur Laufzeit.
+Aufbau wie `src/ultraloom/policy/config.py` — lies es zuerst und folge seiner Machart: `tomllib.loads`, jede Meldung nennt die Stelle so, wie die Datei sie schreibt, `reason` als Pflichtfeld, `ConfigError` beim Lesen statt zur Laufzeit. Anders als bei der Policy nimmt `[[commit.allow]]` nur `regex`, kein `match`: Ein Glob hat auf eine Textzeile angewandt keine klare Bedeutung, und ein unbesehen als Regex kompiliertes `match = "WIP*"` würde still etwas anderes bedeuten, als wer es schreibt, erwartet.
 
 Zwei Punkte, die dieses Modul anders macht als die Policy, beide mit Kommentar zu belegen:
 
