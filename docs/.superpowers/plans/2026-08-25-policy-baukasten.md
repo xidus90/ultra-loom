@@ -6,14 +6,14 @@
 
 **Architecture:** Drei Schichten unterhalb des Harness: `rules` entscheidet (nur Standardbibliothek), `config` liest `[policy.*]` aus `.ultraloom/config.toml` und ergänzt eingebaute Sicherheitsregeln, `hook` übersetzt Claude Codes Payload in Subjects und Exit-Codes. Das CLI bekommt ein Unterkommando `policy`; damit es billig bleibt, wandert der Import der Prüfkette in `cli.py` in die Funktionen.
 
-**Tech Stack:** Python 3.14, `uv`, nur Standardbibliothek im Produktionscode (`tomllib`, `re`, `fnmatch`, `pathlib`, `json`, `dataclasses`), pytest, ruff, mypy (strict), coverage.
+**Tech Stack:** Python 3.13 (`requires-python = ">=3.13"`; die venv des Hauptcheckouts fährt 3.13.14), `uv`, nur Standardbibliothek im Produktionscode (`tomllib`, `re`, `fnmatch`, `pathlib`, `json`, `dataclasses`), pytest, ruff, mypy (strict), coverage.
 
 **Spec:** `docs/.superpowers/specs/2026-08-25-policy-baukasten-design.md`
 
 ## Global Constraints
 
 - **Gearbeitet wird in `C:/Users/micro/Documents/#GIT/ultraloom`**, nicht in einer Kopie unter `.claude/worktrees/`: die ist von `.git/info/exclude` ignoriert, teilt Index und HEAD mit dem Hauptcheckout, und `git add` meldet dort keine Änderung. Vor dem ersten Commit `git rev-parse --git-dir --git-common-dir` lesen; sind beide gleich, ist es kein Worktree.
-- **Zweig:** `feat/guard-baukasten`, angelegt von `5d1c43e`. Vor jedem Commit Zweig und HEAD lesen — eine fremde Sitzung im selben Checkout leert den Index, und git schreibt dann einen leeren Commit und meldet Erfolg.
+- **Zweig:** `feat/policy-baukasten`, angelegt von `5d1c43e`. Vor jedem Commit Zweig und HEAD lesen — eine fremde Sitzung im selben Checkout leert den Index, und git schreibt dann einen leeren Commit und meldet Erfolg.
 - **TDD ohne Ausnahme:** jeder Test wird zuerst geschrieben, laufen gelassen und *als rot gesehen*, bevor die Implementierung entsteht.
 - **100 % Coverage**, `fail_under = 100`. Jeder Ausschluss trägt seine Begründung im `# pragma`-Kommentar.
 - **mypy strict**, `files = ["src", "tests"]`. Kein `Any`, kein `type: ignore` ohne Begründung dahinter.
