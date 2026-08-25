@@ -154,6 +154,12 @@ def _parser() -> argparse.ArgumentParser:
     hook_subs.add_parser(
         "post-edit", parents=[common], help="format and check the file that was just written"
     )
+    hook_subs.add_parser(
+        "subagent-start", parents=[common], help="remember where the remote stood"
+    )
+    hook_subs.add_parser(
+        "subagent-stop", parents=[common], help="report what a subagent changed"
+    )
 
     return parser
 

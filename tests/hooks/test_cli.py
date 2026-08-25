@@ -40,3 +40,26 @@ def test_post_edit_reads_the_payload_from_stdin(
 
     assert main(["hook", "post-edit", "--root", str(tmp_path)]) == 0
     assert capsys.readouterr().err == ""
+
+
+def test_subagent_start_reads_the_payload_from_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    payload = json.dumps(
+        {"session_id": "s1", "hook_event_name": "SubagentStart", "agent_id": "a1"}
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+
+    assert main(["hook", "subagent-start", "--root", str(tmp_path)]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_subagent_stop_reads_the_payload_from_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Straight after subagent-start, so the snapshot is there and nothing moved."""
+    payload = json.dumps({"session_id": "s1", "hook_event_name": "SubagentStop", "agent_id": "a1"})
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+
+    assert main(["hook", "subagent-stop", "--root", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.startswith("subagent a1: no snapshot")

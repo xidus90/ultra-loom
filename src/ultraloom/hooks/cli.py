@@ -20,6 +20,18 @@ def dispatch(args: argparse.Namespace, root: Path) -> int:
         from ultraloom.hooks import post_edit
 
         return post_edit.run(sys.stdin, root, sys.stderr)
+    if args.hook_name == "subagent-start":
+        # Local for the same reason: these two reach git through `process`,
+        # and session-start must not pay for an import it never uses. Note
+        # the two spellings -- the subcommand has a hyphen, the module an
+        # underscore -- and that they are never the same string.
+        from ultraloom.hooks import subagent_start
+
+        return subagent_start.run(sys.stdin, root, sys.stderr)
+    if args.hook_name == "subagent-stop":
+        from ultraloom.hooks import subagent_stop
+
+        return subagent_stop.run(sys.stdin, root, sys.stdout, sys.stderr)
     # argparse limits the choice, so this is the "no subcommand" case. Said
     # here rather than made required: argparse would exit 2, and 2 is a
     # finding in this protocol, not a typo.
