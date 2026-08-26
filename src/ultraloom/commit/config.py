@@ -21,6 +21,25 @@ from ultraloom.config import CONFIG_NAME, ConfigError
 # see language.py's own note on how the English direction was calibrated.
 DEFAULT_THRESHOLD = 2
 
+# Named so a typo is refused rather than ignored: `thresold = 4` would
+# otherwise run at the default, and `regx` would drop an exemption, both
+# without a word. The same reasoning as [verify.<kind>] in config.py's sibling.
+_COMMIT_KEYS = ("language", "threshold", "allow")
+_ALLOW_KEYS = ("regex", "reason")
+
+
+def _refuse_unknown(
+    item: Mapping[str, Any], known: tuple[str, ...], where: str, path: Path
+) -> None:
+    """Name every key of `item` that `known` does not list."""
+    unknown = sorted(set(item) - set(known))
+    if unknown:
+        raise ConfigError(
+            f"{path}: {where} does not know "
+            f"{', '.join(repr(key) for key in unknown)}; "
+            f"it takes {', '.join(repr(key) for key in known)}"
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class CommitPolicy:
@@ -55,6 +74,8 @@ def load_commit_policy(root: Path) -> CommitPolicy | None:
     commit = raw["commit"]
     if not isinstance(commit, dict):
         raise ConfigError(f"{path}: [commit] must be a table")
+
+    _refuse_unknown(commit, _COMMIT_KEYS, "[commit]", path)
 
     language = commit.get("language")
     if language is None:
@@ -110,6 +131,8 @@ def _allow(item: Mapping[str, Any], path: Path, index: int) -> re.Pattern[str]:
             f"{path}: {where} needs a `regex`; unlike the policy's path rules there is "
             "no `match`, because a glob has no clear meaning against a line of text"
         )
+
+    _refuse_unknown(item, _ALLOW_KEYS, where, path)
 
     reason = item.get("reason")
     if not isinstance(reason, str) or not reason:

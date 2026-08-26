@@ -112,3 +112,23 @@ def test_a_broken_schema_is_refused_by_name(tmp_path: Path, body: str, message: 
     root = _write(tmp_path, body)
     with pytest.raises(ConfigError, match=message):
         load_commit_policy(root)
+
+
+def test_an_unknown_commit_key_is_refused_by_name(tmp_path: Path) -> None:
+    """`thresold = 4` would otherwise run at the default with nothing to read it off."""
+    root = _write(tmp_path, '[commit]\nlanguage = "en"\nthresold = 4\n')
+    with pytest.raises(ConfigError) as error:
+        load_commit_policy(root)
+    assert "'thresold'" in str(error.value)
+    assert "'threshold'" in str(error.value)
+
+
+def test_an_unknown_allow_key_is_refused_by_name(tmp_path: Path) -> None:
+    root = _write(
+        tmp_path,
+        '[commit]\nlanguage = "en"\n\n[[commit.allow]]\n'
+        'regx = "^Fixes"\nregex = "^Fixes"\nreason = "a trailer"\n',
+    )
+    with pytest.raises(ConfigError) as error:
+        load_commit_policy(root)
+    assert "'regx'" in str(error.value)
