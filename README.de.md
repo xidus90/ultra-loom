@@ -543,7 +543,62 @@ und alles unterhalb der Scherenmarke `# ------------------------ >8 ---`, die
 Änderung berührt, und ihn zu werten hieße, jeden Commit abzulehnen, der
 fremdsprachige Prosa anfasst.
 
-Innerhalb einer Zeile werden fünf Formen entfernt, bevor gezählt wird:
+Fünf Formen werden entfernt, bevor gezählt wird. Vier entscheiden sich
+innerhalb der Zeile; der Code-Span ist die Ausnahme, denn er darf über
+Zeilen reichen, und was er offen lässt, überträgt sich auf die nächste:
+
+| Form            | Beispiel                    | Warum                              |
+| --------------- | --------------------------- | ---------------------------------- |
+| Trailer-Zeilen  | `Ref: das und der`          | Ein git-Trailer, keine Prosa (nicht Zeile 1) |
+| Code-Spans      | `` `das und der` ``         | Zitierte Bezeichner und Ausgaben   |
+| Zitate          | `He said "das und der"`     | Ein Zitat ist nicht die eigene Rede|
+| Pfad-Token      | `docs/das/und.md`, `der.py` | Ein Dateiname ist kein Satz        |
+| Namenspartikel  | `von Neumann`, `de Broglie` | Der Partikel gehört zum Namen      |
+
+Ein Trailer ist die großgeschriebene Bindestrichform — `Co-Authored-By`,
+`Signed-off-by` — oder eines von `Fixes`, `Closes`, `Refs`, `Ref`, `Cc`,
+`Link`, `Bug`, `BREAKING CHANGE`. Sonst nichts: eine
+Conventional-Commit-Betreffzeile wie `fix:` oder `docs:` ist Prosa und wird
+gewertet.
+
+Ein **Code-Span** darf über einen Zeilenumbruch reichen, über beliebig viele
+Zeilen: Die Prüfung führt beim Durchlaufen der Nachricht mit, ob einer offen
+ist, also sind beide Hälften ausgenommen und jede Zeile, die ganz darin liegt,
+ebenso. Ein Backtick, der sich mit nichts paart, öffnet einen Span, und der
+Rest dieser Zeile gilt als zitiert.
+
+Dieser Zustand ändert, was eine Zeile zählt, und zwar in beide Richtungen. Er
+kann eine Zählung senken, das ist der Zweck. Er kann sie aber auch **erhöhen**:
+Ist ein Span offen, fällt der Kopf der Zeile bis zum schließenden Backtick weg
+und ihr Rest wird gewertet, während bei derselben Zeile für sich genommen
+umgekehrt der Rest weggefallen wäre. Je Zeile ist nur die
+Schwellenentscheidung — jede Zeile wird an ihrer eigenen Zählung gemessen und
+als eigener Fund gemeldet —, nicht die Zählung selbst.
+
+Ein offener Code-Span endet an einer Leerzeile. Ein Absatzumbruch ist kein
+plausibles Span-Inneres, und diese Grenze zählt: Ohne sie liefe ein einzelner
+verirrter Backtick bis zum Ende der Nachricht und ließe jede Zeile darunter
+stillschweigend durch. Ein Tor, das sich selbst abschaltet, ist schlimmer als
+eines, das zu viel ablehnt.
+
+Ein **Zitat** reicht dagegen nie über Zeilen. Es wird innerhalb seiner Zeile
+gepaart und sonst nirgends, ein ungepaartes `"` — ein Maß wie `80" breit` oder
+ein Verirrter — ist also Satzzeichen und ändert nichts. Das ist bewusst anders
+als beim Backtick: Umbrochene Backticks kommen in echten Commit-Nachrichten
+vor, umbrochene Zitate vor allem in Tests, und ein verirrtes `"` als
+Span-Öffner zu lesen genügte, um das Tor für eine ganze Nachricht
+abzuschalten. Nur das doppelte Anführungszeichen trennt, ein Apostroph in
+`don't` öffnet also nichts.
+
+Zeilen, die mit `#` beginnen, weil git dort seine eigenen Hinweise schreibt,
+und alles unterhalb der Scherenmarke `# ------------------------ >8 ---`, die
+`git commit --verbose` anhängt — der Diff darunter enthält, was immer die
+Änderung berührt, und ihn zu werten hieße, jeden Commit abzulehnen, der
+fremdsprachige Prosa anfasst.
+
+Fünf Formen werden entfernt, bevor gezählt wird. Vier entscheiden sich
+innerhalb der Zeile; der Code-Span ist die Ausnahme, denn er darf über
+Zeilen reichen, und was er offen lässt, überträgt sich auf die nächste:
 
 | Form            | Beispiel                    | Warum                              |
 | --------------- | --------------------------- | ---------------------------------- |
@@ -578,7 +633,7 @@ Innerhalb eines Absatzes gilt der Rest der Zeile nach einem ungepaarten
 Trennzeichen als zitiert. Nur das doppelte Anführungszeichen trennt, ein
 Apostroph in `don't` öffnet also nichts.
 
-Zeilen, die mit `#` beginnen, bewegen diesen Zustand nie: git hat sie
+Zeilen, die mit `#` beginnen, bewegen den Code-Span-Zustand nie: git hat sie
 geschrieben und entfernt sie wieder, bevor die Nachricht gespeichert wird, ein
 Trennzeichen dort gehört also zu keinem Span des Autors.
 

@@ -501,7 +501,9 @@ below the `# ------------------------ >8 ---` scissors that `git commit
 scoring it would refuse every commit that goes near prose in the other
 language.
 
-Within a line, five shapes are removed before the hits are counted:
+Five shapes are removed before the hits are counted. Four are decided
+within the line; a code span is the exception, because it may wrap across
+lines and what it leaves open carries to the next one:
 
 | Shape          | Example                     | Why                                |
 | -------------- | --------------------------- | ---------------------------------- |
@@ -516,24 +518,32 @@ A trailer is the capitalised hyphenated shape — `Co-Authored-By`,
 `Bug`, `BREAKING CHANGE`. Nothing else: a conventional-commit subject such as
 `fix:` or `docs:` is prose and is scored.
 
-Code spans and quoted spans may wrap across a line break, however many lines
-they run: the check tracks whether a span is open as it walks the message, so
-both halves are exempt and so is any line lying wholly inside. Scoring itself
-stays per line — each line keeps its own count and its own threshold decision;
-only the question of whether a span is open carries over.
+A **code span** may wrap across a line break, however many lines it runs: the
+check tracks whether one is open as it walks the message, so both halves are
+exempt and so is any line lying wholly inside. A backtick that pairs with
+nothing opens a span, and the rest of that line is read as quoted.
 
-An open span closes at a blank line. A paragraph break is not a plausible span
-interior, and the bound matters: a delimiter that pairs with nothing — a
-backtick or a `"` used as punctuation, as in `80" wide` — opens a span, and
-without the bound that span would run to the end of the message and let every
-line below it through in silence. A gate that switches itself off is worse
-than one that refuses too much, so the damage stops at the paragraph.
+That state changes what a line scores, in both directions. It can lower a
+count, which is the point. It can also **raise** one: with a span open, the
+line's head is dropped up to the closing backtick and its tail is scored,
+where the same line read alone would have had its tail blanked instead. Only
+the threshold decision is per line — each line is judged on its own count and
+reported as its own finding — not the count itself.
 
-Within a paragraph, the rest of the line after an unpaired delimiter is read as
-quoted. Only the double quote delimits, so an apostrophe in `don't` opens
-nothing.
+An open code span closes at a blank line. A paragraph break is not a plausible
+span interior, and the bound matters: without it a single stray backtick would
+run to the end of the message and let every line below it through in silence.
+A gate that switches itself off is worse than one that refuses too much.
 
-Lines that begin with `#` never move that state: git wrote them and strips
+A **quoted span** does not wrap at all. It is paired within its line and
+nowhere else, so an unpaired `"` — a measurement such as `80" wide`, or a
+stray — is punctuation and changes nothing. That is deliberately unlike the
+backtick: wrapped backticks turn up in real commit messages, wrapped quotes
+turn up mostly in tests, and treating a stray `"` as a span opener was enough
+to switch the gate off for a whole message. Only the double quote delimits, so
+an apostrophe in `don't` opens nothing.
+
+Lines that begin with `#` never move the code-span state: git wrote them and strips
 them again before the message is stored, so a delimiter there belongs to no
 span the author wrote.
 

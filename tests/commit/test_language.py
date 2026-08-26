@@ -65,7 +65,7 @@ def test_a_name_particle_does_not_count() -> None:
 
 def test_von_without_a_capitalised_name_still_counts() -> None:
     text = "Das Ergebnis von dem Bericht und von der Pruefung"
-    assert scan(text, "en", 2) != ()
+    assert [f.line_number for f in scan(text, "en", 2)] == [1]
 
 
 def test_the_diff_below_the_scissors_is_ignored() -> None:
@@ -140,7 +140,7 @@ def test_umlauts_are_found_although_the_list_is_ascii(text: str) -> None:
     point of having it. An earlier version used a sentence whose plain-ASCII
     stopwords carried the count on their own, and passed without the folding.
     """
-    assert scan(text, "en", 2) != ()
+    assert [f.line_number for f in scan(text, "en", 2)] == [1]
 
 
 def test_a_hyphenated_trailer_does_not_count() -> None:
@@ -158,7 +158,7 @@ def test_a_conventional_commit_subject_is_not_a_trailer() -> None:
     """The subject is the line that matters, and for a one-line commit it is all there is."""
     for subject in ("fix: ", "Fix: ", "docs: ", "chore: ", "Note: "):
         text = f"{subject}behebt den Fehler und das Problem"
-        assert scan(text, "en", 2) != (), subject
+        assert [f.line_number for f in scan(text, "en", 2)] == [1], subject
 
 
 def test_an_english_fest_is_not_a_finding() -> None:
@@ -170,7 +170,7 @@ def test_no_trailer_is_exempt_on_the_first_line() -> None:
     """A trailer block never legitimately begins on line 1, so the subject is prose."""
     for key in ("Ref", "Fixes", "Co-Authored-By", "Auto-merge", "Feature-flag", "BREAKING CHANGE"):
         text = f"{key}: behebt den Fehler und das Problem"
-        assert scan(text, "en", 2) != (), key
+        assert [f.line_number for f in scan(text, "en", 2)] == [1], key
 
 
 def test_a_breaking_change_footer_does_not_count() -> None:
@@ -209,19 +209,19 @@ def test_a_closing_backtick_with_no_opener_leaves_its_text_scored() -> None:
     prose like any other.
     """
     text = "Widen the gate\n\nund der Bericht` shows what the gate printed"
-    assert scan(text, "en", 2) != ()
+    assert [f.line_number for f in scan(text, "en", 2)] == [3]
 
 
 def test_a_balanced_span_is_left_alone() -> None:
     """The rule must not reach back into a line whose backticks all pair up."""
     assert scan("Report `das und der` in the output", "en", 2) == ()
     # Prose after a balanced span is still prose, and still counted.
-    assert scan("Report `x` und der Bericht das", "en", 2) != ()
+    assert [f.line_number for f in scan("Report `x` und der Bericht das", "en", 2)] == [1]
 
 
 def test_a_lone_trailing_backtick_strips_nothing() -> None:
     """Nothing follows the backtick, so the line is scored exactly as it reads."""
-    assert scan("Der Bericht und das Ergebnis `", "en", 2) != ()
+    assert [f.line_number for f in scan("Der Bericht und das Ergebnis `", "en", 2)] == [1]
 
 
 def test_the_tail_of_a_wrapped_code_span_is_exempt() -> None:
@@ -245,51 +245,35 @@ def test_a_code_span_wrapping_three_lines_is_exempt() -> None:
     assert scan(text, "en", 2) == ()
 
 
-def test_the_opening_line_of_a_wrapped_quote_is_exempt() -> None:
-    """Plain quotes wrap exactly like backticks do."""
-    text = (
-        "Widen the gate\n\n"
-        'He said "behebt den Fehler und das\n'
-        'Problem" and left'
-    )
-    assert scan(text, "en", 2) == ()
+def test_a_quoted_span_does_not_wrap_across_lines() -> None:
+    """Reworked from three tests that asserted the opposite, and kept as the record.
 
-
-def test_the_tail_of_a_wrapped_quote_is_exempt() -> None:
-    text = (
-        "Widen the gate\n\n"
-        'He said "es behebt den Fehler\n'
-        'und das Problem" and left'
-    )
-    assert scan(text, "en", 2) == ()
-
-
-def test_a_quote_wrapping_three_lines_is_exempt() -> None:
-    text = (
-        "Widen the gate\n\n"
-        'He said "es behebt den Fehler\n'
-        "und das Problem und der Bericht\n"
-        'und die Pruefung" and left'
-    )
-    assert scan(text, "en", 2) == ()
-
-
-def test_a_lone_backtick_as_punctuation_opens_a_span() -> None:
-    """Nothing pairs with it, so the rest of the line reads as quoted.
-
-    This errs toward letting a line through rather than refusing it, which is
-    the safe direction: a false positive is what teaches --no-verify.
+    Backtick wrapping is observed in real commit messages; quote wrapping was
+    only ever constructed here. An unpaired quote is a measurement or a stray
+    far more often than half a citation, so both halves are scored as prose.
     """
-    assert scan("Set the width to 80` und der Bericht das", "en", 2) == ()
+    text = (
+        "Widen the gate\n\n"
+        'He said "es behebt den Fehler und das\n'
+        'Problem und der Bericht" and left'
+    )
+    assert [f.line_number for f in scan(text, "en", 2)] == [3, 4]
 
 
-def test_a_lone_quote_as_punctuation_opens_a_span() -> None:
-    assert scan('Set the width to 80" und der Bericht das', "en", 2) == ()
+def test_a_quoted_span_within_one_line_is_still_exempt() -> None:
+    """Only the wrapping went away; pairing within the line is untouched."""
+    assert scan('He said "das und der" and left', "en", 2) == ()
+
+
+def test_a_lone_quote_is_punctuation_not_a_span_opener() -> None:
+    """A measurement, and the rest of the line is ordinary prose."""
+    text = 'Set the width to 80" und der Bericht das'
+    assert [f.line_number for f in scan(text, "en", 2)] == [1]
 
 
 def test_an_apostrophe_is_not_a_quote_delimiter() -> None:
     """Only the double quote delimits; `don't` must not open anything."""
-    assert scan("The gate don't und der Bericht das care", "en", 2) != ()
+    assert [f.line_number for f in scan("The gate don't und der Bericht das care", "en", 2)] == [1]
 
 
 def test_a_git_hint_line_does_not_move_the_span_flags() -> None:
@@ -305,7 +289,7 @@ def test_a_git_hint_line_does_not_move_the_span_flags() -> None:
         "# Changes not staged for commit: `\n"
         "Der Bericht und das Ergebnis fehlen"
     )
-    assert scan(noise, "en", 2) != ()
+    assert [f.line_number for f in scan(noise, "en", 2)] == [5]
 
     spanning = (
         "Widen the gate\n\n"
@@ -364,12 +348,8 @@ def test_a_span_wrapped_inside_one_paragraph_is_still_exempt() -> None:
         "und das Problem` and stopped"
     )
     assert scan(code, "en", 2) == ()
-    quoted = (
-        "Widen the gate\n\n"
-        'He said "es behebt den Fehler\n'
-        'und das Problem" and stopped'
-    )
-    assert scan(quoted, "en", 2) == ()
+    # No quoted twin: a quoted span does not wrap, so there is nothing for
+    # the paragraph bound to bound. See test_a_quoted_span_does_not_wrap.
 
 
 def test_a_span_does_not_wrap_across_a_blank_line() -> None:
@@ -403,4 +383,52 @@ def test_a_path_and_a_name_particle_inside_a_wrapped_span() -> None:
 def test_a_path_and_a_name_particle_outside_a_span() -> None:
     """Both shapes are still removed where no span is involved, and prose still counts."""
     assert scan("Report docs/das/und.md by von Neumann to the team", "en", 2) == ()
-    assert scan("Report docs/das/und.md by von Neumann und der Bericht das", "en", 2) != ()
+    text = "Report docs/das/und.md by von Neumann und der Bericht das"
+    assert [f.line_number for f in scan(text, "en", 2)] == [1]
+
+
+def test_a_stray_quote_mid_paragraph_does_not_disable_the_gate() -> None:
+    """The blank-line reset fires before the delimiter, not after it.
+
+    A body paragraph is normally the whole body, so a stray quote inside one
+    had nothing left to bound it and the gate stopped checking.
+    """
+    text = (
+        "Fix the parser\n"
+        "\n"
+        'The input may contain a " character\n'
+        "Das Ergebnis und der Bericht fehlen\n"
+        "Das Verhalten und der Vertrag aendern sich"
+    )
+    assert [f.line_number for f in scan(text, "en", 2)] == [4, 5]
+
+
+def test_a_stray_quote_with_no_blank_line_anywhere_does_not_disable_the_gate() -> None:
+    """A two-line message has no paragraph break, so the reset never fires at all."""
+    text = 'Add a 80" wide banner\nDas Ergebnis und der Bericht fehlen'
+    assert [f.line_number for f in scan(text, "en", 2)] == [2]
+
+
+def test_a_removed_span_leaves_a_separator_behind() -> None:
+    """The replacement is a space, never the empty string.
+
+    An empty replacement welds the halves of a line together: `un` + `d der`
+    becomes `und der` and manufactures a stopword nobody wrote. Scored with a
+    space there is one hit, which is under the threshold; welded there are two.
+    """
+    assert scan("Fix un`x`d der parser", "en", 2) == ()
+
+
+def test_the_tail_of_a_carried_span_cannot_pass_as_a_trailer() -> None:
+    """The space in front of the tail is load-bearing too: a trailer starts its line.
+
+    Without it the remainder after the closing backtick begins the line, and a
+    tail that happens to open with a trailer key would take the whole line out
+    of scoring.
+    """
+    text = (
+        "Widen the gate\n\n"
+        "He wrote `something\n"
+        "x`Ref: das und der Bericht"
+    )
+    assert [f.line_number for f in scan(text, "en", 2)] == [4]

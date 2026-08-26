@@ -91,10 +91,14 @@ CODE_SPAN = re.compile(r"`[^`]*`")
 # line keeps its own count, its own threshold decision and its own finding --
 # and only the question "is a span open here" comes from above.
 OPEN_SPAN = re.compile(r"`.*$")
+# Strictly per line, and deliberately unlike CODE_SPAN. A quoted span does not
+# wrap: an unpaired `"` in prose is a measurement or a stray, as in `80" wide`,
+# far more often than the opening half of a citation. Treating it as a span
+# opener let one stray quote blank the rest of its line and, while the flag
+# carried, everything below -- exit 0 on a message of plain German. Backtick
+# wrapping is observed in real commit messages and pays for its carry; quote
+# wrapping was only ever constructed in this suite, so it does not.
 QUOTED_SPAN = re.compile(r"\"[^\"]*\"")
-# Only the double quote delimits. An apostrophe does not, so "don't" opens
-# nothing -- which is why backticks and quotes need no different treatment.
-OPEN_QUOTE = re.compile(r"\".*$")
 PATH_TOKEN = re.compile(r"\S*(?:[/\\]\S*|\.[A-Za-z0-9]{1,5})(?=\s|$)")
 
 # A name particle, not a function word: "von Neumann", "van Gogh",
@@ -140,7 +144,6 @@ def scan(
     stopwords = STOPWORDS[language]
     findings: list[Finding] = []
     in_code = False
-    in_quote = False
 
     for number, line in enumerate(text.splitlines(), start=1):
         if SCISSORS.match(line):
@@ -160,9 +163,8 @@ def scan(
             # worse than one that refuses too much, and a paragraph break is
             # not a plausible span interior.
             in_code = False
-            in_quote = False
             continue
-        scored, in_code, in_quote = _spans(line, in_code, in_quote)
+        scored, in_code = _spans(line, in_code)
         # After _spans and not before it: an exempted line is still the
         # author's text, and a span it opens goes on into the lines below.
         if any(pattern.search(line) for pattern in allow):
@@ -173,39 +175,37 @@ def scan(
     return tuple(findings)
 
 
-def _spans(line: str, in_code: bool, in_quote: bool) -> tuple[str, bool, bool]:
-    """One line with its quoted spans blanked, and the flags for the next line.
+def _spans(line: str, in_code: bool) -> tuple[str, bool]:
+    """One line with its quoted spans blanked, and the code flag for the next.
 
-    Three cases per delimiter. A span open from above ends at the first
-    delimiter on this line, or swallows the line whole if there is none. What
-    is left is paired within the line as before. A delimiter still over after
-    that pairing opens a span, so the rest of the line is quoted.
+    A code span open from above ends at the first backtick on this line, or
+    swallows the line whole if there is none. What is left is paired within
+    the line, and a backtick still over after that pairing opens a span, so
+    the rest of the line is quoted.
+
+    Quoted spans get none of that: they are paired within the line and
+    nothing else -- see QUOTED_SPAN for why the two differ.
+
+    Every substitution puts a space in place of what it removes. An empty
+    replacement would weld the halves together, turning `un``x``d der` into
+    `und der` and manufacturing a stopword that was never written.
     """
     text = line
     if in_code:
         _, tick, rest = text.partition("`")
         if not tick:
-            # No closing backtick anywhere: the line lies inside the span, and
-            # a quote within it is code, so in_quote is left as it stands.
-            return " ", True, in_quote
+            # No closing backtick anywhere: the line lies inside the span.
+            return " ", True
+        # The space also keeps a tail that happens to read like a trailer key
+        # from being taken for one: a trailer must start its line.
         text = " " + rest
     text = CODE_SPAN.sub(" ", text)
     in_code = "`" in text
     if in_code:
         text = OPEN_SPAN.sub(" ", text)
 
-    # Quotes are read on what the code pass left, so a quote inside a code
-    # span neither counts nor moves the quote flag.
-    if in_quote:
-        _, mark, rest = text.partition('"')
-        if not mark:
-            return " ", in_code, True
-        text = " " + rest
-    text = QUOTED_SPAN.sub(" ", text)
-    in_quote = '"' in text
-    if in_quote:
-        text = OPEN_QUOTE.sub(" ", text)
-    return text, in_code, in_quote
+    # Read on what the code pass left, so a quote inside a code span is code.
+    return QUOTED_SPAN.sub(" ", text), in_code
 
 
 def _hits(line: str, stopwords: frozenset[str], *, is_subject: bool) -> tuple[str, ...]:
