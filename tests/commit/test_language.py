@@ -159,3 +159,8 @@ def test_a_conventional_commit_subject_is_not_a_trailer() -> None:
     for subject in ("fix: ", "Fix: ", "docs: ", "chore: ", "Note: "):
         text = f"{subject}behebt den Fehler und das Problem"
         assert scan(text, "en", 2) != (), subject
+
+
+def test_an_english_fest_is_not_a_finding() -> None:
+    text = "Add the fest and the beer fest to the calendar"
+    assert scan(text, "en", 2) == ()

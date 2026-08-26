@@ -20,8 +20,8 @@ LANGUAGES: tuple[Language, ...] = ("en", "de")
 # German it feels.
 #
 # Deliberately absent from the German list, each a normal English word: die,
-# war, man, den, hat, in, so, an. "Let the process die in the war room" must
-# not be a finding.
+# war, man, den, hat, in, so, an, fest. "Let the process die in the war room"
+# must not be a finding, and neither must "Add the beer fest to the calendar".
 #
 # The German list is calibrated: in one project's history, a hundred English
 # commits against sixteen German ones, and these are the words that separate
@@ -36,7 +36,7 @@ STOPWORDS: Mapping[Language, frozenset[str]] = {
             "nach", "ohne", "beim", "zum", "zur", "zu", "auf", "durch",
             "gegen", "dass", "weil", "wenn", "schon", "noch", "jeden", "jede",
             "jeder", "wieder", "statt", "samt", "unter", "zusammen", "heraus",
-            "ihn", "fest",
+            "ihn",
         }
     ),
     # Searched when the target language is German. Function words with no
