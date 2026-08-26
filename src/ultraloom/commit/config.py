@@ -44,7 +44,10 @@ def load_commit_policy(root: Path) -> CommitPolicy | None:
 
     try:
         raw: dict[str, Any] = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as error:
+    # UnicodeDecodeError is a ValueError, so it needs naming here: without it
+    # a config saved in another encoding ends the run in a traceback instead of
+    # the one line every other unreadable config gets.
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise ConfigError(f"{path}: {error}") from error
 
     if "commit" not in raw:

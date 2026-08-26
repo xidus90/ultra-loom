@@ -42,9 +42,11 @@ def run(path: Path, root: Path, stderr: TextIO) -> int:
 
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as error:
+    except (OSError, UnicodeDecodeError) as error:
         # Git wrote this file moments ago, so a failure here is our problem,
-        # not the author's -- exit 1 rather than a refusal.
+        # not the author's -- exit 1 rather than a refusal. A decode failure is
+        # one of ours too: UnicodeDecodeError is a ValueError and would escape
+        # an OSError-only clause, ending the hook in a pathlib traceback.
         print(f"ultraloom commit-msg: cannot read {path}: {error}", file=stderr)
         return EXIT_INTERNAL
 
@@ -69,6 +71,10 @@ def _report(findings: tuple[Finding, ...], language: str, stderr: TextIO) -> Non
         file=stderr,
     )
     for finding in findings:
-        print(f"  line {finding.line_number}: {finding.line}", file=stderr)
-        print(f"          hits: {', '.join(finding.hits)}", file=stderr)
+        # The indent comes from the label rather than a constant: a message long
+        # enough for a two-digit line number would push the text right and leave
+        # a fixed indent pointing at nothing.
+        label = f"  line {finding.line_number}: "
+        print(f"{label}{finding.line}", file=stderr)
+        print(f"{' ' * len(label)}hits: {', '.join(finding.hits)}", file=stderr)
     print(_WAY_OUT, file=stderr)
