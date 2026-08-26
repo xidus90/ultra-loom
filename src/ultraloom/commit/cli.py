@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TextIO
 
 from ultraloom.commit.config import load_commit_policy
-from ultraloom.commit.language import Finding, scan
+from ultraloom.commit.language import Finding, Language, scan
 from ultraloom.config import ConfigError
 
 EXIT_OK = 0
@@ -78,3 +78,49 @@ def _report(findings: tuple[Finding, ...], language: str, stderr: TextIO) -> Non
         print(f"{label}{finding.line}", file=stderr)
         print(f"{' ' * len(label)}hits: {', '.join(finding.hits)}", file=stderr)
     print(_WAY_OUT, file=stderr)
+
+
+def calibrate_run(
+    root: Path,
+    count: int,
+    language: Language | None,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    """Print what each threshold would have refused in the last `count` commits.
+
+    A measurement, not a gate: the exit code says whether the table could be
+    produced, never whether the history would pass.
+    """
+    # Imported here, like every other import on this module's paths: the hook
+    # runs on every commit and must not pay for `git log`'s machinery.
+    from ultraloom.commit.calibrate import THRESHOLDS, HistoryError, read_messages, render
+
+    try:
+        policy = load_commit_policy(root)
+    except ConfigError as error:
+        print(f"ultraloom commit-msg: {error}", file=stderr)
+        return EXIT_INTERNAL
+
+    chosen = language or (None if policy is None else policy.language)
+    if chosen is None:
+        # No guessed default, for the same reason [commit] has none: the answer
+        # would be a measurement against a rule nobody chose.
+        print(
+            "ultraloom commit-msg: --calibrate needs a language -- pass --language, "
+            "or write [commit].language in the config",
+            file=stderr,
+        )
+        return EXIT_INTERNAL
+
+    try:
+        messages = read_messages(root, count)
+    except HistoryError as error:
+        print(f"ultraloom commit-msg: {error}", file=stderr)
+        return EXIT_INTERNAL
+
+    # The project's exemptions travel with the measurement: a table that
+    # ignored them would report a cost the configured gate never charges.
+    allow = () if policy is None else policy.allow
+    render(messages, chosen, THRESHOLDS, stdout, allow)
+    return EXIT_OK

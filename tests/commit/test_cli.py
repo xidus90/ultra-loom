@@ -5,7 +5,9 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from ultraloom.commit.cli import run
+import pytest
+
+from ultraloom.commit.cli import calibrate_run, run
 
 
 def _project(tmp_path: Path, config: str) -> Path:
@@ -150,3 +152,56 @@ def test_the_hits_line_aligns_under_a_two_digit_line_number(tmp_path: Path) -> N
     assert run(path, root, errors) == 2
     lines = errors.getvalue().splitlines()
     assert lines[1].index("Das") == lines[2].index("hits:")
+
+
+def test_calibrate_needs_a_language_from_somewhere(tmp_path: Path) -> None:
+    """No guessed default, for the same reason [commit] has none."""
+    root = _project(tmp_path, '[verify]\nlint = "ruff check ."\n')
+    errors = io.StringIO()
+    assert calibrate_run(root, 5, None, io.StringIO(), errors) == 1
+    assert "--language" in errors.getvalue()
+
+
+def test_calibrate_takes_the_language_from_the_flag_without_a_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "ultraloom.commit.calibrate.read_messages",
+        lambda _root, _count: ("Das Ergebnis und der Bericht fehlen",),
+    )
+    out = io.StringIO()
+    assert calibrate_run(tmp_path, 5, "en", out, io.StringIO()) == 0
+    assert "threshold 2: 1 refused" in out.getvalue()
+
+
+def test_calibrate_measures_with_the_project_exemptions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A table ignoring `allow` reports a cost the configured gate never charges."""
+    root = _project(
+        tmp_path,
+        '[commit]\nlanguage = "en"\n\n[[commit.allow]]\n'
+        'regex = "^Das Ergebnis"\nreason = "a fixed heading"\n',
+    )
+    monkeypatch.setattr(
+        "ultraloom.commit.calibrate.read_messages",
+        lambda _root, _count: ("Das Ergebnis und der Bericht fehlen",),
+    )
+    out = io.StringIO()
+    assert calibrate_run(root, 5, None, out, io.StringIO()) == 0
+    assert "threshold 1: 0 refused" in out.getvalue()
+
+
+def test_calibrate_reports_a_broken_config_rather_than_a_table(tmp_path: Path) -> None:
+    root = _project(tmp_path, "[commit]\nthreshold = 2\n")
+    errors = io.StringIO()
+    assert calibrate_run(root, 5, None, io.StringIO(), errors) == 1
+    assert "needs a `language`" in errors.getvalue()
+
+
+def test_calibrate_reports_an_unreadable_history(tmp_path: Path) -> None:
+    """tmp_path is no repository, so git log has nothing to answer with."""
+    root = _project(tmp_path, '[commit]\nlanguage = "en"\n')
+    errors = io.StringIO()
+    assert calibrate_run(root, 5, None, io.StringIO(), errors) == 1
+    assert "cannot read the history" in errors.getvalue()

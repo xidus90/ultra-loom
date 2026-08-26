@@ -1287,3 +1287,30 @@ def test_commit_msg_reaches_the_gate_and_returns_its_code(
 
     assert code == 2
     assert "line 1" in capsys.readouterr().err
+
+
+def test_commit_msg_without_a_file_or_calibrate_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """argparse cannot: the argument is required for one mode and not the other."""
+    write_config(tmp_path, '[commit]\nlanguage = "en"\n')
+
+    code = main(["commit-msg", "--root", str(tmp_path)])
+
+    assert code == 1
+    assert "--calibrate" in capsys.readouterr().err
+
+
+def test_commit_msg_calibrate_reaches_the_table(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_config(tmp_path, '[commit]\nlanguage = "en"\n')
+    monkeypatch.setattr(
+        "ultraloom.commit.calibrate.read_messages",
+        lambda _root, _count: ("Das Ergebnis und der Bericht fehlen",),
+    )
+
+    code = main(["commit-msg", "--calibrate", "5", "--root", str(tmp_path)])
+
+    assert code == 0
+    assert "threshold 2: 1 refused" in capsys.readouterr().out

@@ -81,6 +81,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         # would block the commit for a reason it has nothing to do with.
         from ultraloom.commit import cli as commit_cli
 
+        if args.calibrate is not None:
+            return commit_cli.calibrate_run(
+                root, args.calibrate, args.language, sys.stdout, sys.stderr
+            )
+        if args.path is None:
+            # argparse cannot say this: the argument is required for the hook
+            # and meaningless for the measurement, and `nargs="?"` is the only
+            # way to have both under one subcommand.
+            print(
+                "ultraloom commit-msg: needs a message file, or --calibrate <n>",
+                file=sys.stderr,
+            )
+            return commit_cli.EXIT_INTERNAL
         return commit_cli.run(Path(args.path), root, sys.stderr)
 
     try:
@@ -181,7 +194,22 @@ def _parser() -> argparse.ArgumentParser:
     commit_msg = subparsers.add_parser(
         "commit-msg", parents=[common], help="check a commit message's language"
     )
-    commit_msg.add_argument("path", help="the message file git passes to the hook")
+    commit_msg.add_argument(
+        "path", nargs="?", help="the message file git passes to the hook"
+    )
+    commit_msg.add_argument(
+        "--calibrate",
+        type=int,
+        default=None,
+        metavar="N",
+        help="measure the thresholds against the last N commits instead of checking a file",
+    )
+    commit_msg.add_argument(
+        "--language",
+        choices=("en", "de"),
+        default=None,
+        help="the language to calibrate against, when [commit] does not name one yet",
+    )
 
     return parser
 
