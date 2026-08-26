@@ -242,3 +242,17 @@ def test_a_count_below_one_is_refused_rather_than_handed_to_git(tmp_path: Path) 
         errors = io.StringIO()
         assert calibrate_run(root, count, None, io.StringIO(), errors) == 1
         assert "--calibrate needs a count of at least 1" in errors.getvalue()
+
+
+def test_calibrate_prefers_the_flag_over_the_configured_language(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flag is the override, so a config beside it must not win."""
+    root = _project(tmp_path, '[commit]\nlanguage = "de"\n')
+    monkeypatch.setattr(
+        "ultraloom.commit.calibrate.read_messages",
+        lambda _root, _count: ("Das Ergebnis und der Bericht fehlen",),
+    )
+    out = io.StringIO()
+    assert calibrate_run(root, 5, "en", out, io.StringIO()) == 0
+    assert "threshold 2: 1 refused" in out.getvalue()
