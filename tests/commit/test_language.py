@@ -420,11 +420,12 @@ def test_a_removed_span_leaves_a_separator_behind() -> None:
 
 
 def test_the_tail_of_a_carried_span_cannot_pass_as_a_trailer() -> None:
-    """The space in front of the tail is load-bearing too: a trailer starts its line.
+    """The space in front of the tail is load-bearing too, by a different mechanism.
 
-    Without it the remainder after the closing backtick begins the line, and a
-    tail that happens to open with a trailer key would take the whole line out
-    of scoring.
+    Not word splitting: a leading space cannot change which words a line
+    yields. It is TRAILER's `^` anchor. Without the space the remainder after
+    the closing backtick starts the line, so a tail that happens to open with
+    a trailer key matches TRAILER and takes the whole line out of scoring.
     """
     text = (
         "Widen the gate\n\n"
@@ -432,3 +433,24 @@ def test_the_tail_of_a_carried_span_cannot_pass_as_a_trailer() -> None:
         "x`Ref: das und der Bericht"
     )
     assert [f.line_number for f in scan(text, "en", 2)] == [4]
+
+
+def test_a_stray_backtick_in_the_subject_does_not_silence_the_body() -> None:
+    """A span never spans out of the subject, for the reason TRAILER is withheld there.
+
+    The two-line message is the shape where nothing else bounds it: there is
+    no blank line for the paragraph rule to fire on.
+    """
+    text = "Add a 80` wide banner\nDas Ergebnis und der Bericht fehlen"
+    assert [f.line_number for f in scan(text, "en", 2)] == [2]
+
+
+def test_a_span_opened_in_the_body_still_closes_two_lines_later() -> None:
+    """The other direction: the line-1 rule must not reach into body wrapping."""
+    text = (
+        "Widen the gate\n\n"
+        "He wrote `Ref: behebt den Fehler\n"
+        "und das Problem und der Bericht\n"
+        "und die Pruefung` and stopped"
+    )
+    assert scan(text, "en", 2) == ()

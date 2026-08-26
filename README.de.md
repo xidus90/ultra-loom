@@ -575,11 +575,16 @@ umgekehrt der Rest weggefallen wäre. Je Zeile ist nur die
 Schwellenentscheidung — jede Zeile wird an ihrer eigenen Zählung gemessen und
 als eigener Fund gemeldet —, nicht die Zählung selbst.
 
-Ein offener Code-Span endet an einer Leerzeile. Ein Absatzumbruch ist kein
-plausibles Span-Inneres, und diese Grenze zählt: Ohne sie liefe ein einzelner
-verirrter Backtick bis zum Ende der Nachricht und ließe jede Zeile darunter
-stillschweigend durch. Ein Tor, das sich selbst abschaltet, ist schlimmer als
-eines, das zu viel ablehnt.
+Einen offenen Code-Span schließen zwei Regeln, und beide gibt es, weil ein
+davonlaufender Span alles darunter verstummen lässt — ein Tor, das sich selbst
+abschaltet, ist schlimmer als eines, das zu viel ablehnt.
+
+Er endet **an einer Leerzeile**, denn ein Absatzumbruch ist kein plausibles
+Span-Inneres. Und er endet **am Ende der Betreffzeile**, denn ein Span reicht
+nie aus einem Betreff hinaus — aus demselben Grund, aus dem dort die
+Trailer-Ausnahme entfällt. Die zweite Regel begrenzt die zweizeilige
+Nachricht, in der keine Leerzeile existiert, an der die erste greifen könnte,
+und ein verirrter Backtick im Betreff sonst den Rumpf mitnähme.
 
 Ein **Zitat** reicht dagegen nie über Zeilen. Es wird innerhalb seiner Zeile
 gepaart und sonst nirgends, ein ungepaartes `"` — ein Maß wie `80" breit` oder

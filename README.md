@@ -530,10 +530,16 @@ where the same line read alone would have had its tail blanked instead. Only
 the threshold decision is per line — each line is judged on its own count and
 reported as its own finding — not the count itself.
 
-An open code span closes at a blank line. A paragraph break is not a plausible
-span interior, and the bound matters: without it a single stray backtick would
-run to the end of the message and let every line below it through in silence.
-A gate that switches itself off is worse than one that refuses too much.
+An open code span is closed by two rules, and both exist because a span that
+runs away silences everything below it -- a gate that switches itself off is
+worse than one that refuses too much.
+
+It closes **at a blank line**, because a paragraph break is not a plausible
+span interior. And it closes **at the end of the subject line**, because a
+span never spans out of a subject -- the same reason the trailer exemption is
+withheld there. The second rule is what bounds the two-line message, where
+there is no blank line for the first rule to fire on and a stray backtick in
+the subject would otherwise take the body with it.
 
 A **quoted span** does not wrap at all. It is paired within its line and
 nowhere else, so an unpaired `"` — a measurement such as `80" wide`, or a

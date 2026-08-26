@@ -165,6 +165,12 @@ def scan(
             in_code = False
             continue
         scored, in_code = _spans(line, in_code)
+        if number == 1:
+            # A span does not span out of the subject, for the reason TRAILER
+            # is withheld there: neither shape begins in a subject line. This
+            # is what bounds the two-line message, where no blank line follows
+            # to close a stray backtick and the whole body would go quiet.
+            in_code = False
         # After _spans and not before it: an exempted line is still the
         # author's text, and a span it opens goes on into the lines below.
         if any(pattern.search(line) for pattern in allow):
@@ -196,8 +202,9 @@ def _spans(line: str, in_code: bool) -> tuple[str, bool]:
         if not tick:
             # No closing backtick anywhere: the line lies inside the span.
             return " ", True
-        # The space also keeps a tail that happens to read like a trailer key
-        # from being taken for one: a trailer must start its line.
+        # The space is not cosmetic, and not about word splitting either: it
+        # is TRAILER's `^`. Without it the tail starts the line, so a tail
+        # opening with a trailer key would take the line out of scoring.
         text = " " + rest
     text = CODE_SPAN.sub(" ", text)
     in_code = "`" in text
