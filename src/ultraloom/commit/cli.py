@@ -96,6 +96,17 @@ def calibrate_run(
     # runs on every commit and must not pay for `git log`'s machinery.
     from ultraloom.commit.calibrate import THRESHOLDS, HistoryError, read_messages, render
 
+    if count < 1:
+        # Never handed to git: `git log -n -1` means *unlimited*, and zero
+        # prints an empty table. Both answer a typo with something that reads
+        # like a measurement, which is the failure this whole gate argues
+        # against.
+        print(
+            f"ultraloom commit-msg: --calibrate needs a count of at least 1, not {count}",
+            file=stderr,
+        )
+        return EXIT_INTERNAL
+
     try:
         policy = load_commit_policy(root)
     except ConfigError as error:

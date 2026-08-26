@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -46,14 +47,42 @@ def test_an_allow_pattern_takes_a_message_out_of_every_count() -> None:
     assert calibrate(messages, "en", (1, 2), allow) == {1: (1,), 2: ()}
 
 
+# git reads three config files and the environment before it reads the
+# repository, and a developer with `commit.gpgsign = true` or a global
+# `core.hooksPath` would see these tests fail for a reason that has nothing to
+# do with them. Both config paths are sent to the null device, the identity
+# comes from the environment rather than a written config, and GIT_CONFIG_COUNT
+# clears any in-environment settings the caller brought along.
+_ISOLATED = {
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+    "GIT_CONFIG_COUNT": "0",
+    "GIT_AUTHOR_NAME": "Test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "Test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+}
+
+
+def _git(root: Path, *arguments: str) -> None:
+    """One git call that answers the same on every developer's machine."""
+    subprocess.run(
+        # Belt and braces beside the environment: a hooks path set by `-c` on
+        # some wrapper still loses to these, and a repository-local one cannot
+        # exist in a tree this fixture just created.
+        ("git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=", *arguments),
+        cwd=root,
+        check=True,
+        env={**os.environ, **_ISOLATED},
+    )
+
+
 def _repository(root: Path, *messages: str) -> Path:
-    subprocess.run(("git", "init", "-q"), cwd=root, check=True)
-    subprocess.run(("git", "config", "user.email", "t@example.com"), cwd=root, check=True)
-    subprocess.run(("git", "config", "user.name", "Test"), cwd=root, check=True)
+    _git(root, "init", "-q")
     for index, message in enumerate(messages):
         (root / f"file{index}.txt").write_text(str(index), encoding="utf-8")
-        subprocess.run(("git", "add", "-A"), cwd=root, check=True)
-        subprocess.run(("git", "commit", "-q", "-m", message), cwd=root, check=True)
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", message)
     return root
 
 
@@ -107,3 +136,20 @@ def test_a_long_message_is_shown_by_its_subject_alone() -> None:
     render(("Das Ergebnis und der Bericht fehlen\n\nUnd noch ein Absatz",), "en", (2,), out)
     said = out.getvalue()
     assert "Und noch ein Absatz" not in said
+
+
+def test_the_count_is_a_limit_and_not_an_offset(tmp_path: Path) -> None:
+    """Exactly the newest `count`, not one more.
+
+    Asking for one too many is invisible in a repository with fewer commits
+    than the number asked for, which is what every other test here has.
+    """
+    root = _repository(tmp_path, "First one", "Second one", "Third one")
+    assert read_messages(root, 2) == ("Third one\n", "Second one\n")
+
+
+def test_the_subject_skips_the_blank_lines_above_it() -> None:
+    """A message may begin with a blank line, and the row must still name it."""
+    out = io.StringIO()
+    render(("\n\nDas Ergebnis und der Bericht fehlen",), "en", (2,), out)
+    assert "#1  Das Ergebnis und der Bericht fehlen" in out.getvalue()

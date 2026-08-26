@@ -1314,3 +1314,46 @@ def test_commit_msg_calibrate_reaches_the_table(
 
     assert code == 0
     assert "threshold 2: 1 refused" in capsys.readouterr().out
+
+
+def test_commit_msg_refuses_a_message_file_beside_calibrate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Silently ignoring the path would say the file had been checked."""
+    write_config(tmp_path, '[commit]\nlanguage = "en"\n')
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text("Let the gate run one profile\n", encoding="utf-8")
+
+    code = main(["commit-msg", str(message), "--calibrate", "5", "--root", str(tmp_path)])
+
+    assert code == 1
+    assert "takes no message file" in capsys.readouterr().err
+
+
+def test_commit_msg_refuses_a_language_flag_on_the_hook_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The hook's language comes from the config, and it must.
+
+    Accepting the flag here and dropping it would let the message that is
+    being judged name the rule it is judged by.
+    """
+    write_config(tmp_path, '[commit]\nlanguage = "en"\n')
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text("Das Ergebnis und der Bericht fehlen\n", encoding="utf-8")
+
+    code = main(["commit-msg", str(message), "--language", "de", "--root", str(tmp_path)])
+
+    assert code == 1
+    assert "--language belongs to --calibrate" in capsys.readouterr().err
+
+
+def test_commit_msg_refuses_a_count_below_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_config(tmp_path, '[commit]\nlanguage = "en"\n')
+
+    code = main(["commit-msg", "--calibrate", "-1", "--root", str(tmp_path)])
+
+    assert code == 1
+    assert "at least 1" in capsys.readouterr().err

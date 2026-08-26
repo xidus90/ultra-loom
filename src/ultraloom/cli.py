@@ -81,19 +81,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         # would block the commit for a reason it has nothing to do with.
         from ultraloom.commit import cli as commit_cli
 
+        # The two modes share a subcommand, so argparse cannot tell either one
+        # what belongs to it -- `nargs="?"` is what makes one path optional and
+        # it makes it optional for both. Every mismatch below is refused rather
+        # than ignored: an accepted flag that does nothing tells the author
+        # their instruction was taken, and this whole command exists to argue
+        # that silent acceptance is the expensive failure.
+        complaint = _commit_msg_misuse(args)
+        if complaint is not None:
+            print(f"ultraloom commit-msg: {complaint}", file=sys.stderr)
+            return commit_cli.EXIT_INTERNAL
         if args.calibrate is not None:
             return commit_cli.calibrate_run(
                 root, args.calibrate, args.language, sys.stdout, sys.stderr
             )
-        if args.path is None:
-            # argparse cannot say this: the argument is required for the hook
-            # and meaningless for the measurement, and `nargs="?"` is the only
-            # way to have both under one subcommand.
-            print(
-                "ultraloom commit-msg: needs a message file, or --calibrate <n>",
-                file=sys.stderr,
-            )
-            return commit_cli.EXIT_INTERNAL
         return commit_cli.run(Path(args.path), root, sys.stderr)
 
     try:
@@ -107,6 +108,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "check":
         return _check(args.kind, config, args.threshold)
     return _flow_command(args, root, config)
+
+
+def _commit_msg_misuse(args: argparse.Namespace) -> str | None:
+    """What is wrong with this commit-msg invocation, if anything.
+
+    Separate from the dispatch so the four cases stand together and read as
+    one rule rather than as three guards in a row.
+    """
+    if args.calibrate is not None:
+        if args.path is not None:
+            return (
+                f"--calibrate measures the history, so it takes no message file "
+                f"-- drop {args.path}"
+            )
+        return None
+    if args.path is None:
+        return "needs a message file, or --calibrate <n>"
+    if args.language is not None:
+        # The hook's language comes from [commit], and it must: a flag that
+        # overrode it would let a commit choose the rule it is judged by.
+        return (
+            "--language belongs to --calibrate; the hook reads [commit].language "
+            "from the config"
+        )
+    return None
 
 
 def next_run_id(root: Path) -> str:

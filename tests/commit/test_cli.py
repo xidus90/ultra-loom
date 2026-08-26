@@ -205,3 +205,40 @@ def test_calibrate_reports_an_unreadable_history(tmp_path: Path) -> None:
     errors = io.StringIO()
     assert calibrate_run(root, 5, None, io.StringIO(), errors) == 1
     assert "cannot read the history" in errors.getvalue()
+
+
+def test_the_table_carries_exactly_the_four_thresholds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which thresholds are shown is the command's answer, not a detail.
+
+    A zero among them would refuse every non-blank line and report a hundred
+    per cent, and a table nobody pins says nothing when that happens.
+    """
+    root = _project(tmp_path, '[commit]\nlanguage = "en"\n')
+    monkeypatch.setattr(
+        "ultraloom.commit.calibrate.read_messages",
+        lambda _root, _count: ("Das Ergebnis und der Bericht fehlen",),
+    )
+    out = io.StringIO()
+    assert calibrate_run(root, 5, None, out, io.StringIO()) == 0
+    shown = [line.strip() for line in out.getvalue().splitlines() if "threshold" in line]
+    assert [line.split(":")[0] for line in shown] == [
+        "threshold 1",
+        "threshold 2",
+        "threshold 3",
+        "threshold 4",
+    ]
+
+
+def test_a_count_below_one_is_refused_rather_than_handed_to_git(tmp_path: Path) -> None:
+    """`git log -n -1` means unlimited, and zero means an empty table.
+
+    Both are somebody's typo answered with a plausible-looking result, which
+    is the one failure this whole tool argues against.
+    """
+    root = _project(tmp_path, '[commit]\nlanguage = "en"\n')
+    for count in (0, -1):
+        errors = io.StringIO()
+        assert calibrate_run(root, count, None, io.StringIO(), errors) == 1
+        assert "--calibrate needs a count of at least 1" in errors.getvalue()
