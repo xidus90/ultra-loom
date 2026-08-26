@@ -516,10 +516,20 @@ A trailer is the capitalised hyphenated shape — `Co-Authored-By`,
 `Bug`, `BREAKING CHANGE`. Nothing else: a conventional-commit subject such as
 `fix:` or `docs:` is prose and is scored.
 
-A code span that wraps across a line break is exempt only from the opening
-backtick onward: the backticks are paired within one line, so the line that
-opens the span is covered from the backtick to its end, while the tail on the
-next line is read as prose.
+Code spans and quoted spans may wrap across a line break, however many lines
+they run: the check tracks whether a span is open as it walks the message, so
+both halves are exempt and so is any line lying wholly inside. Scoring itself
+stays per line — each line keeps its own count and its own threshold decision;
+only the question of whether a span is open carries over.
+
+A delimiter that pairs with nothing — a backtick or a `"` used as punctuation —
+opens a span, and the rest of that line is read as quoted. That errs toward
+letting a line through rather than refusing it, which is the safe direction.
+Only the double quote delimits, so an apostrophe in `don't` opens nothing.
+
+Lines that begin with `#` never move that state: git wrote them and strips
+them again before the message is stored, so a delimiter there belongs to no
+span the author wrote.
 
 The exemption never applies to line 1. A trailer block does not begin on the
 subject line, while `Ref:` and `Auto-merge:` are perfectly good subjects — and

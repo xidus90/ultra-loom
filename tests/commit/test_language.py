@@ -200,12 +200,13 @@ def test_the_opening_line_of_a_wrapped_span_is_exempt() -> None:
     assert scan(text, "en", 2) == ()
 
 
-def test_the_tail_of_a_wrapped_span_is_still_scored() -> None:
-    """The known limit of the per-line rule, pinned rather than hidden.
+def test_a_closing_backtick_with_no_opener_leaves_its_text_scored() -> None:
+    """The record of the case that used to be the gap, in the form it now takes.
 
-    A leftover backtick can close a span as well as open one, and then the
-    quoted text lies before it, not after. Nothing on the line says which,
-    so the tail of a wrapped span is scored as prose.
+    A leftover backtick can close a span as well as open one. Which it is now
+    comes from the span flag, and here no line before this one opened
+    anything, so the backtick pairs with nothing and the text ahead of it is
+    prose like any other.
     """
     text = "Widen the gate\n\nund der Bericht` shows what the gate printed"
     assert scan(text, "en", 2) != ()
@@ -221,3 +222,106 @@ def test_a_balanced_span_is_left_alone() -> None:
 def test_a_lone_trailing_backtick_strips_nothing() -> None:
     """Nothing follows the backtick, so the line is scored exactly as it reads."""
     assert scan("Der Bericht und das Ergebnis `", "en", 2) != ()
+
+
+def test_the_tail_of_a_wrapped_code_span_is_exempt() -> None:
+    """The half the per-line rule could not reach: quoted text before the backtick."""
+    text = (
+        "Widen the gate\n\n"
+        "The subject was `Ref: behebt den Fehler\n"
+        "und das Problem` and the gate said nothing"
+    )
+    assert scan(text, "en", 2) == ()
+
+
+def test_a_code_span_wrapping_three_lines_is_exempt() -> None:
+    """The middle line lies wholly inside the span and carries no backtick at all."""
+    text = (
+        "Widen the gate\n\n"
+        "The subject was `Ref: behebt den Fehler\n"
+        "und das Problem und der Bericht\n"
+        "und die Pruefung` and the gate said nothing"
+    )
+    assert scan(text, "en", 2) == ()
+
+
+def test_the_opening_line_of_a_wrapped_quote_is_exempt() -> None:
+    """Plain quotes wrap exactly like backticks do."""
+    text = (
+        "Widen the gate\n\n"
+        'He said "behebt den Fehler und das\n'
+        'Problem" and left'
+    )
+    assert scan(text, "en", 2) == ()
+
+
+def test_the_tail_of_a_wrapped_quote_is_exempt() -> None:
+    text = (
+        "Widen the gate\n\n"
+        'He said "es behebt den Fehler\n'
+        'und das Problem" and left'
+    )
+    assert scan(text, "en", 2) == ()
+
+
+def test_a_quote_wrapping_three_lines_is_exempt() -> None:
+    text = (
+        "Widen the gate\n\n"
+        'He said "es behebt den Fehler\n'
+        "und das Problem und der Bericht\n"
+        'und die Pruefung" and left'
+    )
+    assert scan(text, "en", 2) == ()
+
+
+def test_a_lone_backtick_as_punctuation_opens_a_span() -> None:
+    """Nothing pairs with it, so the rest of the line reads as quoted.
+
+    This errs toward letting a line through rather than refusing it, which is
+    the safe direction: a false positive is what teaches --no-verify.
+    """
+    assert scan("Set the width to 80` und der Bericht das", "en", 2) == ()
+
+
+def test_a_lone_quote_as_punctuation_opens_a_span() -> None:
+    assert scan('Set the width to 80" und der Bericht das', "en", 2) == ()
+
+
+def test_an_apostrophe_is_not_a_quote_delimiter() -> None:
+    """Only the double quote delimits; `don't` must not open anything."""
+    assert scan("The gate don't und der Bericht das care", "en", 2) != ()
+
+
+def test_a_git_hint_line_does_not_move_the_span_flags() -> None:
+    """git wrote the `#` lines and strips them again, so their delimiters are not the author's.
+
+    Both directions matter: a stray backtick in a hint must not blank the
+    prose below it, and a span the author opened must survive a hint line
+    sitting inside it.
+    """
+    noise = (
+        "Widen the gate\n\n"
+        "# On branch feat/x -- use `git add` to stage\n"
+        "# Changes not staged for commit: `\n"
+        "Der Bericht und das Ergebnis fehlen"
+    )
+    assert scan(noise, "en", 2) != ()
+
+    spanning = (
+        "Widen the gate\n\n"
+        "He wrote `Ref: behebt den Fehler\n"
+        "# a git hint with a stray ` backtick\n"
+        "und das Problem` and stopped"
+    )
+    assert scan(spanning, "en", 2) == ()
+
+
+def test_an_exempted_line_still_carries_its_span_onward() -> None:
+    """An allowed line is the author's text too, so a span it opens goes on below."""
+    allow = (re.compile("^WIP"),)
+    text = (
+        "Widen the gate\n\n"
+        "WIP `Ref: behebt den Fehler\n"
+        "und das Problem` and stopped"
+    )
+    assert scan(text, "en", 2, allow) == ()

@@ -559,10 +559,22 @@ Ein Trailer ist die großgeschriebene Bindestrichform — `Co-Authored-By`,
 Conventional-Commit-Betreffzeile wie `fix:` oder `docs:` ist Prosa und wird
 gewertet.
 
-Ein Code-Span, der über einen Zeilenumbruch reicht, ist nur ab dem
-öffnenden Backtick ausgenommen: Backticks werden innerhalb einer Zeile
-gepaart, die öffnende Zeile ist also vom Backtick bis zu ihrem Ende gedeckt,
-während der Rest auf der nächsten Zeile als Prosa gelesen wird.
+Code-Spans und Zitate dürfen über einen Zeilenumbruch reichen, über beliebig
+viele Zeilen: Die Prüfung führt beim Durchlaufen der Nachricht mit, ob ein
+Span offen ist, also sind beide Hälften ausgenommen und jede Zeile, die ganz
+darin liegt, ebenso. Gewertet wird weiterhin je Zeile — jede Zeile behält
+ihre eigene Zählung und ihre eigene Schwellenentscheidung; übertragen wird nur
+die Frage, ob ein Span offen ist.
+
+Ein Trennzeichen, das sich mit nichts paart — ein Backtick oder ein `"` als
+Satzzeichen —, öffnet einen Span, und der Rest dieser Zeile gilt als zitiert.
+Das irrt in Richtung Durchlassen statt Ablehnen, und das ist die sichere
+Richtung. Nur das doppelte Anführungszeichen trennt, ein Apostroph in `don't`
+öffnet also nichts.
+
+Zeilen, die mit `#` beginnen, bewegen diesen Zustand nie: git hat sie
+geschrieben und entfernt sie wieder, bevor die Nachricht gespeichert wird, ein
+Trennzeichen dort gehört also zu keinem Span des Autors.
 
 Für Zeile 1 gilt die Ausnahme nie. Ein Trailer-Block beginnt nicht auf der
 Betreffzeile, während `Ref:` und `Auto-merge:` völlig taugliche Betreffs sind —
