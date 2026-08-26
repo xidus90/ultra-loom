@@ -141,3 +141,21 @@ def test_umlauts_are_found_although_the_list_is_ascii(text: str) -> None:
     stopwords carried the count on their own, and passed without the folding.
     """
     assert scan(text, "en", 2) != ()
+
+
+def test_a_hyphenated_trailer_does_not_count() -> None:
+    text = "Fix the gate\n\nSigned-off-by: Der Name und der Andere"
+    assert scan(text, "en", 2) == ()
+
+
+def test_a_listed_unhyphenated_trailer_does_not_count() -> None:
+    for key in ("Fixes", "Closes", "Refs", "Ref", "Cc", "Link", "Bug"):
+        text = f"{key}: das und der Bericht"
+        assert scan(text, "en", 2) == (), key
+
+
+def test_a_conventional_commit_subject_is_not_a_trailer() -> None:
+    """The subject is the line that matters, and for a one-line commit it is all there is."""
+    for subject in ("fix: ", "Fix: ", "docs: ", "chore: ", "Note: "):
+        text = f"{subject}behebt den Fehler und das Problem"
+        assert scan(text, "en", 2) != (), subject

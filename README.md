@@ -505,11 +505,17 @@ Within a line, five shapes are removed before the hits are counted:
 
 | Shape          | Example                     | Why                                |
 | -------------- | --------------------------- | ---------------------------------- |
-| Trailer lines  | `Ref: das und der`          | A key and a value, not prose       |
+| Trailer lines  | `Ref: das und der`          | A git trailer, not prose           |
 | Code spans     | `` `das und der` ``         | Quoted identifiers and output      |
 | Quoted spans   | `He said "das und der"`     | A citation is not the author's own |
 | Path tokens    | `docs/das/und.md`, `der.py` | A filename is not a sentence       |
 | Name particles | `von Neumann`, `de Broglie` | The particle is part of a name     |
+
+A trailer is the capitalised hyphenated shape — `Co-Authored-By`,
+`Signed-off-by` — or one of `Fixes`, `Closes`, `Refs`, `Ref`, `Cc`, `Link`,
+`Bug`. Nothing else: a conventional-commit subject such as `fix:` or `docs:` is
+prose and is scored, because for a one-line commit the subject is the whole
+message.
 
 A name particle is the lowercase word followed by a capitalised one; German
 prose puts an article or a lowercase noun there instead. Without this rule a

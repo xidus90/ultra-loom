@@ -60,7 +60,14 @@ SCISSORS = re.compile(r"^#\s*-+\s*>8\s*-+")
 # Shapes that carry the other language inside an otherwise fine message. All
 # five are removed from a line before it is scored, because a gate with false
 # positives gets routed around with --no-verify and then protects nothing.
-TRAILER = re.compile(r"^[A-Za-z-]+:\s")
+# Only a real git trailer, never a conventional-commit subject. `^\w+:\s`
+# would exempt `fix: ...`, and for a one-line commit the subject is the whole
+# message, so the gate would be off exactly where it matters. What separates a
+# trailer is the capitalised hyphenated shape -- Co-Authored-By, Signed-off-by
+# -- plus the handful of unhyphenated ones git tooling actually writes.
+TRAILER = re.compile(
+    r"^(?:[A-Z][A-Za-z]*(?:-[A-Za-z]+)+|Fixes|Closes|Refs|Ref|Cc|Link|Bug):\s"
+)
 CODE_SPAN = re.compile(r"`[^`]*`")
 QUOTED_SPAN = re.compile(r"\"[^\"]*\"")
 PATH_TOKEN = re.compile(r"\S*(?:[/\\]\S*|\.[A-Za-z0-9]{1,5})(?=\s|$)")
