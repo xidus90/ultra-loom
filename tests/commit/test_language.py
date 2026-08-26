@@ -149,8 +149,8 @@ def test_a_hyphenated_trailer_does_not_count() -> None:
 
 
 def test_a_listed_unhyphenated_trailer_does_not_count() -> None:
-    for key in ("Fixes", "Closes", "Refs", "Ref", "Cc", "Link", "Bug"):
-        text = f"{key}: das und der Bericht"
+    for key in ("Fixes", "Closes", "Refs", "Ref", "Cc", "Link", "Bug", "BREAKING CHANGE"):
+        text = f"Fix the gate\n\n{key}: das und der Bericht"
         assert scan(text, "en", 2) == (), key
 
 
@@ -163,6 +163,19 @@ def test_a_conventional_commit_subject_is_not_a_trailer() -> None:
 
 def test_an_english_fest_is_not_a_finding() -> None:
     text = "Add the fest and the beer fest to the calendar"
+    assert scan(text, "en", 2) == ()
+
+
+def test_no_trailer_is_exempt_on_the_first_line() -> None:
+    """A trailer block never legitimately begins on line 1, so the subject is prose."""
+    for key in ("Ref", "Fixes", "Co-Authored-By", "Auto-merge", "Feature-flag", "BREAKING CHANGE"):
+        text = f"{key}: behebt den Fehler und das Problem"
+        assert scan(text, "en", 2) != (), key
+
+
+def test_a_breaking_change_footer_does_not_count() -> None:
+    """The space defeats the hyphenated shape, but it is a real footer."""
+    text = "Change the gate\n\nBREAKING CHANGE: das Verhalten und der Vertrag aendern sich"
     assert scan(text, "en", 2) == ()
 
 

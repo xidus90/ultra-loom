@@ -547,7 +547,7 @@ Innerhalb einer Zeile werden fünf Formen entfernt, bevor gezählt wird:
 
 | Form            | Beispiel                    | Warum                              |
 | --------------- | --------------------------- | ---------------------------------- |
-| Trailer-Zeilen  | `Ref: das und der`          | Ein git-Trailer, keine Prosa       |
+| Trailer-Zeilen  | `Ref: das und der`          | Ein git-Trailer, keine Prosa (nicht Zeile 1) |
 | Code-Spans      | `` `das und der` ``         | Zitierte Bezeichner und Ausgaben   |
 | Zitate          | `He said "das und der"`     | Ein Zitat ist nicht die eigene Rede|
 | Pfad-Token      | `docs/das/und.md`, `der.py` | Ein Dateiname ist kein Satz        |
@@ -555,9 +555,14 @@ Innerhalb einer Zeile werden fünf Formen entfernt, bevor gezählt wird:
 
 Ein Trailer ist die großgeschriebene Bindestrichform — `Co-Authored-By`,
 `Signed-off-by` — oder eines von `Fixes`, `Closes`, `Refs`, `Ref`, `Cc`,
-`Link`, `Bug`. Sonst nichts: eine Conventional-Commit-Betreffzeile wie `fix:`
-oder `docs:` ist Prosa und wird gewertet, denn bei einem einzeiligen Commit ist
-der Betreff die ganze Nachricht.
+`Link`, `Bug`, `BREAKING CHANGE`. Sonst nichts: eine
+Conventional-Commit-Betreffzeile wie `fix:` oder `docs:` ist Prosa und wird
+gewertet.
+
+Für Zeile 1 gilt die Ausnahme nie. Ein Trailer-Block beginnt nicht auf der
+Betreffzeile, während `Ref:` und `Auto-merge:` völlig taugliche Betreffs sind —
+und bei einem einzeiligen Commit ist der Betreff die ganze Nachricht, eine
+Ausnahme dort schaltete das Tor also genau dort ab, wo es zählt.
 
 Ein Namenspartikel ist das kleingeschriebene Wort gefolgt von einem
 großgeschriebenen; deutsche Prosa setzt dort einen Artikel oder ein

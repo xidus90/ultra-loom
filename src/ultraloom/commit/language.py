@@ -64,13 +64,19 @@ SCISSORS = re.compile(r"^#\s*-+\s*>8\s*-+")
 # Shapes that carry the other language inside an otherwise fine message. All
 # five are removed from a line before it is scored, because a gate with false
 # positives gets routed around with --no-verify and then protects nothing.
-# Only a real git trailer, never a conventional-commit subject. `^\w+:\s`
-# would exempt `fix: ...`, and for a one-line commit the subject is the whole
-# message, so the gate would be off exactly where it matters. What separates a
-# trailer is the capitalised hyphenated shape -- Co-Authored-By, Signed-off-by
-# -- plus the handful of unhyphenated ones git tooling actually writes.
+# Only a real git trailer, never a conventional-commit subject. What separates
+# a trailer is the capitalised hyphenated shape -- Co-Authored-By,
+# Signed-off-by -- plus the handful of unhyphenated ones git tooling and the
+# conventional-commit footer actually write.
+#
+# The pattern alone is not enough, because the shape is not exclusive: `Ref:`
+# and any capitalised hyphenated first word, `Auto-merge:`, are perfectly good
+# subjects too. So the exemption is refused on line 1 outright -- a trailer
+# block never legitimately begins there -- which closes both holes at once and
+# costs nothing real. See _hits.
 TRAILER = re.compile(
-    r"^(?:[A-Z][A-Za-z]*(?:-[A-Za-z]+)+|Fixes|Closes|Refs|Ref|Cc|Link|Bug):\s"
+    r"^(?:[A-Z][A-Za-z]*(?:-[A-Za-z]+)+"
+    r"|Fixes|Closes|Refs|Ref|Cc|Link|Bug|BREAKING CHANGE):\s"
 )
 CODE_SPAN = re.compile(r"`[^`]*`")
 QUOTED_SPAN = re.compile(r"\"[^\"]*\"")
@@ -127,15 +133,19 @@ def scan(
             continue
         if any(pattern.search(line) for pattern in allow):
             continue
-        hits = _hits(line, stopwords)
+        hits = _hits(line, stopwords, is_subject=number == 1)
         if len(hits) >= threshold:
             findings.append(Finding(number, line, hits))
     return tuple(findings)
 
 
-def _hits(line: str, stopwords: frozenset[str]) -> tuple[str, ...]:
-    """The stopwords in one line, after the exempt shapes are removed."""
-    if TRAILER.match(line):
+def _hits(line: str, stopwords: frozenset[str], *, is_subject: bool) -> tuple[str, ...]:
+    """The stopwords in one line, after the exempt shapes are removed.
+
+    `is_subject` withholds the trailer exemption from line 1: no trailer block
+    begins there, and the subject is the line the gate exists for.
+    """
+    if not is_subject and TRAILER.match(line):
         return ()
     stripped = PATH_TOKEN.sub(
         " ", QUOTED_SPAN.sub(" ", CODE_SPAN.sub(" ", NAME_PARTICLE.sub(" ", line)))
