@@ -522,10 +522,16 @@ both halves are exempt and so is any line lying wholly inside. Scoring itself
 stays per line — each line keeps its own count and its own threshold decision;
 only the question of whether a span is open carries over.
 
-A delimiter that pairs with nothing — a backtick or a `"` used as punctuation —
-opens a span, and the rest of that line is read as quoted. That errs toward
-letting a line through rather than refusing it, which is the safe direction.
-Only the double quote delimits, so an apostrophe in `don't` opens nothing.
+An open span closes at a blank line. A paragraph break is not a plausible span
+interior, and the bound matters: a delimiter that pairs with nothing — a
+backtick or a `"` used as punctuation, as in `80" wide` — opens a span, and
+without the bound that span would run to the end of the message and let every
+line below it through in silence. A gate that switches itself off is worse
+than one that refuses too much, so the damage stops at the paragraph.
+
+Within a paragraph, the rest of the line after an unpaired delimiter is read as
+quoted. Only the double quote delimits, so an apostrophe in `don't` opens
+nothing.
 
 Lines that begin with `#` never move that state: git wrote them and strips
 them again before the message is stored, so a delimiter there belongs to no

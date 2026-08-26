@@ -325,3 +325,82 @@ def test_an_exempted_line_still_carries_its_span_onward() -> None:
         "und das Problem` and stopped"
     )
     assert scan(text, "en", 2, allow) == ()
+
+
+def test_an_unpaired_quote_does_not_outlive_its_paragraph() -> None:
+    """A measurement in the subject must not switch the gate off for the message.
+
+    `80" wide` is how people write measurements, not an exotic input. Before
+    the blank-line rule the quote it opens ran to the end of the message and
+    two lines of plain German walked through in silence -- the gate disabling
+    itself, which is the fault this whole feature argues against.
+    """
+    text = (
+        'Add a 80" wide banner\n'
+        "\n"
+        "Das Ergebnis und der Bericht fehlen\n"
+        "Das Verhalten und der Vertrag aendern sich"
+    )
+    findings = scan(text, "en", 2)
+    assert [finding.line_number for finding in findings] == [3, 4]
+
+
+def test_an_unpaired_backtick_does_not_outlive_its_paragraph() -> None:
+    text = (
+        "Add a 80` wide banner\n"
+        "\n"
+        "Das Ergebnis und der Bericht fehlen\n"
+        "Das Verhalten und der Vertrag aendern sich"
+    )
+    findings = scan(text, "en", 2)
+    assert [finding.line_number for finding in findings] == [3, 4]
+
+
+def test_a_span_wrapped_inside_one_paragraph_is_still_exempt() -> None:
+    """The bound is the paragraph, so a span that stays inside one is untouched."""
+    code = (
+        "Widen the gate\n\n"
+        "He wrote `Ref: behebt den Fehler\n"
+        "und das Problem` and stopped"
+    )
+    assert scan(code, "en", 2) == ()
+    quoted = (
+        "Widen the gate\n\n"
+        'He said "es behebt den Fehler\n'
+        'und das Problem" and stopped'
+    )
+    assert scan(quoted, "en", 2) == ()
+
+
+def test_a_span_does_not_wrap_across_a_blank_line() -> None:
+    """A paragraph break is not a plausible span interior, so the span ends there."""
+    code = (
+        "Widen the gate\n\n"
+        "He wrote `Ref: behebt den Fehler\n"
+        "\n"
+        "und das Problem` and stopped"
+    )
+    assert [finding.line_number for finding in scan(code, "en", 2)] == [5]
+    quoted = (
+        "Widen the gate\n\n"
+        'He said "es behebt den Fehler\n'
+        "\n"
+        'und das Problem" and stopped'
+    )
+    assert [finding.line_number for finding in scan(quoted, "en", 2)] == [5]
+
+
+def test_a_path_and_a_name_particle_inside_a_wrapped_span() -> None:
+    """Cheap insurance on the order of the strips: span blanking runs first now."""
+    text = (
+        "Widen the gate\n\n"
+        "He wrote `siehe docs/das/und.md von Neumann und das\n"
+        "Problem und der Bericht` and stopped"
+    )
+    assert scan(text, "en", 2) == ()
+
+
+def test_a_path_and_a_name_particle_outside_a_span() -> None:
+    """Both shapes are still removed where no span is involved, and prose still counts."""
+    assert scan("Report docs/das/und.md by von Neumann to the team", "en", 2) == ()
+    assert scan("Report docs/das/und.md by von Neumann und der Bericht das", "en", 2) != ()

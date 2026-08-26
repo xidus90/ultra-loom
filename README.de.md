@@ -566,11 +566,17 @@ darin liegt, ebenso. Gewertet wird weiterhin je Zeile — jede Zeile behält
 ihre eigene Zählung und ihre eigene Schwellenentscheidung; übertragen wird nur
 die Frage, ob ein Span offen ist.
 
-Ein Trennzeichen, das sich mit nichts paart — ein Backtick oder ein `"` als
-Satzzeichen —, öffnet einen Span, und der Rest dieser Zeile gilt als zitiert.
-Das irrt in Richtung Durchlassen statt Ablehnen, und das ist die sichere
-Richtung. Nur das doppelte Anführungszeichen trennt, ein Apostroph in `don't`
-öffnet also nichts.
+Ein offener Span endet an einer Leerzeile. Ein Absatzumbruch ist kein
+plausibles Span-Inneres, und diese Grenze zählt: Ein Trennzeichen, das sich mit
+nichts paart — ein Backtick oder ein `"` als Satzzeichen, wie in `80" breit` —,
+öffnet einen Span, und ohne die Grenze liefe dieser Span bis zum Ende der
+Nachricht und ließe jede Zeile darunter stillschweigend durch. Ein Tor, das
+sich selbst abschaltet, ist schlimmer als eines, das zu viel ablehnt, der
+Schaden endet also am Absatz.
+
+Innerhalb eines Absatzes gilt der Rest der Zeile nach einem ungepaarten
+Trennzeichen als zitiert. Nur das doppelte Anführungszeichen trennt, ein
+Apostroph in `don't` öffnet also nichts.
 
 Zeilen, die mit `#` beginnen, bewegen diesen Zustand nie: git hat sie
 geschrieben und entfernt sie wieder, bevor die Nachricht gespeichert wird, ein

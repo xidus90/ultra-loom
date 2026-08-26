@@ -151,6 +151,17 @@ def scan(
             # stored, so a delimiter here belongs to no span the author wrote
             # and must not move the flags.
             continue
+        if not line.strip():
+            # A span closes at a paragraph break. Nothing else bounds one, and
+            # unbounded is not a small fault: a lone `"` in `80" wide` -- a
+            # measurement, not an exotic input -- would otherwise open a span
+            # that runs to the end of the message and lets every German line
+            # below it through in silence. A gate that switches itself off is
+            # worse than one that refuses too much, and a paragraph break is
+            # not a plausible span interior.
+            in_code = False
+            in_quote = False
+            continue
         scored, in_code, in_quote = _spans(line, in_code, in_quote)
         # After _spans and not before it: an exempted line is still the
         # author's text, and a span it opens goes on into the lines below.
