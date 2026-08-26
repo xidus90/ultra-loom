@@ -475,6 +475,194 @@ sagt, welchen Werkzeugnamen ein `tools`-Filter sehen soll; voreingestellt ist
 
 Die Entscheidung ist gezeichnet in `docs/flows/policy.de.md`.
 
+## Commit-Nachrichten
+
+    ultraloom commit-msg <Datei>         # was der git-Hook ausführt
+    ultraloom commit-msg --calibrate N   # was eine Schwelle abgelehnt hätte
+
+Eine Historie halb auf Englisch und halb auf Deutsch ist schwer zu lesen und
+noch schwerer zu durchsuchen, und dieses Abdriften ist nie eine Entscheidung —
+es ist ein eiliger Commit nach dem anderen. Dieses Gate fängt das ab, solange
+die Nachricht noch im Editor steht.
+
+**Opt-in, ohne Vorgabe.** Ohne einen `[commit]`-Abschnitt in
+`.ultraloom/config.toml` wird die Nachricht gar nicht erst gelesen. Es gibt
+keine sinnvolle Sprache, gegen die zu prüfen wäre, wenn niemand eine gewählt
+hat — anders als bei `[policy.*]` gilt hier ohne den Abschnitt keine Regel.
+
+### Konfiguration
+
+```toml
+[commit]
+# Pflicht. "en" oder "de" — die Sprache, in der hier committet wird.
+language = "en"
+
+# Optional, Vorgabe 2. Stoppworttreffer je Zeile, ab denen sie abgelehnt wird.
+threshold = 2
+
+# Optional. Zeilen, die dieses Projekt nie gewertet haben will, je mit Grund.
+[[commit.allow]]
+regex  = '^Revert "'
+reason = "A revert repeats the original subject verbatim, whatever it said."
+```
+
+`[[commit.allow]]` nimmt `regex` und `reason`, beide Pflicht, und sonst nichts.
+Anders als bei den Pfadregeln der Policy gibt es kein `match`: Ein Glob hat
+gegen eine Textzeile keine klare Bedeutung — wäre `WIP*` die ganze Zeile oder
+irgendwo darin? — und wer `match` schreibt, bekommt eine Fehlermeldung, statt
+dass es still als Regex übersetzt würde, wo `WIP*` klammheimlich zu `WIP`
+gefolgt von beliebig vielen `P` würde. Das Muster wird beim Lesen der
+Konfiguration übersetzt, ein kaputtes fällt also sofort auf, statt auf den
+Commit zu warten, der zufällig zuerst passt.
+
+Jeder Wert wird beim Lesen geprüft, und ein Fehler wird zusammen mit der Datei
+genannt, aus der er stammt. Ein kaputtes `[commit]` ist Exit 1, nicht Exit 2 —
+siehe die Exit-Codes weiter unten.
+
+### Die Heuristik
+
+Funktionswörter der *anderen* Sprache, die in dieser nichts bedeuten. Für
+`language = "en"` ist die Liste deutsch: `der`, `das`, `und`, `nicht`, `ein`,
+`wird`, `mit`, `von` und rund vierzig weitere. Ausdrücklich nicht darin, jedes
+ein gewöhnliches englisches Wort: `die`, `war`, `man`, `den`, `hat`, `in`,
+`so`, `an`. „Let the process die in the war room" darf kein Befund sein.
+
+Treffer zählen **je Zeile, nicht je Nachricht**. Ein Text, der zwei deutsche
+Seitentitel aufzählt, sind zwei Zeilen mit je einem Treffer — nicht eine Zeile
+mit zweien, was die zweite Lesart ablehnen würde.
+
+Umlaute werden vor dem Vergleich aufgelöst (`ä` zu `ae`, `ö` zu `oe`, `ü` zu
+`ue`, `ß` zu `ss`), `für` und `fuer` sind für die Prüfung also dasselbe Wort,
+während die Wortliste selbst ASCII bleibt.
+
+### Was nie gewertet wird
+
+Zeilen, die mit `#` beginnen, weil git dort seine eigenen Hinweise schreibt,
+und alles unterhalb der Scherenmarke `# ------------------------ >8 ---`, die
+`git commit --verbose` anhängt — der Diff darunter enthält, was immer die
+Änderung berührt, und ihn zu werten hieße, jeden Commit abzulehnen, der
+fremdsprachige Prosa anfasst.
+
+Innerhalb einer Zeile werden fünf Formen entfernt, bevor gezählt wird:
+
+| Form            | Beispiel                    | Warum                              |
+| --------------- | --------------------------- | ---------------------------------- |
+| Trailer-Zeilen  | `Ref: das und der`          | Schlüssel und Wert, keine Prosa    |
+| Code-Spans      | `` `das und der` ``         | Zitierte Bezeichner und Ausgaben   |
+| Zitate          | `He said "das und der"`     | Ein Zitat ist nicht die eigene Rede|
+| Pfad-Token      | `docs/das/und.md`, `der.py` | Ein Dateiname ist kein Satz        |
+| Namenspartikel  | `von Neumann`, `de Broglie` | Der Partikel gehört zum Namen      |
+
+Ein Namenspartikel ist das kleingeschriebene Wort gefolgt von einem
+großgeschriebenen; deutsche Prosa setzt dort einen Artikel oder ein
+kleingeschriebenes Substantiv. Ohne diese Regel erreicht eine Nachricht, die
+zwei solche Namen zitiert, die Schwelle von allein.
+
+### Die Schwelle kalibrieren
+
+Keine Zahl trägt von einem Repository zum nächsten: Ein Projekt, dessen Commits
+Pfade, Paketnamen oder fremdsprachige Titel zitieren, erreicht jede Schwelle
+früher als eines mit schlichter Prosa. Also messen, bevor das Gate angeht.
+
+    ultraloom commit-msg --calibrate 100 --language en --root .
+
+Liest die letzten `N` Nachrichten per `git log` und druckt je Schwelle, wie
+viele sie abgelehnt hätte, samt deren Betreffzeilen. Hier antwortet dieselbe
+Prüfung, die auch der Hook ausführt, `[[commit.allow]]` eingeschlossen — sonst
+meldete die Tabelle Kosten, die das konfigurierte Gate nie verlangt.
+
+`--language` gibt es, weil ein Projekt ohne `[commit]` noch keine Sprache hat,
+die zu lesen wäre — genau darum wird ja zuerst gemessen. Ist ein
+`[commit]`-Abschnitt da, überschreibt das Flag ihn nur für diese Messung. Fehlt
+beides, lehnt der Befehl ab, statt zu raten. Eine Anzahl unter 1 wird ebenfalls
+abgelehnt: `git log -n -1` heißt *unbegrenzt* und `-n 0` druckt eine leere
+Tabelle, beides beantwortete einen Tippfehler mit etwas, das wie ein Ergebnis
+aussieht.
+
+`--language` gehört zu `--calibrate` und zu sonst nichts. `ultraloom commit-msg
+<Datei> --language de` ist ein Fehler, keine Gefälligkeit: Die Sprache des
+Hooks muss aus `[commit]` kommen, denn ein Flag, das sie überschriebe, ließe
+einen Commit die Regel wählen, nach der er beurteilt wird. `--calibrate` neben
+einer Nachrichtendatei wird aus dem milderen Grund abgelehnt, dass ein Flag nie
+still übergangen werden soll.
+
+**Die deutsche Richtung ist nicht kalibriert.** Die Wortliste für
+`language = "de"` ist von Hand geschrieben und nie an einem deutschsprachigen
+Repository gemessen worden. Ihre Schwelle ist ein Anfangswert, kein Ergebnis;
+wer ihr trauen will, misst sie vorher mit `--calibrate`. Die englische Richtung
+ist an der Historie eines Projekts kalibriert — hundert englische Commits gegen
+sechzehn deutsche — und hat hier eine zweite Messung: `--calibrate 100
+--language en` über ultraloom selbst lehnt am 2026-08-26 genau eine der letzten
+hundert Nachrichten ab, bei Schwelle 1 und bei Schwelle 2 dieselbe. Diese
+Nachricht ist ein englischer Commit *über* die Stoppwortliste, der `das, und`
+blank in einer Klammer zitiert; sie ist die ehrliche Grenze der Heuristik und
+der Grund, warum es Code-Spans und `[[commit.allow]]` gibt. Eine geratene Zahl
+als gemessene auszugeben, wäre genau der Fehler, den dieses Werkzeug verhindern
+soll.
+
+### Exit-Codes
+
+    0  die Nachricht ist in Ordnung, oder das Projekt hat kein [commit]
+    1  interner Fehler — kaputte Konfiguration, unlesbare Datei, falsches Flag
+    2  abgelehnt; jede beanstandete Zeile auf stderr
+
+**Eine kaputte Konfiguration ist hier Exit 1 und unter der Policy Exit 2.** Die
+Asymmetrie ist Absicht: Die Policy schützt vor einem Werkzeugaufruf, der nicht
+stattfinden darf, dort ist Schweigen der größere Schaden. Dieses Gate schützt
+einen Stil, und wegen eines Tippfehlers in einer TOML-Datei jeden Commit im
+Repository zu blockieren, ist schlimmer, als einen durchzulassen — der Fehler
+fällt beim nächsten `ultraloom check` auf.
+
+Die Ablehnung nennt jede gefundene Zeile, nicht nur die erste, mit den
+Treffern, die sie gewertet haben:
+
+```
+ultraloom commit-msg: this message reads as German, and commits here are English.
+  line 1: Fix das und der thing
+          hits: das, und, der
+Rewrite it, or use `git commit --no-verify` if this cannot wait. The next
+commit runs this check again.
+```
+
+Alle, weil eine nach der anderen den Autor je Zeile einmal durch den Editor
+schickt und jede Runde eine weitere Gelegenheit ist, nach `--no-verify` zu
+greifen. Und `--no-verify` steht mit Absicht da: Ein Gate, das seinen eigenen
+Ausweg verschweigt, bekommt einen drumherum gebaut. Der Satz danach ist der
+Punkt — der Ausweg gilt für diesen Commit, nicht für den Zweig.
+
+### Der git-Hook
+
+ultraloom liefert das Kommando, nicht den Hook. Drei Zeilen machen einen daraus:
+
+```sh
+#!/usr/bin/env sh
+exec ultraloom commit-msg "$1"
+```
+
+Es gibt kein `install`-Unterkommando. Ein Werkzeug, das ungefragt in `.git/`
+schreibt oder eine git-Einstellung verstellt, ist genau die Sorte
+Nebenwirkung, die dieses Projekt anderswo kritisiert; drei Zeilen in einer
+README sind ehrlicher.
+
+Ein Hook unter `.git/hooks/` ist nicht versioniert und fehlt in einem frischen
+Klon. Also gehört die Datei ins Repository, und git wird einmal je Checkout
+darauf gezeigt:
+
+```sh
+mkdir -p .githooks
+# die drei Zeilen von oben nach .githooks/commit-msg schreiben, dann:
+chmod +x .githooks/commit-msg
+git config core.hooksPath .githooks
+```
+
+`core.hooksPath` ist Konfiguration je Klon und lässt sich nicht committen, die
+`git config`-Zeile gehört also in die Einrichtungsanleitung des Projekts.
+Committet wird der Hook selbst, damit ihn niemand rekonstruieren muss.
+
+Wo ultraloom nicht im `PATH` liegt, schreibt man den Aufruf aus —
+`exec uv run --project . ultraloom commit-msg "$1"` — und bedenkt, dass git den
+Hook vom Wurzelverzeichnis des Arbeitsbaums aus startet.
+
 ## Sitzungs-Hooks
 
     ultraloom hook session-start    # SessionStart

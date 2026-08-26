@@ -434,6 +434,187 @@ says which tool name a `tools` filter should see; it defaults to `Write`.
 
 The decision is drawn in `docs/flows/policy.md`.
 
+## Commit messages
+
+    ultraloom commit-msg <file>          # what the git hook runs
+    ultraloom commit-msg --calibrate N   # what a threshold would have refused
+
+A repository whose history is half English and half German is hard to read and
+harder to search, and the drift is never a decision — it is one hurried commit
+at a time. This is the gate that catches it while the message is still in the
+editor.
+
+**Opt-in, with no default.** Without a `[commit]` section in
+`.ultraloom/config.toml` the message is not even read. There is no sensible
+language to check against that nobody chose, so unlike `[policy.*]` this
+section has no rule that applies without it.
+
+### Configuration
+
+```toml
+[commit]
+# Required. "en" or "de" — the language commits here are written in.
+language = "en"
+
+# Optional, default 2. Stopword hits on one line before it is refused.
+threshold = 2
+
+# Optional. Lines this project never wants scored, each with its reason.
+[[commit.allow]]
+regex  = '^Revert "'
+reason = "A revert repeats the original subject verbatim, whatever it said."
+```
+
+`[[commit.allow]]` takes `regex` and `reason`, both required, and nothing else.
+Unlike the policy's path rules there is no `match`: a glob has no clear meaning
+against a line of text — would `WIP*` be the whole line or somewhere in it? —
+and writing one is refused rather than quietly compiled as a regex, where
+`WIP*` would become `WIP` followed by any number of `P`. The pattern is
+compiled while the config is read, so a broken one fails immediately instead of
+waiting for the commit that happens to match first.
+
+Every value is checked when it is read, and a mistake is named together with
+the file it came from. A broken `[commit]` is exit 1, not exit 2 — see the exit
+codes below.
+
+### The heuristic
+
+Function words of the *other* language that mean nothing in this one. For
+`language = "en"` the list is German: `der`, `das`, `und`, `nicht`, `ein`,
+`wird`, `mit`, `von` and some forty more. Deliberately absent, each an ordinary
+English word: `die`, `war`, `man`, `den`, `hat`, `in`, `so`, `an`. "Let the
+process die in the war room" must not be a finding.
+
+Hits are counted **per line, not per message**. A body listing two German page
+titles is two lines of one hit each, not one line of two — and the second
+reading would refuse it.
+
+Umlauts are folded before matching (`ä` to `ae`, `ö` to `oe`, `ü` to `ue`, `ß`
+to `ss`), so `für` and `fuer` are the same word to the check while the word
+list itself stays ASCII.
+
+### What is never scored
+
+Lines starting with `#`, because git writes its own hints there, and everything
+below the `# ------------------------ >8 ---` scissors that `git commit
+--verbose` adds — the diff below it carries whatever the change touched, and
+scoring it would refuse every commit that goes near prose in the other
+language.
+
+Within a line, five shapes are removed before the hits are counted:
+
+| Shape          | Example                     | Why                                |
+| -------------- | --------------------------- | ---------------------------------- |
+| Trailer lines  | `Ref: das und der`          | A key and a value, not prose       |
+| Code spans     | `` `das und der` ``         | Quoted identifiers and output      |
+| Quoted spans   | `He said "das und der"`     | A citation is not the author's own |
+| Path tokens    | `docs/das/und.md`, `der.py` | A filename is not a sentence       |
+| Name particles | `von Neumann`, `de Broglie` | The particle is part of a name     |
+
+A name particle is the lowercase word followed by a capitalised one; German
+prose puts an article or a lowercase noun there instead. Without this rule a
+message citing two such names reaches the threshold on its own.
+
+### Calibrating the threshold
+
+No number carries from one repository to the next: a project whose commits
+quote paths, package names or foreign titles reaches any threshold sooner than
+one whose commits are plain prose. So measure before turning the gate on.
+
+    ultraloom commit-msg --calibrate 100 --language en --root .
+
+It reads the last `N` messages with `git log` and prints, per threshold, how
+many it would have refused and their subjects. The same scan the hook runs
+answers here, `[[commit.allow]]` included, or the table would report a cost the
+configured gate never charges.
+
+`--language` exists because a project that has not written `[commit]` yet has
+no language to read — which is the whole point of measuring first. With a
+`[commit]` section present the flag overrides it for this measurement only.
+Given neither, the command refuses rather than guessing. A count below 1 is
+refused too: `git log -n -1` means *unlimited* and `-n 0` prints an empty
+table, so either would answer a typo with something that reads like a result.
+
+`--language` belongs to `--calibrate` and to nothing else. `ultraloom
+commit-msg <file> --language de` is an error, not a courtesy: the hook's
+language must come from `[commit]`, because a flag that overrode it would let a
+commit choose the rule it is judged by. `--calibrate` beside a message file is
+refused for the milder reason that a flag should never be silently ignored.
+
+**The German direction is not calibrated.** The word list for `language = "de"`
+was written by hand and never measured against a German-language repository.
+Its threshold is a starting point, not a result; measure it with `--calibrate`
+before trusting it. The English direction was calibrated against one project's
+history — a hundred English commits against sixteen German ones — and has a
+second reading here: `--calibrate 100 --language en` over ultraloom itself on
+2026-08-26 refuses exactly one of the last hundred messages, the same one at
+threshold 1 and at threshold 2. That message is an English commit *about* the
+stopword list which cites `das, und` bare in parentheses; it is the honest
+limit of the heuristic, and the reason code spans and `[[commit.allow]]` exist.
+Publishing a guessed number as a measured one would be exactly the failure this
+tool argues against.
+
+### Exit codes
+
+    0  the message is fine, or the project has no [commit] section
+    1  internal error — a broken config, an unreadable file, a misused flag
+    2  refused; every offending line on stderr
+
+**A broken configuration is exit 1 here, and exit 2 under the policy.** The
+asymmetry is deliberate: the policy guards against a tool call that must not
+happen, so silence there is the larger harm. This gate guards a style, and
+blocking every commit in a repository over a typo in a TOML file is worse than
+letting one through — the mistake surfaces at the next `ultraloom check`.
+
+The refusal names every line it found, not just the first, with the hits that
+scored it:
+
+```
+ultraloom commit-msg: this message reads as German, and commits here are English.
+  line 1: Fix das und der thing
+          hits: das, und, der
+Rewrite it, or use `git commit --no-verify` if this cannot wait. The next
+commit runs this check again.
+```
+
+All of them, because one at a time sends the author back through the editor per
+line, and each trip is another chance to reach for `--no-verify`. And
+`--no-verify` is named on purpose: a gate that hides its own way out gets one
+built around it. The sentence after it is the point — the escape is for this
+commit, not for the branch.
+
+### The git hook
+
+ultraloom ships the command, not the hook. Three lines make it one:
+
+```sh
+#!/usr/bin/env sh
+exec ultraloom commit-msg "$1"
+```
+
+There is no `install` subcommand. A tool that writes into `.git/` or changes a
+git setting unasked is the kind of side effect this project criticises
+elsewhere; three lines in a README are honester.
+
+A hook under `.git/hooks/` is not versioned and is missing from a fresh clone,
+so keep the file in the repository instead and point git at it once per
+checkout:
+
+```sh
+mkdir -p .githooks
+# write the three lines above to .githooks/commit-msg, then:
+chmod +x .githooks/commit-msg
+git config core.hooksPath .githooks
+```
+
+`core.hooksPath` is per-clone configuration and cannot be committed, so the
+`git config` line belongs in the project's setup instructions. What is
+committed is the hook itself, so nobody has to reconstruct it.
+
+Where ultraloom is not on `PATH`, spell the invocation out —
+`exec uv run --project . ultraloom commit-msg "$1"` — and remember that git
+runs the hook from the top of the working tree.
+
 ## Session hooks
 
     ultraloom hook session-start    # SessionStart

@@ -78,6 +78,23 @@ lehnte das Gate jeden Commit ab, der deutschsprachige Dateien anfasst.
 **Kommentarzeilen zählen nicht.** git schreibt seine Hinweise mit `#` in die
 Datei; sie sind nicht die Nachricht.
 
+**Zweite Messung, an dieser Historie.** `ultraloom commit-msg --calibrate 100
+--language en --root .` über ultraloom selbst, am 2026-08-26: von hundert
+Nachrichten lehnt die Heuristik **genau eine** ab — bei Schwelle 1 und bei
+Schwelle 2 dieselbe, ab Schwelle 3 keine mehr.
+
+Die abgelehnte ist `8e9c13d` „Make the umlaut test actually depend on folding".
+Sie handelt von der Stoppwortliste und zitiert `das, und` blank in einer
+Klammer, ohne Backticks. Das ist der ehrliche Grenzfall: ein englischer Commit,
+der über deutsche Wörter spricht. Genau dafür gibt es Code-Spans und
+`[[commit.allow]]`.
+
+Der Befund stützt die Vorgabe nur halb. Schwelle 2 kostet hier dasselbe wie
+Schwelle 1 — der Abstand, den space' Historie zeigt, taucht in dieser nicht
+auf, weil ultraloom keine deutschen Seitentitel in Commits zitiert. Die Vorgabe
+bleibt bei zwei, weil space' Messung sie trägt; diese hier widerspricht ihr
+nicht, bestätigt sie aber auch nicht.
+
 ## Konfiguration
 
     [commit]
