@@ -126,13 +126,17 @@ def _allow(item: Mapping[str, Any], path: Path, index: int) -> re.Pattern[str]:
             f"{path}: {where} has no `match` -- remove it and write a `regex`; unlike "
             "the policy's path rules a glob has no clear meaning against a line of text"
         )
+    # Before the missing-`regex` check and not after it: a lone `regx = "..."`
+    # is *why* the `regex` is missing, and "needs a `regex`" sends its author
+    # back to a line that appears to have one. `match` keeps its own message
+    # above, because there the key is known and the advice is specific.
+    _refuse_unknown(item, _ALLOW_KEYS, where, path)
+
     if "regex" not in item:
         raise ConfigError(
             f"{path}: {where} needs a `regex`; unlike the policy's path rules there is "
             "no `match`, because a glob has no clear meaning against a line of text"
         )
-
-    _refuse_unknown(item, _ALLOW_KEYS, where, path)
 
     reason = item.get("reason")
     if not isinstance(reason, str) or not reason:

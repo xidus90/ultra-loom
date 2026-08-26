@@ -124,11 +124,27 @@ def test_an_unknown_commit_key_is_refused_by_name(tmp_path: Path) -> None:
 
 
 def test_an_unknown_allow_key_is_refused_by_name(tmp_path: Path) -> None:
+    """The typo is the reason the `regex` is missing, so the typo has to be the message.
+
+    A lone `regx` is the mistake a person actually makes; answering it with
+    "needs a `regex`" sends the author back to a line that appears to have one.
+    """
     root = _write(
         tmp_path,
         '[commit]\nlanguage = "en"\n\n[[commit.allow]]\n'
-        'regx = "^Fixes"\nregex = "^Fixes"\nreason = "a trailer"\n',
+        'regx = "^Fixes"\nreason = "a trailer"\n',
     )
     with pytest.raises(ConfigError) as error:
         load_commit_policy(root)
     assert "'regx'" in str(error.value)
+
+
+def test_an_allow_entry_with_no_pattern_key_still_asks_for_a_regex(tmp_path: Path) -> None:
+    """Nothing was mistyped here, so naming an unknown key would say nothing."""
+    root = _write(
+        tmp_path,
+        '[commit]\nlanguage = "en"\n\n[[commit.allow]]\nreason = "a trailer"\n',
+    )
+    with pytest.raises(ConfigError) as error:
+        load_commit_policy(root)
+    assert "needs a `regex`" in str(error.value)
