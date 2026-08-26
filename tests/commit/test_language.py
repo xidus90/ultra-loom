@@ -164,3 +164,9 @@ def test_a_conventional_commit_subject_is_not_a_trailer() -> None:
 def test_an_english_fest_is_not_a_finding() -> None:
     text = "Add the fest and the beer fest to the calendar"
     assert scan(text, "en", 2) == ()
+
+
+def test_a_german_still_is_not_a_finding() -> None:
+    """`still` is ordinary German -- quiet -- and reaches the threshold on one word twice."""
+    text = "Lasse den Prozess still laufen und still beenden"
+    assert scan(text, "de", 2) == ()

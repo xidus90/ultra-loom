@@ -23,6 +23,10 @@ LANGUAGES: tuple[Language, ...] = ("en", "de")
 # war, man, den, hat, in, so, an, fest. "Let the process die in the war room"
 # must not be a finding, and neither must "Add the beer fest to the calendar".
 #
+# The rule binds in both directions, and the English list is where it is easier
+# to forget: deliberately absent from it, each a normal German word, are still,
+# was, will, fast, bald, hier, rate, boot and eben.
+#
 # The German list is calibrated: in one project's history, a hundred English
 # commits against sixteen German ones, and these are the words that separate
 # them. The English list is not -- see the spec's "Grenzen".
@@ -47,7 +51,7 @@ STOPWORDS: Mapping[Language, frozenset[str]] = {
             "the", "and", "with", "this", "that", "from", "which", "into",
             "there", "their", "would", "should", "could", "because", "while",
             "about", "against", "between", "through", "without", "instead",
-            "rather", "still", "already", "every", "each", "again",
+            "rather", "already", "every", "each", "again",
         }
     ),
 }
