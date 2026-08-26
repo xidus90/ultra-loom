@@ -559,6 +559,11 @@ Ein Trailer ist die großgeschriebene Bindestrichform — `Co-Authored-By`,
 Conventional-Commit-Betreffzeile wie `fix:` oder `docs:` ist Prosa und wird
 gewertet.
 
+Ein Code-Span, der über einen Zeilenumbruch reicht, ist nur ab dem
+öffnenden Backtick ausgenommen: Backticks werden innerhalb einer Zeile
+gepaart, die öffnende Zeile ist also vom Backtick bis zu ihrem Ende gedeckt,
+während der Rest auf der nächsten Zeile als Prosa gelesen wird.
+
 Für Zeile 1 gilt die Ausnahme nie. Ein Trailer-Block beginnt nicht auf der
 Betreffzeile, während `Ref:` und `Auto-merge:` völlig taugliche Betreffs sind —
 und bei einem einzeiligen Commit ist der Betreff die ganze Nachricht, eine

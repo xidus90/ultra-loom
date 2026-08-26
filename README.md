@@ -516,6 +516,11 @@ A trailer is the capitalised hyphenated shape — `Co-Authored-By`,
 `Bug`, `BREAKING CHANGE`. Nothing else: a conventional-commit subject such as
 `fix:` or `docs:` is prose and is scored.
 
+A code span that wraps across a line break is exempt only from the opening
+backtick onward: the backticks are paired within one line, so the line that
+opens the span is covered from the backtick to its end, while the tail on the
+next line is read as prose.
+
 The exemption never applies to line 1. A trailer block does not begin on the
 subject line, while `Ref:` and `Auto-merge:` are perfectly good subjects — and
 for a one-line commit the subject is the whole message, so an exemption there

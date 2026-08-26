@@ -183,3 +183,41 @@ def test_a_german_still_is_not_a_finding() -> None:
     """`still` is ordinary German -- quiet -- and reaches the threshold on one word twice."""
     text = "Lasse den Prozess still laufen und still beenden"
     assert scan(text, "de", 2) == ()
+
+
+def test_the_opening_line_of_a_wrapped_span_is_exempt() -> None:
+    """CODE_SPAN works per line, so a span that wraps never sees its closing backtick.
+
+    This is the shape a careful author writes: the foreign example is quoted,
+    and the line break falls inside the quotes. Refusing it is the failure the
+    spec calls fatal.
+    """
+    text = (
+        "Widen the gate\n\n"
+        "real trailer key and a perfectly good subject: `Ref: behebt den Fehler und das\n"
+        "Problem` and any capitalised hyphenated first word"
+    )
+    assert scan(text, "en", 2) == ()
+
+
+def test_the_tail_of_a_wrapped_span_is_still_scored() -> None:
+    """The known limit of the per-line rule, pinned rather than hidden.
+
+    A leftover backtick can close a span as well as open one, and then the
+    quoted text lies before it, not after. Nothing on the line says which,
+    so the tail of a wrapped span is scored as prose.
+    """
+    text = "Widen the gate\n\nund der Bericht` shows what the gate printed"
+    assert scan(text, "en", 2) != ()
+
+
+def test_a_balanced_span_is_left_alone() -> None:
+    """The rule must not reach back into a line whose backticks all pair up."""
+    assert scan("Report `das und der` in the output", "en", 2) == ()
+    # Prose after a balanced span is still prose, and still counted.
+    assert scan("Report `x` und der Bericht das", "en", 2) != ()
+
+
+def test_a_lone_trailing_backtick_strips_nothing() -> None:
+    """Nothing follows the backtick, so the line is scored exactly as it reads."""
+    assert scan("Der Bericht und das Ergebnis `", "en", 2) != ()

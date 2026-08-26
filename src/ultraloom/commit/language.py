@@ -79,6 +79,22 @@ TRAILER = re.compile(
     r"|Fixes|Closes|Refs|Ref|Cc|Link|Bug|BREAKING CHANGE):\s"
 )
 CODE_SPAN = re.compile(r"`[^`]*`")
+
+# A code span that wraps across a line break. CODE_SPAN pairs backticks
+# within one line, so the opening half of a wrapped span never sees a closing
+# backtick and the quoted text is scored as prose -- a refusal earned by
+# quoting the example correctly, which is how a gate teaches --no-verify.
+#
+# Applied after CODE_SPAN, a backtick left over can only be one that opens a
+# span, so the rest of the line is quoted text. Per-line scoring stays
+# intact: the threshold rule depends on lines being independent, and this
+# needs nothing from the line before.
+#
+# The closing half is not covered, and cannot be without that state: there
+# the quoted text lies *before* the leftover backtick, and nothing on the
+# line says which of the two it is. See
+# test_the_tail_of_a_wrapped_span_is_still_scored.
+OPEN_SPAN = re.compile(r"`.*$")
 QUOTED_SPAN = re.compile(r"\"[^\"]*\"")
 PATH_TOKEN = re.compile(r"\S*(?:[/\\]\S*|\.[A-Za-z0-9]{1,5})(?=\s|$)")
 
@@ -147,8 +163,10 @@ def _hits(line: str, stopwords: frozenset[str], *, is_subject: bool) -> tuple[st
     """
     if not is_subject and TRAILER.match(line):
         return ()
-    stripped = PATH_TOKEN.sub(
-        " ", QUOTED_SPAN.sub(" ", CODE_SPAN.sub(" ", NAME_PARTICLE.sub(" ", line)))
-    )
+    stripped = NAME_PARTICLE.sub(" ", line)
+    stripped = CODE_SPAN.sub(" ", stripped)
+    stripped = OPEN_SPAN.sub(" ", stripped)
+    stripped = QUOTED_SPAN.sub(" ", stripped)
+    stripped = PATH_TOKEN.sub(" ", stripped)
     folded = stripped.lower().translate(_FOLD)
     return tuple(word for word in _WORD.findall(folded) if word in stopwords)
