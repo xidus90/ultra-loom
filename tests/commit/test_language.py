@@ -512,8 +512,16 @@ def test_spanish_prose_is_refused_where_commits_are_english() -> None:
 
 
 def test_portuguese_prose_is_refused_where_commits_are_english() -> None:
-    findings = scan("Fix\n\nCorrige o erro que aparece com a entrada", "en", 2)
+    # A realistic sentence rather than a short contrived one. The contrived
+    # version cleared the threshold with exactly two hits, so it measured the
+    # threshold rather than the heuristic: any later trim of the list would
+    # have turned it red for a reason that had nothing to do with Portuguese
+    # being detectable. A sentence of the length a commit body actually has
+    # carries four hits -- de, para, que, com -- and holds that margin.
+    body = "Ajusta o tratamento de erros para que a leitura nao falhe com ficheiros grandes"
+    findings = scan(f"Fix\n\n{body}", "en", 2)
     assert findings and findings[0].line_number == 3
+    assert len(findings[0].hits) == 4
 
 
 def test_french_prose_is_refused_where_commits_are_english() -> None:
@@ -554,7 +562,8 @@ def test_the_lexicon_is_not_fitted_to_the_words_of_its_own_tests() -> None:
     archivo only where the subject is files -- so it generalises to nothing,
     inflates the list and carries a fresh homograph risk into every language
     nobody has checked yet. Each word below was once in the list, and four of
-    them were the words that made this suite's Portuguese sentence fire.
+    them once carried this suite's Portuguese sentence over the threshold,
+    which is why that sentence was rewritten to fire on function words alone.
     """
     content_words = {
         "aparece", "corrige", "entrada", "archivo", "erro", "ficheiro",
