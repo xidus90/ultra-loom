@@ -454,3 +454,55 @@ def test_a_span_opened_in_the_body_still_closes_two_lines_later() -> None:
         "und die Pruefung` and stopped"
     )
     assert scan(text, "en", 2) == ()
+
+
+def test_two_words_of_a_non_latin_script_are_a_finding() -> None:
+    findings = scan("Fix the parser\n\n修复解析 器错误", "en", 2)
+    assert findings and findings[0].line_number == 3
+
+
+def test_a_single_quoted_term_stays_below_the_threshold() -> None:
+    # One term is a citation, not a sentence -- the shape a hook must let pass.
+    assert scan("Rename the 北京 constant", "en", 2) == ()
+
+
+def test_a_script_run_counts_once_however_long_it_is() -> None:
+    # Counting characters would put every Chinese word over the threshold at once.
+    findings = scan("Fix\n\n修复解析器错误修复", "en", 2)
+    assert findings == ()
+
+
+def test_latin_with_diacritics_is_not_a_script_hit() -> None:
+    assert scan("Add a café fixture and a naïve retry", "en", 2) == ()
+
+
+def test_a_script_hit_obeys_the_span_exemption() -> None:
+    assert scan("Rename `修复 解析` to parse", "en", 2) == ()
+
+
+def test_a_script_hit_obeys_an_allow_rule() -> None:
+    rule = (re.compile(r"^Sample: "),)
+    assert scan("Fix\n\nSample: 修复 解析", "en", 2, rule) == ()
+
+
+def test_a_script_hit_is_scored_for_a_german_target_too() -> None:
+    # The Cyrillic letters that look Latin here are the test data.
+    findings = scan("Fehler beheben\n\nисправление ошибки", "de", 2)  # noqa: RUF001
+    assert findings and findings[0].line_number == 3
+
+
+def test_each_covered_script_produces_hits() -> None:
+    samples = {
+        "Han": "修复 解析",
+        "Hiragana": "これは それは",
+        "Katakana": "パーサ エラー",
+        "Hangul": "파서 오류",
+        "Cyrillic": "исправление ошибки",
+        "Arabic": "إصلاح الخطأ",
+        "Hebrew": "תיקון שגיאה",
+        "Greek": "διόρθωση σφάλματος",
+        "Devanagari": "त्रुटि सुधार",
+        "Thai": "แก้ไข ข้อผิด",
+    }
+    for name, text in samples.items():
+        assert scan(f"Fix\n\n{text}", "en", 2), name

@@ -7,6 +7,7 @@ finding reads this module and nothing else.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
@@ -119,6 +120,11 @@ _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 # every entry keeps one list instead of two that can drift.
 _FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 
+# A run of foreign script is worth one hit, and the hit string is the run
+# itself. Cut here so a message quoting a whole paragraph does not print that
+# paragraph back in the refusal; nothing else depends on the length.
+_RUN_LIMIT = 12
+
 
 @dataclass(frozen=True, slots=True)
 class Finding:
@@ -135,7 +141,7 @@ def scan(
     threshold: int,
     allow: tuple[re.Pattern[str], ...] = (),
 ) -> tuple[Finding, ...]:
-    """Every line whose stopword count reaches the threshold.
+    """Every line whose hit count reaches the threshold.
 
     Per line and not per message: a body listing two page titles in the other
     language is two lines of one hit, not one line of two, and the second
@@ -216,7 +222,11 @@ def _spans(line: str, in_code: bool) -> tuple[str, bool]:
 
 
 def _hits(line: str, stopwords: frozenset[str], *, is_subject: bool) -> tuple[str, ...]:
-    """The stopwords in one line, after the exempt shapes are removed.
+    """The hits in one line, after the exempt shapes are removed.
+
+    A hit is a stopword of the other language or a run of letters in a
+    non-Latin script; the two weigh the same, so the threshold, the
+    per-line counting and every exemption read one kind of evidence.
 
     Takes the line _spans has already blanked, so what arrives here is the
     author's own prose and nothing quoted.
@@ -229,4 +239,58 @@ def _hits(line: str, stopwords: frozenset[str], *, is_subject: bool) -> tuple[st
     stripped = NAME_PARTICLE.sub(" ", line)
     stripped = PATH_TOKEN.sub(" ", stripped)
     folded = stripped.lower().translate(_FOLD)
-    return tuple(word for word in _WORD.findall(folded) if word in stopwords)
+    words = tuple(word for word in _WORD.findall(folded) if word in stopwords)
+    # Scored on what _spans and the strippers above left, so a foreign
+    # script inside a code span, a path or a trailer is exempt by the same
+    # machinery that exempts a stopword there.
+    return words + _script_runs(stripped)
+
+
+def _script(char: str) -> str:
+    """The script of one letter, empty for Latin and for anything not a letter.
+
+    Read off `unicodedata.name()` rather than codepoint ranges: the name
+    begins with the script -- CYRILLIC, DEVANAGARI, THAI -- so one lookup
+    covers every script at once, where ranges would be a table per script that
+    has to be kept correct against each Unicode revision. The lookup is C and
+    runs once per character of a commit message, which is not a size where the
+    difference is measurable.
+    """
+    if not unicodedata.category(char).startswith("L"):
+        return ""
+    script, _, _ = unicodedata.name(char, "").partition(" ")
+    return "" if script == "LATIN" else script
+
+
+def _script_runs(line: str) -> tuple[str, ...]:
+    """One entry per run of letters in a single non-Latin script.
+
+    Per run and never per character: a Chinese word is a handful of characters
+    and would clear any usable threshold on its own, so the gate would refuse
+    every message that names one. A run is a word, and a word is one hit --
+    the same weight a stopword carries, which is why everything already built
+    around stopword hits applies to these unchanged.
+    """
+    runs: list[str] = []
+    current: list[str] = []
+    script = ""
+
+    for char in line:
+        if current and unicodedata.category(char).startswith("M"):
+            # A combining mark spells the letter in front of it. Dropping it
+            # out of the run would split Devanagari and Thai words into one
+            # run per consonant and multiply their weight.
+            current.append(char)
+            continue
+        found = _script(char)
+        if found and found == script:
+            current.append(char)
+            continue
+        if current:
+            runs.append("".join(current))
+        current = [char] if found else []
+        script = found
+    if current:
+        runs.append("".join(current))
+
+    return tuple(run[:_RUN_LIMIT] for run in runs)
