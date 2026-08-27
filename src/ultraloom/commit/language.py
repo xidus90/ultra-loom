@@ -16,45 +16,157 @@ type Language = Literal["en", "de"]
 
 LANGUAGES: tuple[Language, ...] = ("en", "de")
 
-# Function words of the other language that mean nothing in the target one.
-# Presence is evidence; a word that is also ordinary English is not, however
-# German it feels.
+# Function words of the other languages that mean nothing in the target one.
+# Presence is evidence; a word that is also ordinary in the target is not,
+# however foreign it feels.
 #
-# Deliberately absent from the German list, each a normal English word: die,
-# war, man, den, hat, in, so, an, fest. "Let the process die in the war room"
-# must not be a finding, and neither must "Add the beer fest to the calendar".
+# Only one of these sources is calibrated: the German list below was read off
+# one real project history -- a hundred English commits against sixteen German
+# ones -- and holds the words that separated them. Everything else here, the
+# English list and the merged Romance list alike, is a starting point written
+# from the languages themselves and measured against no corpus. See the spec's
+# "Grenzen".
 #
-# The rule binds in both directions, and the English list is where it is easier
-# to forget: deliberately absent from it, each a normal German word, are still,
-# was, will, fast, bald, hier, rate, boot and eben.
+# The filter against the target language is not curation but code: _ORDINARY
+# names each target's own everyday words, and the union below is relieved of
+# them when it is assembled. A source list added later therefore cannot smuggle
+# back in what was excluded here, which hand-pruning every list would leave to
+# vigilance.
 #
-# The German list is calibrated: in one project's history, a hundred English
-# commits against sixteen German ones, and these are the words that separate
-# them. The English list is not -- see the spec's "Grenzen".
-STOPWORDS: Mapping[Language, frozenset[str]] = {
-    # Searched when the target language is English.
+# The filter is per target and not global. `in` is unusable against English and
+# against German both; `come` only against English, where German prose never
+# writes it.
+_ORDINARY: Mapping[Language, frozenset[str]] = {
+    # What English prose itself writes -- including the borrowings, which is
+    # why le, lo, plus, sans and tout stand here rather than counting as
+    # evidence of French.
     "en": frozenset(
         {
-            "der", "das", "dem", "des", "und", "oder", "nicht", "ein", "eine",
-            "einen", "einem", "eines", "einer", "sind", "waren", "haben",
-            "wird", "wurde", "werden", "mit", "von", "fuer", "ueber", "aus",
-            "nach", "ohne", "beim", "zum", "zur", "zu", "auf", "durch",
-            "gegen", "dass", "weil", "wenn", "schon", "noch", "jeden", "jede",
-            "jeder", "wieder", "statt", "samt", "unter", "zusammen", "heraus",
-            "ihn",
+            "a", "an", "as", "at", "all", "and", "any", "are", "back", "be",
+            "been", "both", "by", "can", "care", "come", "den", "did", "die",
+            "do", "does", "down", "each", "even", "fest", "first", "for",
+            "from", "get", "had", "has", "hat", "have", "her", "here", "him",
+            "his", "how", "if", "in", "into", "is", "it", "its", "just",
+            "last", "le", "less", "lo", "made", "make", "man", "many", "may",
+            "more", "most", "much", "new", "next", "no", "not", "now", "of",
+            "off", "old", "on", "one", "only", "or", "other", "our", "out",
+            "over", "per", "plus", "put", "run", "same", "sans", "set", "so",
+            "some", "son", "still", "such", "tan", "than", "that", "the",
+            "then", "there", "these", "this", "those", "to", "tout", "two",
+            "under", "up", "us", "use", "used", "very", "war", "was", "way",
+            "we", "were", "what", "when", "where", "which", "who", "why",
+            "will", "with", "would", "you",
         }
     ),
-    # Searched when the target language is German. Function words with no
-    # German homograph. Not calibrated against a corpus -- the threshold for
-    # this direction is a starting point, not a measurement.
+    # The same for German. Written in ASCII like every list here, because the
+    # text is folded to ASCII before it is looked up -- see _FOLD.
     "de": frozenset(
         {
-            "the", "and", "with", "this", "that", "from", "which", "into",
-            "there", "their", "would", "should", "could", "because", "while",
-            "about", "against", "between", "through", "without", "instead",
-            "rather", "already", "every", "each", "again",
+            "alle", "als", "also", "am", "an", "auch", "auf", "aus", "bei",
+            "bis", "da", "dann", "das", "dass", "dem", "den", "der", "des",
+            "die", "doch", "du", "durch", "ein", "eine", "einen", "er", "es",
+            "fuer", "gegen", "gut", "haben", "hat", "hier", "ich", "ihr", "im",
+            "in", "ist", "jetzt", "kann", "mal", "man", "mehr", "mit", "muss",
+            "nach", "neu", "nicht", "noch", "nun", "nur", "oder", "ohne",
+            "per", "plus", "schon", "sehr", "sein", "sie", "sind", "so",
+            "soll", "ueber", "um", "und", "unter", "vor", "von", "war",
+            "waren", "was", "weil", "wenn", "werden", "wie", "wir", "wird",
+            "wurde", "zu",
         }
     ),
+}
+
+# Calibrated -- see above. Searched when the target language is English.
+_GERMAN_SOURCE = frozenset(
+    {
+        "der", "das", "dem", "des", "und", "oder", "nicht", "ein", "eine",
+        "einen", "einem", "eines", "einer", "sind", "waren", "haben",
+        "wird", "wurde", "werden", "mit", "von", "fuer", "ueber", "aus",
+        "nach", "ohne", "beim", "zum", "zur", "zu", "auf", "durch",
+        "gegen", "dass", "weil", "wenn", "schon", "noch", "jeden", "jede",
+        "jeder", "wieder", "statt", "samt", "unter", "zusammen", "heraus",
+        "ihn",
+    }
+)
+
+# Not calibrated. Searched when the target language is German.
+_ENGLISH_SOURCE = frozenset(
+    {
+        "the", "and", "with", "this", "that", "from", "which", "into",
+        "there", "their", "would", "should", "could", "because", "while",
+        "about", "against", "between", "through", "without", "instead",
+        "rather", "already", "every", "each", "again",
+    }
+)
+
+# Not calibrated. Spanish, Portuguese, French, Italian, Romanian and Catalan
+# merged into one list, because the gate never has to tell them apart: it asks
+# whether a line is the target language, and every one of the six is equally
+# not. A third of the Spanish entries are also Portuguese, and that overlap
+# costs nothing once they share one set.
+#
+# Entries are ASCII throughout and carry no accents, since the text is folded
+# for umlauts only and an accented entry would never match anything. The
+# unaccented forms are the ones that matter here in any case.
+#
+# No one-letter word is here. Spanish a, Portuguese o and e, Spanish y and
+# Catalan i are all real function words, and in a commit message they are all
+# far more often loop variables and enumeration labels. Spanish and French un
+# is absent for its own reason: un- is an English prefix, so any hyphenated
+# negation would tokenise into a hit.
+#
+# The six groups below only say where an entry was drawn from. Where two
+# languages share a spelling -- Portuguese da and Italian da, Spanish este and
+# Romanian este -- it is written once, under the first of them.
+_ROMANCE_SOURCE = frozenset(
+    {
+        # Spanish
+        "el", "la", "los", "las", "una", "uno", "unos", "unas", "que",
+        "con", "por", "para", "pero", "como", "cuando", "donde", "porque",
+        "este", "esta", "estos", "estas", "esto", "ese", "esa", "eso", "del",
+        "al", "sobre", "entre", "sin", "desde", "hasta", "muy", "mas",
+        "tambien", "ahora", "siempre", "cada", "otro", "otra", "todos",
+        "todas", "tan", "son", "no", "ser", "estar", "hace", "hacer",
+        "puede", "debe", "tiene", "aparece", "corrige", "entrada", "archivo",
+        # Portuguese
+        "os", "as", "uma", "uns", "umas", "do", "da", "dos", "das", "na",
+        "nos", "nas", "sem", "muito", "erro", "quem", "qual", "quais",
+        "seja", "tem", "pode", "esse", "essa", "isso", "ficheiro",
+        # French
+        "le", "lo", "les", "des", "du", "au", "aux", "ce", "cet", "cette",
+        "ces", "une", "qui", "quoi", "avec", "pour", "mais", "quand", "sur",
+        "sous", "sans", "depuis", "tres", "aussi", "maintenant", "toujours",
+        "chaque", "autre", "autres", "tous", "toutes", "tout", "dans",
+        "plus", "moins", "encore", "alors", "donc", "parce", "pourquoi",
+        "est", "sont", "etre", "avoir", "peut", "doit", "faire", "fait",
+        "erreur", "erreurs", "apparaissent", "entree", "fichier", "pas",
+        "se", "si", "leur", "leurs", "nous", "vous", "ils", "elles", "par",
+        # Italian
+        "il", "gli", "che", "perche", "questo", "questa", "questi", "queste",
+        "quello", "tra", "fra", "senza", "ogni", "tutti", "tutte", "molto",
+        "anche", "adesso", "essere", "viene", "deve", "errore", "appare",
+        "corregge", "della", "dello", "dei", "degli", "delle", "nel",
+        "nella", "alla", "allo", "agli", "dal", "dalla", "come", "in",
+        # Romanian
+        "sau", "nu", "sunt", "care", "pentru", "cu", "din", "de",
+        "acest", "aceasta", "acum", "mereu", "fiecare", "toti", "toate",
+        "foarte", "deci", "eroare", "apare", "intrare", "fisier", "mult",
+        "dar",
+        # Catalan
+        "els", "amb", "aquest", "aquesta", "aquests", "tambe", "ara",
+        "fitxer", "apareix", "dels", "als",
+    }
+)
+
+_SOURCES: Mapping[Language, tuple[frozenset[str], ...]] = {
+    "en": (_GERMAN_SOURCE, _ROMANCE_SOURCE),
+    "de": (_ENGLISH_SOURCE, _ROMANCE_SOURCE),
+}
+
+# The filter lives here, in the one place the mapping is built.
+STOPWORDS: Mapping[Language, frozenset[str]] = {
+    target: frozenset[str]().union(*sources) - _ORDINARY[target]
+    for target, sources in _SOURCES.items()
 }
 
 # `git commit --verbose` appends the whole diff below this marker, uncommented.

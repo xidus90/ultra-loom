@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from ultraloom.commit.language import scan
+from ultraloom.commit.language import STOPWORDS, scan
 
 
 def test_an_english_message_is_clean() -> None:
@@ -120,8 +120,6 @@ def test_german_words_that_are_also_english_never_count(word: str) -> None:
     the target language. A gate with false positives gets routed around with
     --no-verify and then protects nothing.
     """
-    from ultraloom.commit.language import STOPWORDS
-
     assert word not in STOPWORDS["en"]
 
 
@@ -506,3 +504,43 @@ def test_each_covered_script_produces_hits() -> None:
     }
     for name, text in samples.items():
         assert scan(f"Fix\n\n{text}", "en", 2), name
+
+
+def test_spanish_prose_is_refused_where_commits_are_english() -> None:
+    findings = scan("Fix\n\nCorrige el error que aparece con la entrada", "en", 2)
+    assert findings and findings[0].line_number == 3
+
+
+def test_portuguese_prose_is_refused_where_commits_are_english() -> None:
+    findings = scan("Fix\n\nCorrige o erro que aparece com a entrada", "en", 2)
+    assert findings and findings[0].line_number == 3
+
+
+def test_french_prose_is_refused_where_commits_are_english() -> None:
+    findings = scan("Fix\n\nCorrige les erreurs qui apparaissent avec cette entree", "en", 2)
+    assert findings and findings[0].line_number == 3
+
+
+def test_ordinary_english_survives_the_merged_list() -> None:
+    # The union collides with a, as, in, to, her, do, no -- all high-frequency
+    # English. Without the filter this line would carry five hits.
+    assert scan("Add a fix to the parser as her review asked", "en", 2) == ()
+
+
+def test_no_source_word_is_ordinary_in_its_target_language() -> None:
+    # The rule the spec makes binding, held by a test rather than a comment.
+    ordinary_english = {
+        "a", "as", "in", "to", "her", "do", "no", "son", "come", "the", "and",
+        "or", "not", "on", "is", "are", "was", "be", "at", "by", "of", "for",
+        "with", "if", "then", "than", "there", "here", "now", "new", "old",
+        "set", "get", "put", "run", "may", "can", "will", "does", "did", "all",
+        "over", "from", "this", "that", "die", "war", "man", "den", "hat", "so",
+        "an", "fest", "still", "plus", "sans", "tout", "le", "lo", "tan",
+    }
+    assert not (STOPWORDS["en"] & ordinary_english)
+
+    ordinary_german = {
+        "in", "so", "am", "da", "im", "man", "ist", "war", "wir", "sie", "er",
+        "es", "wie", "was", "nun", "hat", "bei", "aus", "als", "ich", "du",
+    }
+    assert not (STOPWORDS["de"] & ordinary_german)
