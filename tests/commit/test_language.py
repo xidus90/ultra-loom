@@ -2,11 +2,54 @@
 
 from __future__ import annotations
 
+import ast
+import pathlib
 import re
+import tokenize
+from collections.abc import Iterator
 
 import pytest
 
-from ultraloom.commit.language import LANGUAGES, STOPWORDS, scan
+from ultraloom.commit.language import (
+    LANGUAGES,
+    STOPWORDS,
+    _SOURCES,
+    _script_runs,
+    scan,
+)
+
+_REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
+
+
+def _runs_in(text: str) -> tuple[str, ...]:
+    """The script runs of one line, for the tests that count them directly."""
+    return _script_runs(text)
+
+
+def _english_prose_of_this_repository() -> Iterator[tuple[pathlib.Path, str]]:
+    """Every comment and docstring under `src/`, as a corpus of English.
+
+    Project rule: comments and docstrings are English everywhere. String
+    literals are not -- user-facing messages here are German -- so only these
+    two are read. `language.py` is skipped because it quotes the very words
+    the guard looks for.
+    """
+    for path in sorted(_REPOSITORY.joinpath("src").rglob("*.py")):
+        if path.name == "language.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        with path.open("rb") as handle:
+            for token in tokenize.tokenize(handle.readline):
+                if token.type == tokenize.COMMENT:
+                    yield path, token.string.lstrip("# ")
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, _DOCSTRING_OWNERS):
+                docstring = ast.get_docstring(node)
+                if docstring:
+                    yield path, docstring
+
+
+_DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
 
 def test_an_english_message_is_clean() -> None:
@@ -517,11 +560,16 @@ def test_portuguese_prose_is_refused_where_commits_are_english() -> None:
     # threshold rather than the heuristic: any later trim of the list would
     # have turned it red for a reason that had nothing to do with Portuguese
     # being detectable. A sentence of the length a commit body actually has
-    # carries four hits -- de, para, que, com -- and holds that margin.
+    # carries three hits -- de, para, que -- and holds that margin.
+    #
+    # Three and not the four this started with: `com` left the list when the
+    # corpus guard found it in this repository's own English prose, where it
+    # ends every domain name. The hits are named rather than counted, so a
+    # change like that shows up as itself instead of as a number.
     body = "Ajusta o tratamento de erros para que a leitura nao falhe com ficheiros grandes"
     findings = scan(f"Fix\n\n{body}", "en", 2)
     assert findings and findings[0].line_number == 3
-    assert len(findings[0].hits) == 4
+    assert findings[0].hits == ("de", "para", "que")
 
 
 def test_french_prose_is_refused_where_commits_are_english() -> None:
@@ -530,9 +578,24 @@ def test_french_prose_is_refused_where_commits_are_english() -> None:
 
 
 def test_ordinary_english_survives_the_merged_list() -> None:
-    # The union collides with a, as, in, to, her, do, no -- all high-frequency
-    # English. Without the filter this line would carry five hits.
-    assert scan("Add a fix to the parser as her review asked", "en", 2) == ()
+    """An English line the unfiltered union would refuse six times over.
+
+    The sentence is chosen against the measured collisions, not guessed ones.
+    The union meets English in as, car, care, come, do, dove, fins, in, le,
+    lo, no, on, plus, sans, son, tan, tout and um -- and in none of a, to or
+    her, which an earlier version of this test named. That version carried
+    one hit unfiltered, so deleting the filter left it green and it guarded
+    nothing.
+
+    Every word below is one of the real collisions, which is what makes the
+    test fail the moment `- _ORDINARY[target]` goes.
+    """
+    line = "Do not care as no car is in the lot"
+    assert scan(line, "en", 2) == ()
+
+    union = frozenset[str]().union(*_SOURCES["en"])
+    unfiltered = tuple(word for word in line.lower().split() if word in union)
+    assert unfiltered == ("do", "care", "as", "no", "car", "in")
 
 
 def test_no_source_word_is_ordinary_in_its_target_language() -> None:
@@ -573,3 +636,89 @@ def test_the_lexicon_is_not_fitted_to_the_words_of_its_own_tests() -> None:
     }
     for target in LANGUAGES:
         assert not (STOPWORDS[target] & content_words)
+
+
+def test_a_list_word_inside_an_identifier_is_not_evidence() -> None:
+    """`de-duplication` is English, not two Portuguese prepositions.
+
+    _WORD splits on `-` and `_`, so a compound and a snake_case identifier
+    both hand the counter a bare list word. Two of them clear the default
+    threshold, which refused ordinary English subjects. The entries are not
+    the fault -- `de` and `na` are high-frequency function words and earn
+    their place -- so the tokenisation is what gives way: a list word with
+    `-` or `_` immediately on either side belongs to a larger name.
+    """
+    assert scan("Add de-duplication and de-serialization helpers", "en", 2) == ()
+    assert scan("Rename fill_na_values to drop_na_rows", "en", 2) == ()
+    # The same word standing alone is still evidence, or the fix would have
+    # bought the false positive back at the price of the true one.
+    assert scan("Fix\n\nAjusta de novo o de sempre", "en", 2)
+
+
+def test_a_hyphen_on_one_side_alone_is_enough_to_exempt() -> None:
+    # A compound may end or begin with the list word, so one neighbour is the
+    # rule and not both.
+    assert scan("Handle the de- prefix and the -de suffix", "en", 2) == ()
+
+
+def test_no_stopword_appears_in_this_repository_s_own_english_prose() -> None:
+    """The guard, given a corpus instead of a hand-written list.
+
+    The hand-enumerated set in the test below is fitted to what it guards:
+    it catches only the collisions somebody already thought of, which is the
+    failure removed from the lexicon itself two rounds ago, one level up.
+
+    Comments and docstrings under `src/` are English by project rule, so a
+    stopword standing bare in one is a homograph nobody caught. `language.py`
+    is excluded because it quotes the lists it defines. Each block is
+    collapsed to a single line first: a quotation that wraps is still a
+    quotation, while QUOTED_SPAN deliberately pairs within one line only.
+    """
+    findings = [
+        (path.name, finding.hits)
+        for path, block in _english_prose_of_this_repository()
+        for finding in scan("subject\n\n" + " ".join(block.split()), "en", 1)
+    ]
+    assert findings == []
+
+
+def test_one_japanese_word_stays_under_the_threshold() -> None:
+    """The case the whole extension exists to keep quiet about.
+
+    `unicodedata.name` calls Han CJK, kana KATAKANA or HIRAGANA and the
+    prolonged sound mark KATAKANA-HIRAGANA, so a naive prefix split cut a
+    three-character loanword into three runs and refused it on its own. A
+    quoted term, a filename or a proper noun must survive; only prose in the
+    other language must not.
+    """
+    assert scan("Rename the \u30d1\u30fc\u30b5 constant", "en", 2) == ()
+    assert scan("Fix \u4fee\u5fa9\u3059\u308b now", "en", 2) == ()
+    # Telling Chinese from Japanese is not something the gate ever has to do,
+    # so collapsing them is the right granularity rather than a compromise --
+    # and a mixed Han/kana word is one run, the way a reader counts it.
+    assert _runs_in("\u4fee\u5fa9\u3059\u308b") == ("\u4fee\u5fa9\u3059\u308b",)
+    assert _runs_in("\u30d1\u30fc\u30b5") == ("\u30d1\u30fc\u30b5",)
+
+
+def test_a_japanese_sentence_is_still_refused() -> None:
+    # Collapsing the three scripts must not buy the false positive off by
+    # going blind: several words are still several hits.
+    assert scan("Fix\n\n\u3053\u308c\u306f \u30d1\u30fc\u30b5\u306e \u30a8\u30e9\u30fc", "en", 2)
+
+
+def test_fullwidth_and_mathematical_latin_are_latin() -> None:
+    """Latin never counts, whatever codepoint block it was written in.
+
+    Compatibility forms carry their own `unicodedata.name`, so fullwidth
+    `Fix the parser` read as three runs of a foreign script. Normalising
+    before the script is read folds them back to the letters they are.
+    """
+    assert scan("\uff26\uff49\uff58 \uff54\uff48\uff45 \uff50\uff41\uff52\uff53\uff45\uff52", "en", 2) == ()
+    assert scan("\U0001d413\U0001d422\U0001d425 \U0001d41e\U0001d425\U0001d42b", "en", 2) == ()
+
+
+def test_scripts_beyond_the_ten_named_ones_are_covered() -> None:
+    # The rule is "not Latin", not a list, so Armenian and Georgian count
+    # without anybody having enumerated them.
+    assert scan("Fix\n\n\u0531\u0562\u0563 \u0564\u0565\u0566", "en", 2)
+    assert scan("Fix\n\n\u10d0\u10d1\u10d2 \u10d3\u10d4\u10d5", "en", 2)

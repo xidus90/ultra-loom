@@ -58,6 +58,14 @@ _ORDINARY: Mapping[Language, frozenset[str]] = {
             "under", "up", "us", "use", "used", "very", "war", "was", "way",
             "we", "were", "what", "when", "where", "which", "who", "why",
             "will", "with", "would", "you",
+            # Found by the corpus guard, not by anyone's imagination -- see
+            # the test that reads this repository's own English prose. Each
+            # is a Romance function word and an ordinary word of English
+            # technical writing at the same time: `sense` and `contra` and
+            # `pendant` in plain prose, `del` as the Python keyword, `com` in
+            # every domain name, `est`, `dos` and `prima` in the phrases
+            # English borrowed whole.
+            "com", "contra", "del", "dos", "est", "pendant", "prima", "sense",
         }
     ),
     # The same for German. Written in ASCII like every list here, because the
@@ -260,6 +268,29 @@ _FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 # paragraph back in the refusal; nothing else depends on the length.
 _RUN_LIMIT = 12
 
+# What welds a word into a larger name. `-` and `_` and nothing else: `.` is
+# sentence punctuation as often as it is a separator, and `/` is already the
+# path exemption's business.
+_JOINERS = frozenset({"-", "_"})
+
+# Han, the two kana and the prolonged sound mark are one script class here.
+# `unicodedata.name` calls them CJK UNIFIED IDEOGRAPH, HIRAGANA LETTER,
+# KATAKANA LETTER and KATAKANA-HIRAGANA PROLONGED SOUND MARK, so a plain
+# prefix split cut a three-character loanword into three runs and refused it
+# on its own -- exactly the quoted term the gate promises to leave alone.
+#
+# Collapsing them is not a compromise but the right granularity: the gate
+# never has to tell Chinese from Japanese, only either from the target. And
+# a word that mixes Han with kana, which ordinary Japanese constantly does,
+# becomes one run the way a reader counts it.
+_JAPANESE: Mapping[str, str] = {
+    "CJK": "CJK",
+    "HIRAGANA": "CJK",
+    "KATAKANA": "CJK",
+    "KATAKANA-HIRAGANA": "CJK",
+    "IDEOGRAPHIC": "CJK",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Finding:
@@ -374,11 +405,40 @@ def _hits(line: str, stopwords: frozenset[str], *, is_subject: bool) -> tuple[st
     stripped = NAME_PARTICLE.sub(" ", line)
     stripped = PATH_TOKEN.sub(" ", stripped)
     folded = stripped.lower().translate(_FOLD)
-    words = tuple(word for word in _WORD.findall(folded) if word in stopwords)
+    words = tuple(
+        match.group()
+        for match in _WORD.finditer(folded)
+        if match.group() in stopwords and not _joined(folded, match)
+    )
     # Scored on what _spans and the strippers above left, so a foreign
     # script inside a code span, a path or a trailer is exempt by the same
     # machinery that exempts a stopword there.
     return words + _script_runs(stripped)
+
+
+def _joined(line: str, match: re.Match[str]) -> bool:
+    """Whether a matched word is welded to something larger.
+
+    `_WORD` splits on `-` and `_`, so `de-duplication` hands the counter a
+    bare `de` and `fill_na_values` a bare `na` -- two of either clearing the
+    default threshold and refusing an ordinary English subject. The entries
+    are not at fault: `de` and `na` are high-frequency function words that
+    earn their place, and pruning them to buy silence here would trade a
+    false positive for a false negative.
+
+    So the tokenisation gives way instead. A joiner immediately on either
+    side means the word is part of a compound or an identifier, and neither
+    is prose in any language. One side is enough -- a compound may open or
+    close with the word.
+
+    This generalises what the file already argued for `un-`, where the
+    reasoning was written down and then applied to a single entry by leaving
+    it out of the list. `de-` is far more common in commit prose than `un-`,
+    and the next such prefix would have needed the same manual exception.
+    """
+    before = line[match.start() - 1] if match.start() else ""
+    after = line[match.end()] if match.end() < len(line) else ""
+    return before in _JOINERS or after in _JOINERS
 
 
 def _script(char: str) -> str:
@@ -394,7 +454,9 @@ def _script(char: str) -> str:
     if not unicodedata.category(char).startswith("L"):
         return ""
     script, _, _ = unicodedata.name(char, "").partition(" ")
-    return "" if script == "LATIN" else script
+    if script == "LATIN":
+        return ""
+    return _JAPANESE.get(script, script)
 
 
 def _script_runs(line: str) -> tuple[str, ...]:
@@ -410,7 +472,15 @@ def _script_runs(line: str) -> tuple[str, ...]:
     current: list[str] = []
     script = ""
 
-    for char in line:
+    # Compatibility forms carry names of their own -- FULLWIDTH LATIN SMALL
+    # LETTER A, MATHEMATICAL BOLD CAPITAL F -- so the prefix read them as
+    # scripts and a fullwidth `Fix the parser` scored three runs of foreign
+    # text. Latin never counts, whatever block it was typed in, and NFKD
+    # folds those forms back to the letters they are. It decomposes the
+    # accented and precomposed forms of the real scripts too, which costs
+    # nothing: the pieces keep their script name, and the combining marks
+    # are already handled below.
+    for char in unicodedata.normalize("NFKD", line):
         if current and unicodedata.category(char).startswith("M"):
             # A combining mark spells the letter in front of it. Dropping it
             # out of the run would split Devanagari and Thai words into one
@@ -428,4 +498,9 @@ def _script_runs(line: str) -> tuple[str, ...]:
     if current:
         runs.append("".join(current))
 
-    return tuple(run[:_RUN_LIMIT] for run in runs)
+    # Recomposed before it is reported: the run was walked in NFKD, and a
+    # refusal must quote back what the author actually typed rather than the
+    # decomposed spelling, which renders as a letter trailed by loose marks.
+    # NFC after the walk and before the cut, so the limit counts the
+    # characters a reader sees.
+    return tuple(unicodedata.normalize("NFC", run)[:_RUN_LIMIT] for run in runs)
