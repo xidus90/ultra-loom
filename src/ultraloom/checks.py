@@ -12,6 +12,7 @@ tool-facing message — argv, exceptions, log lines — stays English.
 
 from __future__ import annotations
 
+import os
 import shlex
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -20,7 +21,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import BoundedSemaphore, Semaphore
 
-from ultraloom import process
+from ultraloom import process, toolchain
 from ultraloom.config import Config, ConfigError
 
 KINDS = ("lint", "types", "test", "coverage")
@@ -266,6 +267,13 @@ def resolve_check(
         argv = entry.measuring
 
     measure, warning = _measuring_state(kind, marker, config, alongside, entry.measure)
+    if not config.exec_prefix:
+        # Only the presets, and only with no prefix set. A [verify] command was
+        # written by a person who meant the path they wrote; and under a prefix
+        # the command runs in a container, where an absolute path from *this*
+        # machine would turn a working call into a broken one.
+        argv = _located(kind, argv, config.root)
+        measure = _located(kind, measure, config.root) if measure else measure
     return Command(
         kind,
         (config.exec_prefix + argv,),
@@ -273,6 +281,27 @@ def resolve_check(
         measure=(config.exec_prefix + measure) if measure else (),
         warning=warning,
     )
+
+
+def _located(kind: str, argv: tuple[str, ...], root: Path) -> tuple[str, ...]:
+    """argv with its executable pinned to a file that exists here.
+
+    argv[0] alone: in `uvx ruff check .` the tool is uvx, and `ruff` is an
+    argument uvx resolves for itself -- on this machine it is no executable at
+    all, and looking it up would refuse a call that works.
+    """
+    found = toolchain.resolve(argv[0], root, os.environ)
+    if found is None:
+        # Named ahead of the message, because a report with four red lines
+        # otherwise does not say which of them is a missing installation.
+        raise CheckUnavailableError(
+            f"{kind}: `{argv[0]}` not found. Set {toolchain.env_var(argv[0])}, "
+            f"put it in {toolchain.LOCAL_DIR}/, or add it to PATH."
+        )
+    # A tool PATH already answers for keeps its bare name: the argv reaches the
+    # same file either way, and every check's command line stays readable in a
+    # report an agent has to act on.
+    return (str(found.path), *argv[1:]) if found.pinned else argv
 
 
 def _warning_for(kind: str, marker: str | None, config: Config, alongside: frozenset[str]) -> str:

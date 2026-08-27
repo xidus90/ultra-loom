@@ -247,6 +247,36 @@ reach either: it closes itself the moment its predecessor is green. It is
 therefore not something a repairer should touch, and `verify-until-green`
 leaves it out of the decision to give up.
 
+### Where the tools come from
+
+A preset names its tool bare â€” `godot`, `eslint`, `vitest`. Before such a
+command runs, ultraloom looks for that first word in three places, in order,
+and checks each one instead of believing it:
+
+1. `ULTRALOOM_TOOL_<NAME>` â€” the tool name upper-cased, `-` turned into `_`.
+   `ULTRALOOM_TOOL_GODOT=D:/Godot/godot.exe` is this machine's answer. A
+   variable that points at nothing falls through to the next candidate rather
+   than being handed on; an empty value counts as unset, so a machine can
+   switch it off again for one run.
+2. `.ultraloom/tools/<name>` in the project â€” on Windows also with `.exe`,
+   `.cmd` and `.bat`, tried in that order.
+3. `PATH`.
+
+Found in 1 or 2, the command runs against that exact file. Found on `PATH`, it
+keeps its bare name â€” the argv reaches the same file either way, and the report
+stays readable. Found nowhere, the check comes back `unavailable` with a
+message naming all three ways out, so a repairing agent can see that no source
+change will close it.
+
+**ultraloom installs nothing.** What fills `.ultraloom/tools/` is not
+ultraloom's business.
+
+Three things are deliberately left alone: a command from `[verify]`, because a
+person wrote that path and meant it; every command when `[exec].prefix` is set,
+because it then runs in a container where a path from this machine would be
+wrong; and every word after the first â€” in `uvx ruff check .` the tool is
+`uvx`, and `ruff` is an argument uvx resolves for itself.
+
 ### Before you configure a check
 
 **A check command that comes from a hook script has to be looked at.** ultraloom

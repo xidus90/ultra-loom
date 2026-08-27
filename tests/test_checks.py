@@ -9,7 +9,7 @@ from threading import Semaphore
 
 import pytest
 
-from ultraloom import checks, process
+from ultraloom import checks, process, toolchain
 from ultraloom.checks import (
     BLOCKED,
     KINDS,
@@ -52,6 +52,19 @@ def node_project(root: Path) -> Path:
 def godot_project(root: Path) -> Path:
     (root / "project.godot").write_text("config_version=5\n", encoding="utf-8")
     return root
+
+
+def local_tool(root: Path, name: str) -> Path:
+    """Ein projektlokales Werkzeug, damit die Auflösung nicht an der Maschine
+    scheitert, auf der die Suite gerade läuft.
+
+    Die Datei ist leer und wird nie gestartet: wo sie gebraucht wird, geht es
+    darum, dass die Prüfung *vorher* aus einem anderen Grund abbricht.
+    """
+    tool = root / toolchain.LOCAL_DIR / name
+    tool.parent.mkdir(parents=True, exist_ok=True)
+    tool.write_text("", encoding="utf-8")
+    return tool
 
 
 def write_config(root: Path, body: str) -> None:
@@ -117,9 +130,15 @@ def test_the_python_preset_is_found_from_pyproject(tmp_path: Path) -> None:
 
 def test_the_node_preset_is_found_from_package_json(tmp_path: Path) -> None:
     node_project(tmp_path)
+    local_tool(tmp_path, "tsc")
+    local_tool(tmp_path, "eslint")
 
-    assert resolve_check("types", load_config(tmp_path)).argvs[0] == ("tsc", "--noEmit")
-    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == ("eslint", ".")
+    # Aufgelöst und damit absolut: PATH kennt hier weder tsc noch eslint.
+    types = resolve_check("types", load_config(tmp_path)).argvs[0]
+    lint = resolve_check("lint", load_config(tmp_path)).argvs[0]
+
+    assert (Path(types[0]).name, types[1:]) == ("tsc", ("--noEmit",))
+    assert (Path(lint[0]).name, lint[1:]) == ("eslint", (".",))
 
 
 def test_the_godot_preset_is_found_from_project_godot(tmp_path: Path) -> None:
@@ -521,6 +540,7 @@ def test_an_unimported_godot_project_fails_test_before_an_engine_starts(tmp_path
     way this can pass.
     """
     godot_project(tmp_path)
+    local_tool(tmp_path, "godot")
 
     result = run_check("test", load_config(tmp_path))
 
@@ -564,6 +584,7 @@ def test_an_imported_godot_project_runs_its_tests(tmp_path: Path) -> None:
 def test_an_empty_godot_cache_directory_is_not_an_import(tmp_path: Path) -> None:
     """The directory exists long before the import that fills it."""
     godot_project(tmp_path)
+    local_tool(tmp_path, "godot")
     (tmp_path / ".godot").mkdir()
 
     assert run_check("test", load_config(tmp_path)).source == "unready"
@@ -621,6 +642,7 @@ def test_a_project_that_prepares_its_own_suite_can_turn_the_precondition_off(
 def test_the_precondition_names_the_key_that_turns_it_off(tmp_path: Path) -> None:
     """Whoever is blocked reads how to unblock themselves."""
     godot_project(tmp_path)
+    local_tool(tmp_path, "godot")
 
     output = run_check("test", load_config(tmp_path)).output
 
@@ -1357,3 +1379,76 @@ def test_one_cap_over_nested_pools_does_not_deadlock(tmp_path: Path) -> None:
 
     assert [result.kind for result in results] == ["lint", "types", "test"]
     assert all(result.ok for result in results), [result.output for result in results]
+
+
+# --- Werkzeugauflösung: wo sie greift und wo ausdrücklich nicht -------------
+
+
+def test_a_preset_tool_nobody_has_comes_back_unavailable(tmp_path: Path) -> None:
+    """Der teuerste Fall von gestern: rot, ohne dass eine Quelländerung hilft."""
+    node_project(tmp_path)
+
+    # run_kinds und nicht run_check: der Weg, der aus dem Fehler ein sichtbares
+    # Ergebnis macht, statt den Lauf abzubrechen.
+    (result,) = run_kinds(("lint",), load_config(tmp_path))
+
+    assert not result.ok
+    assert result.source == checks.UNAVAILABLE
+    assert "lint: `eslint` not found" in result.output
+    assert "ULTRALOOM_TOOL_ESLINT" in result.output
+    assert toolchain.LOCAL_DIR in result.output
+    assert "PATH" in result.output
+
+
+def test_the_variable_names_a_preset_tool_for_this_machine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    node_project(tmp_path)
+    mine = tmp_path / "elsewhere" / "eslint"
+    mine.parent.mkdir()
+    mine.write_text("", encoding="utf-8")
+    monkeypatch.setenv(toolchain.env_var("eslint"), str(mine))
+
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == (str(mine), ".")
+
+
+def test_the_exec_prefix_switches_the_resolution_off(tmp_path: Path) -> None:
+    """Im Container ist ein Pfad von dieser Maschine falsch, nicht hilfreich."""
+    node_project(tmp_path)
+    local_tool(tmp_path, "eslint")
+    config = Config(root=tmp_path, exec_prefix=("docker", "compose", "exec", "-T", "app"))
+
+    command = resolve_check("lint", config)
+
+    assert command.argvs[0] == ("docker", "compose", "exec", "-T", "app", "eslint", ".")
+
+
+def test_a_configured_command_is_left_alone(tmp_path: Path) -> None:
+    """Wer `./scripts/lint.sh` schreibt, hat den Pfad gewählt."""
+    node_project(tmp_path)
+    verify_config(tmp_path, lint="./scripts/lint.sh --strict")
+
+    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == (
+        "./scripts/lint.sh",
+        "--strict",
+    )
+
+
+def test_only_the_first_word_is_resolved(tmp_path: Path) -> None:
+    """`ruff` ist ein Argument von uvx und hier keine ausführbare Datei."""
+    python_project(tmp_path)
+
+    argv = resolve_check("lint", load_config(tmp_path)).argvs[0]
+
+    assert argv[0] == "uvx", "uvx liegt im PATH und behält seinen nackten Namen"
+    assert argv[1] == "ruff"
+
+
+def test_a_project_local_tool_beats_the_one_on_path(tmp_path: Path) -> None:
+    """Sonst hätte `.ultraloom/tools/` neben einem installierten uvx keinen Sinn."""
+    godot_project(tmp_path)
+    tool = local_tool(tmp_path, "uvx")
+
+    command = resolve_check("lint", load_config(tmp_path))
+
+    assert command.argvs[0] == (str(tool), "gdlint", ".")

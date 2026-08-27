@@ -272,6 +272,36 @@ grün wird. Es ist deshalb nichts, was ein Reparateur anfassen sollte, und
 `verify-until-green` lässt es außer Betracht, wenn die Entscheidung fällt,
 aufzugeben.
 
+### Wo die Werkzeuge herkommen
+
+Ein Preset nennt sein Werkzeug nackt — `godot`, `eslint`, `vitest`. Bevor ein
+solcher Befehl läuft, sucht ultraloom dieses erste Wort an drei Stellen, der
+Reihe nach, und prüft jede, statt sie zu glauben:
+
+1. `ULTRALOOM_TOOL_<NAME>` — der Werkzeugname großgeschrieben, `-` zu `_`.
+   `ULTRALOOM_TOOL_GODOT=D:/Godot/godot.exe` ist die Antwort dieser Maschine.
+   Eine Variable, die auf nichts zeigt, fällt auf den nächsten Kandidaten
+   durch, statt weitergereicht zu werden; ein leerer Wert zählt als nicht
+   gesetzt, sodass eine Maschine sie für einen Lauf wieder abschalten kann.
+2. `.ultraloom/tools/<name>` im Projekt — auf Windows zusätzlich mit `.exe`,
+   `.cmd` und `.bat`, in dieser Reihenfolge probiert.
+3. `PATH`.
+
+Bei 1 oder 2 läuft der Befehl gegen genau diese Datei. Findet ihn `PATH`,
+behält er seinen nackten Namen — die argv erreicht so oder so dieselbe Datei,
+und der Bericht bleibt lesbar. Findet ihn niemand, kommt die Prüfung als
+`unavailable` zurück, mit einer Meldung, die alle drei Wege nennt: Ein
+reparierender Agent sieht dann, dass keine Quelländerung sie schließt.
+
+**ultraloom installiert nichts.** Was `.ultraloom/tools/` füllt, ist nicht
+ultralooms Sache.
+
+Drei Dinge bleiben absichtlich unberührt: ein Befehl aus `[verify]`, weil ein
+Mensch diesen Pfad geschrieben hat und ihn so meint; jeder Befehl bei gesetztem
+`[exec].prefix`, weil er dann in einem Container läuft, wo ein Pfad von dieser
+Maschine falsch wäre; und jedes Wort nach dem ersten — bei `uvx ruff check .`
+ist das Werkzeug `uvx`, und `ruff` ist ein Argument, das uvx selbst auflöst.
+
 ### Bevor man eine Prüfung konfiguriert
 
 **Ein Prüfbefehl, der aus einem Hook-Skript stammt, muss angesehen werden.**
