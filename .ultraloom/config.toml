@@ -2,11 +2,28 @@
 # reaches for `uvx ruff` and thereby gets whichever version uvx happens to
 # fetch, whereas `uv run` resolves the development dependency this project
 # pins -- the same ruff version the gates run, then.
-# `types` and `test` are absent on purpose: the preset already gets those right,
-# and an entry repeating it silently loses whatever hangs off it -- for `test`,
-# the measurement `coverage` picks up in the same run.
+# `test` is absent on purpose: the preset already gets it right, and an entry
+# repeating it silently loses whatever hangs off it -- here the measurement
+# `coverage` picks up in the same run.
+#
+# `types` is named only to trade mypy for its daemon. A/B over this hook's own
+# post-edit path, back to back on 2026-08-27: warm 1400 ms -> 988 ms, cold
+# 9.6 s -> 9.1 s. Back to back matters -- the first attempt at this
+# measurement ran while the machine was busy and said the opposite, with
+# spreads wide enough to hide the whole effect.
+#
+# Still `uv run` and not a shim from `uv tool install`: that is what pins the
+# version. A globally installed mypy would judge this project by whatever
+# version the machine happens to carry, and the gate would drift from the
+# development dependency without anyone editing a line. The same reason keeps
+# `lint` on `uv run`.
+#
+# `run --` rather than `check`, because that form restarts the daemon by itself
+# when the flags behind it change; a daemon still judging by the previous
+# settings is worse than no daemon.
 [verify]
-lint = "uv run ruff check ."
+lint  = "uv run ruff check ."
+types = "uv run dmypy run -- --no-error-summary --no-pretty"
 
 # What the repairer must not touch. `pyproject.toml` stands beside the tests
 # because the thresholds live there: a loosened ruff rule or a lowered
