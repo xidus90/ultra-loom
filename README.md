@@ -479,9 +479,10 @@ codes below.
 
 ### The heuristic
 
-Function words of the *other* language that mean nothing in this one. For
-`language = "en"` the list is German: `der`, `das`, `und`, `nicht`, `ein`,
-`wird`, `mit`, `von` and some forty more. Deliberately absent, each an ordinary
+Function words of the *other* languages that mean nothing in this one. For
+`language = "en"` that starts with German — `der`, `das`, `und`, `nicht`,
+`ein`, `wird`, `mit`, `von` and some forty more — and goes on with the Romance
+group below. Deliberately absent, each an ordinary
 English word: `die`, `war`, `man`, `den`, `hat`, `in`, `so`, `an`. "Let the
 process die in the war room" must not be a finding.
 
@@ -492,6 +493,59 @@ reading would refuse it.
 Umlauts are folded before matching (`ä` to `ae`, `ö` to `oe`, `ü` to `ue`, `ß`
 to `ss`), so `für` and `fuer` are the same word to the check while the word
 list itself stays ASCII.
+
+#### Which languages are searched
+
+The list searched for a target is the union of every *other* language's
+function words, minus the target's own everyday words. For `language = "en"`
+that union is German plus a merged Romance group; for `language = "de"` it is
+English plus the same Romance group.
+
+The Romance group is Spanish, Portuguese, French, Italian, Romanian and
+Catalan in **one list**, not six. The gate never has to tell them apart — it
+asks whether a line is the target language, and every one of the six is
+equally not — so merging costs nothing measurable: a third of the entries are
+shared between the six anyway, and against English the merged list has 11 %
+homographs, the same figure Spanish alone has.
+
+What the merging *would* have cost is paid by the filter instead. Bare, the
+union collides with `a`, `as`, `in`, `to`, `her`, `do`, `no` — all
+high-frequency English. So the union is relieved of the target's ordinary
+words in the one place it is assembled, which is code and not curation: a
+source list added later cannot smuggle back in what was excluded there. The
+filter is per target, not global — `in` is unusable against English and German
+both, `come` only against English, where German prose never writes it.
+
+**No one-letter word is in any source list.** Spanish `a`, Portuguese `o` and
+`e`, Spanish `y`, Catalan `i` are all real function words, and in a commit
+message they are all far more often loop variables and enumeration labels —
+`Reduce to O(n)`. Only words whose real spelling carries no accent are listed
+at all, because the text is folded for umlauts and nothing else, and an
+accented entry would sit in the list matching nothing while reading as
+coverage.
+
+Only function words: articles, prepositions, conjunctions, pronouns,
+demonstratives and the copulas and modals that behave like them. No content
+word, however well it would suit a test sentence — the heuristic rests on
+words that stand in nearly every sentence of a language, and a content word
+stands only in sentences about its subject.
+
+#### Scripts other than Latin
+
+A run of letters in a script that is not Latin counts as **one hit**, weighed
+exactly like a stopword. Covered: Han, Hiragana, Katakana, Hangul, Cyrillic,
+Arabic, Hebrew, Greek, Devanagari and Thai.
+
+Per *run*, never per character. A Chinese word is a handful of characters, so
+counting each one would put every message that names a single Chinese word
+over any usable threshold at once. A run is a word, and a word is one hit. A
+combining mark continues the run in front of it rather than starting a new
+one; otherwise a Devanagari or Thai word splits into one run per consonant and
+its weight multiplies.
+
+Because the weight is the same, everything already built around stopword hits
+applies to these unchanged: the threshold, the per-line counting, the blanked
+spans, `[[commit.allow]]`, the trailer exemption and the scissors cut.
 
 ### What is never scored
 
@@ -588,18 +642,24 @@ language must come from `[commit]`, because a flag that overrode it would let a
 commit choose the rule it is judged by. `--calibrate` beside a message file is
 refused for the milder reason that a flag should never be silently ignored.
 
-**The German direction is not calibrated.** The word list for `language = "de"`
-was written by hand and never measured against a German-language repository.
-Its threshold is a starting point, not a result; measure it with `--calibrate`
-before trusting it. The English direction was calibrated against one project's
-history — a hundred English commits against sixteen German ones — and has a
-second reading here: `--calibrate 100 --language en` over ultraloom itself on
-2026-08-26 refuses exactly one of the last hundred messages, the same one at
-threshold 1 and at threshold 2. That message is an English commit *about* the
-stopword list which cites `das, und` bare in parentheses; it is the honest
-limit of the heuristic, and the reason code spans and `[[commit.allow]]` exist.
-Publishing a guessed number as a measured one would be exactly the failure this
-tool argues against.
+**Only one source list is calibrated.** The German list searched against
+English was read off one real project history — a hundred English commits
+against sixteen German ones — and holds the words that separated them.
+Everything else here, the English list and the merged Romance list alike, was
+written from the languages themselves and measured against no corpus. Those
+are starting points, not results, and `--calibrate` is how a project turns one
+into a measurement of its own history. Publishing a guessed number as a
+measured one would be exactly the failure this tool argues against.
+
+The English direction has a second reading here. `--calibrate 100 --language
+en` over ultraloom itself on 2026-08-27 refuses two of the last hundred
+messages at threshold 2, four at threshold 1 and none at threshold 4. All four
+are English commits *about* the word lists, citing foreign function words bare
+in running prose — `das, und` in parentheses, `als, da, du` in a list of
+homographs. They are the honest limit of the heuristic, and the reason code
+spans and `[[commit.allow]]` exist. One of them shows a second edge worth
+knowing: a `de` counted inside `README.de.md,` because the path exemption
+needs whitespace after the extension and a trailing comma denies it.
 
 ### Exit codes
 

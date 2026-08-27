@@ -2,6 +2,11 @@
 
 Stand: 2026-08-25. Status: zur Durchsicht.
 
+Nachfolger: `2026-08-27-sprachen-erweitern-design.md`. Zur Sprachabdeckung ist
+dieses Papier überholt — es kennt nur Deutsch gegen Englisch und umgekehrt,
+während der Nachfolger die verschmolzene romanische Gruppe und den Test auf
+nichtlateinische Schriften ergänzt. Alles Übrige hier gilt unverändert.
+
 ## Warum
 
 Eine Sprachregel, die nur in Dateien steht, die niemand automatisch lädt, hält

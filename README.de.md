@@ -521,9 +521,10 @@ siehe die Exit-Codes weiter unten.
 
 ### Die Heuristik
 
-Funktionswörter der *anderen* Sprache, die in dieser nichts bedeuten. Für
-`language = "en"` ist die Liste deutsch: `der`, `das`, `und`, `nicht`, `ein`,
-`wird`, `mit`, `von` und rund vierzig weitere. Ausdrücklich nicht darin, jedes
+Funktionswörter der *anderen* Sprachen, die in dieser nichts bedeuten. Für
+`language = "en"` beginnt die Liste mit dem Deutschen — `der`, `das`, `und`,
+`nicht`, `ein`, `wird`, `mit`, `von` und rund vierzig weitere — und geht mit
+der romanischen Gruppe unten weiter. Ausdrücklich nicht darin, jedes
 ein gewöhnliches englisches Wort: `die`, `war`, `man`, `den`, `hat`, `in`,
 `so`, `an`. „Let the process die in the war room" darf kein Befund sein.
 
@@ -534,6 +535,62 @@ mit zweien, was die zweite Lesart ablehnen würde.
 Umlaute werden vor dem Vergleich aufgelöst (`ä` zu `ae`, `ö` zu `oe`, `ü` zu
 `ue`, `ß` zu `ss`), `für` und `fuer` sind für die Prüfung also dasselbe Wort,
 während die Wortliste selbst ASCII bleibt.
+
+#### Welche Sprachen durchsucht werden
+
+Die Liste für eine Zielsprache ist die Vereinigung der Funktionswörter aller
+*anderen* Sprachen, abzüglich der gewöhnlichen Wörter der Zielsprache. Für
+`language = "en"` ist das Deutsch plus eine verschmolzene romanische Gruppe,
+für `language = "de"` Englisch plus dieselbe Gruppe.
+
+Die romanische Gruppe sind Spanisch, Portugiesisch, Französisch, Italienisch,
+Rumänisch und Katalanisch in **einer** Liste, nicht in sechs. Das Gate muss sie
+nie auseinanderhalten — es fragt, ob eine Zeile die Zielsprache ist, und jede
+der sechs ist gleichermaßen nicht — also kostet das Verschmelzen nichts
+Messbares: Ein Drittel der Einträge teilen sich die sechs ohnehin, und gegen
+Englisch hat die verschmolzene Liste 11 % Homografen, dieselbe Zahl wie
+Spanisch allein.
+
+Was das Verschmelzen *gekostet hätte*, zahlt stattdessen der Filter. Blank
+kollidiert die Vereinigung mit `a`, `as`, `in`, `to`, `her`, `do`, `no` — alles
+hochfrequentes Englisch. Also wird sie an der einen Stelle, an der sie
+zusammengesetzt wird, um die gewöhnlichen Wörter der Zielsprache erleichtert;
+das ist Code und keine Pflege: Eine später ergänzte Quellliste kann nicht
+zurückschmuggeln, was dort ausgeschlossen wurde. Der Filter gilt je Zielsprache
+und nicht global — `in` ist gegen Englisch wie gegen Deutsch unbrauchbar,
+`come` nur gegen Englisch, wo deutsche Prosa es nie schreibt.
+
+**Kein einbuchstabiges Wort steht in einer Quellliste.** Spanisch `a`,
+portugiesisch `o` und `e`, spanisch `y`, katalanisch `i` sind alle echte
+Funktionswörter — und in einer Commit-Nachricht weit häufiger Laufvariablen und
+Aufzählungsmarken: `Reduce to O(n)`. Aufgenommen sind überhaupt nur Wörter,
+deren richtige Schreibung ohne Akzent auskommt, denn gefaltet wird nur für
+Umlaute und sonst nichts; ein akzentuierter Eintrag stünde in der Liste, träfe
+nichts und läse sich doch wie Abdeckung.
+
+Nur Funktionswörter: Artikel, Präpositionen, Konjunktionen, Pronomen,
+Demonstrativa und die Kopulas und Modalverben, die sich wie sie verhalten. Kein
+Inhaltswort, so gut es sich für einen Testsatz auch eignete — die Heuristik
+ruht auf Wörtern, die in fast jedem Satz einer Sprache stehen, und ein
+Inhaltswort steht nur in Sätzen über seinen Gegenstand.
+
+#### Andere Schriften als die lateinische
+
+Ein Lauf von Buchstaben in einer nichtlateinischen Schrift zählt als **ein
+Treffer**, genau so schwer wie ein Stoppwort. Erfasst sind Han, Hiragana,
+Katakana, Hangul, Kyrillisch, Arabisch, Hebräisch, Griechisch, Devanagari und
+Thai.
+
+Je *Lauf*, nie je Zeichen. Ein chinesisches Wort ist eine Handvoll Zeichen;
+zählte man jedes, ginge jede Nachricht, die ein einziges chinesisches Wort
+nennt, sofort über jede brauchbare Schwelle. Ein Lauf ist ein Wort, und ein
+Wort ist ein Treffer. Ein kombinierendes Zeichen setzt den Lauf davor fort,
+statt einen neuen zu beginnen; sonst zerfiele ein Devanagari- oder Thai-Wort in
+einen Lauf je Konsonant und sein Gewicht vervielfachte sich.
+
+Weil das Gewicht dasselbe ist, gilt alles, was um Stoppworttreffer herum schon
+gebaut ist, unverändert auch hier: die Schwelle, das Zählen je Zeile, die
+geleerten Spans, `[[commit.allow]]`, die Trailer-Ausnahme und der Scherenschnitt.
 
 ### Was nie gewertet wird
 
@@ -680,19 +737,26 @@ einen Commit die Regel wählen, nach der er beurteilt wird. `--calibrate` neben
 einer Nachrichtendatei wird aus dem milderen Grund abgelehnt, dass ein Flag nie
 still übergangen werden soll.
 
-**Die deutsche Richtung ist nicht kalibriert.** Die Wortliste für
-`language = "de"` ist von Hand geschrieben und nie an einem deutschsprachigen
-Repository gemessen worden. Ihre Schwelle ist ein Anfangswert, kein Ergebnis;
-wer ihr trauen will, misst sie vorher mit `--calibrate`. Die englische Richtung
-ist an der Historie eines Projekts kalibriert — hundert englische Commits gegen
-sechzehn deutsche — und hat hier eine zweite Messung: `--calibrate 100
---language en` über ultraloom selbst lehnt am 2026-08-26 genau eine der letzten
-hundert Nachrichten ab, bei Schwelle 1 und bei Schwelle 2 dieselbe. Diese
-Nachricht ist ein englischer Commit *über* die Stoppwortliste, der `das, und`
-blank in einer Klammer zitiert; sie ist die ehrliche Grenze der Heuristik und
-der Grund, warum es Code-Spans und `[[commit.allow]]` gibt. Eine geratene Zahl
-als gemessene auszugeben, wäre genau der Fehler, den dieses Werkzeug verhindern
-soll.
+**Nur eine Quellliste ist kalibriert.** Die deutsche Liste, die gegen Englisch
+durchsucht wird, ist an der Historie eines echten Projekts abgelesen — hundert
+englische Commits gegen sechzehn deutsche — und enthält die Wörter, die sie
+trennten. Alles andere hier, die englische Liste wie die verschmolzene
+romanische, ist aus den Sprachen selbst geschrieben und an keinem Korpus
+gemessen. Das sind Anfangswerte, keine Ergebnisse, und `--calibrate` ist der
+Weg, aus einem davon eine Messung an der eigenen Historie zu machen. Eine
+geratene Zahl als gemessene auszugeben, wäre genau der Fehler, den dieses
+Werkzeug verhindern soll.
+
+Die englische Richtung hat hier eine zweite Messung. `--calibrate 100
+--language en` über ultraloom selbst lehnt am 2026-08-27 zwei der letzten
+hundert Nachrichten bei Schwelle 2 ab, vier bei Schwelle 1 und keine bei
+Schwelle 4. Alle vier sind englische Commits *über* die Wortlisten, die fremde
+Funktionswörter blank in laufender Prosa zitieren — `das, und` in einer
+Klammer, `als, da, du` in einer Aufzählung von Homografen. Sie sind die
+ehrliche Grenze der Heuristik und der Grund, warum es Code-Spans und
+`[[commit.allow]]` gibt. Eine davon zeigt eine zweite Kante, die man kennen
+sollte: ein `de`, gezählt in `README.de.md,`, weil die Pfad-Ausnahme
+Leerraum hinter der Endung braucht und ein anhängendes Komma ihn verwehrt.
 
 ### Exit-Codes
 
