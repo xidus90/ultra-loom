@@ -352,14 +352,28 @@ is refused with the note that the mode is `allow`.
 ### What is blocked without any configuration
 
 With no `.ultraloom/config.toml` at all, the built-in rules still apply — a repo
-is protected without anyone having set anything up. They are security only, and
-they live as a constant in `ultraloom.policy.config`, not in a shipped TOML
+is protected without anyone having set anything up. They are security and the
+gate's own integrity, nothing else, and they live as a constant in `ultraloom.policy.config`, not in a shipped TOML
 file: a file can go missing, a constant cannot.
 
 Paths, reason *secrets are not written by an agent*:
 
     .env   .env.*   *.pem   *.key   id_rsa*   *.p12
     .npmrc   .pypirc   credentials.json   .aws/**
+
+Paths, reason *the stop gate's own controls are not written by the party it
+gates*:
+
+    .claude/.no-verify   .ultraloom/hooks/**
+
+That second group is the one built-in that guards ultraloom rather than the
+project. `.claude/.no-verify` switches the stop gate off, carries no counting
+extension and therefore appears in no change set: a session that writes it
+disables its own gate for good, and nothing in the diff says so. The state
+under `.ultraloom/hooks/` is what the gate measures against, and rewriting it
+moves the baseline instead of doing the work. Neither is out of reach for a
+human — the shell writes both, and `commands` denies nothing by default. The
+rule only keeps a tool call from doing it in passing.
 
 Content, reason *this looks like a credential in plain text*:
 

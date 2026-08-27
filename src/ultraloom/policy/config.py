@@ -37,6 +37,16 @@ DEFAULTS: Mapping[Kind, tuple[Rule, ...]] = {
             is_regex=False,
             tools=None,
         ),
+        # Spelled out rather than imported from the hooks: policy is the layer
+        # under them and must not start a session's worth of check machinery to
+        # answer one path. The drift is caught in the test instead, which may
+        # import both sides.
+        Rule(
+            patterns=(".claude/.no-verify", ".ultraloom/hooks/**"),
+            reason="the stop gate's own controls are not written by the party it gates",
+            is_regex=False,
+            tools=None,
+        ),
     ),
     "content": (
         Rule(

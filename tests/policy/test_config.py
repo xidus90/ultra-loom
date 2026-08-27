@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from ultraloom.config import ConfigError
+from ultraloom.hooks.state import STATE_DIR
+from ultraloom.hooks.stop import MARKER
 from ultraloom.policy.config import DEFAULTS, load_ruleset
 from ultraloom.policy.rules import Subject, evaluate
 
@@ -125,3 +127,23 @@ def test_a_broken_schema_is_refused_by_name(tmp_path: Path, body: str, message: 
     root = _write(tmp_path, body)
     with pytest.raises(ConfigError, match=message):
         load_ruleset(root)
+
+
+def test_the_defaults_protect_the_gate_controls(tmp_path: Path) -> None:
+    """The stop gate's own off switch is not something the gated party writes.
+
+    `.claude/.no-verify` carries no counting extension and shows up in no
+    change set, so a session that writes it disables the gate for good and
+    nothing in the diff says so. Same for the state the gate measures against.
+    """
+    ruleset = load_ruleset(tmp_path)
+    for path in (".claude/.no-verify", ".ultraloom/hooks/some-session.json"):
+        assert not evaluate(ruleset, Subject("paths", path, "Write")).allowed, path
+
+
+def test_the_gate_controls_are_named_by_the_modules_that_own_them() -> None:
+    """A renamed marker must not leave the rule pointing at nothing."""
+    assert MARKER in {pattern for rule in DEFAULTS["paths"] for pattern in rule.patterns}
+    assert f"{STATE_DIR}/**" in {
+        pattern for rule in DEFAULTS["paths"] for pattern in rule.patterns
+    }

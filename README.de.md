@@ -389,8 +389,8 @@ abgelehnt, dass der Modus `allow` ist.
 ### Was ohne jede Konfiguration gesperrt ist
 
 Ohne `.ultraloom/config.toml` greifen die eingebauten Regeln trotzdem — ein Repo
-ist geschützt, ohne dass jemand etwas eingerichtet hat. Sie sind ausschließlich
-sicherheitsrelevant und stehen als Konstante in `ultraloom.policy.config`, nicht
+ist geschützt, ohne dass jemand etwas eingerichtet hat. Sie decken Sicherheit und
+die Unversehrtheit des Gates ab, sonst nichts, und stehen als Konstante in `ultraloom.policy.config`, nicht
 in einer mitgelieferten TOML-Datei: eine Datei kann fehlen, eine Konstante
 nicht.
 
@@ -398,6 +398,21 @@ Pfade, Begründung *secrets are not written by an agent*:
 
     .env   .env.*   *.pem   *.key   id_rsa*   *.p12
     .npmrc   .pypirc   credentials.json   .aws/**
+
+Pfade, Begründung *the stop gate's own controls are not written by the party it
+gates*:
+
+    .claude/.no-verify   .ultraloom/hooks/**
+
+Die zweite Gruppe ist die eine eingebaute Regel, die ultraloom schützt und
+nicht das Projekt. `.claude/.no-verify` schaltet den Stop-Gate ab, trägt keine
+zählende Endung und taucht deshalb in keiner Änderungsmenge auf: eine Sitzung,
+die die Datei schreibt, schaltet ihren eigenen Gate dauerhaft aus, und im Diff
+steht davon nichts. Der Zustand unter `.ultraloom/hooks/` ist das, wogegen der
+Gate misst; ihn zu überschreiben verschiebt die Basislinie, statt die Arbeit zu
+tun. Für einen Menschen ist beides weiter erreichbar — die Shell schreibt beide
+Dateien, und `commands` verbietet per Voreinstellung nichts. Die Regel hält nur
+den beiläufigen Werkzeugaufruf davon ab.
 
 Inhalte, Begründung *this looks like a credential in plain text*:
 
