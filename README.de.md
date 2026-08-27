@@ -536,6 +536,20 @@ Umlaute werden vor dem Vergleich aufgelöst (`ä` zu `ae`, `ö` zu `oe`, `ü` zu
 `ue`, `ß` zu `ss`), `für` und `fuer` sind für die Prüfung also dasselbe Wort,
 während die Wortliste selbst ASCII bleibt.
 
+**Ein Listenwort, das in einem größeren Namen steckt, zählt nicht.** Wörter
+trennen an `-` und `_`, `de-duplication` lieferte dem Zähler sonst ein blankes
+`de` und `fill_na_values` ein blankes `na` — und zwei davon reißen die
+Vorgabeschwelle, womit `Add de-duplication and de-serialization helpers`
+abgelehnt würde, gewöhnliches Englisch. Ein Listenwort mit `-` oder `_`
+unmittelbar auf einer der beiden Seiten gilt deshalb als Teil eines Kompositums
+oder eines Bezeichners und geht durch. Eine Seite genügt: Ein Kompositum darf
+mit dem Wort beginnen oder enden. Nur diese beiden Trenner — ein `.` ist so oft
+Satzzeichen wie Trenner, und `/` ist längst Sache der Pfad-Ausnahme.
+
+Die Alternative wäre gewesen, `de` und `na` aus den Listen zu streichen, und
+das tauscht einen falschen Treffer gegen einen falschen Freispruch: Beides sind
+hochfrequente romanische Funktionswörter, die echte Funde tragen.
+
 #### Welche Sprachen durchsucht werden
 
 Die Liste für eine Zielsprache ist die Vereinigung der Funktionswörter aller
@@ -560,6 +574,17 @@ zurückschmuggeln, was dort ausgeschlossen wurde. Der Filter gilt je Zielsprache
 und nicht global — `in` ist gegen Englisch wie gegen Deutsch unbrauchbar,
 `come` nur gegen Englisch, wo deutsche Prosa es nie schreibt.
 
+**Der Filter wird an einem Korpus geprüft, nicht an einer Handliste.** Ein
+Homograf fliegt nur raus, wenn ihn jemand bemerkt, und eine handgeschriebene
+Liste „gewöhnlicher englischer Wörter" bemerkt genau das, woran ihr Autor
+ohnehin schon gedacht hat — dieselbe Anpassung an das zu Prüfende, von der die
+Wortlisten selbst befreit wurden. Der Test liest darum die Kommentare und
+Docstrings dieses Repositorys, die nach Projektregel englisch sind, und
+behauptet, dass kein Eintrag aus `STOPWORDS["en"]` darin trifft. Das fand
+`sense`, `contra`, `pendant`, `prima`, `est`, `dos`, `com` und `del` — alles
+romanische Funktionswörter, alles gewöhnliche Wörter englischer Fachprosa,
+keines davon auf irgendeiner Handliste. Sie sind jetzt ausgeschlossen.
+
 **Kein einbuchstabiges Wort steht in einer Quellliste.** Spanisch `a`,
 portugiesisch `o` und `e`, spanisch `y`, katalanisch `i` sind alle echte
 Funktionswörter — und in einer Commit-Nachricht weit häufiger Laufvariablen und
@@ -577,16 +602,36 @@ Inhaltswort steht nur in Sätzen über seinen Gegenstand.
 #### Andere Schriften als die lateinische
 
 Ein Lauf von Buchstaben in einer nichtlateinischen Schrift zählt als **ein
-Treffer**, genau so schwer wie ein Stoppwort. Erfasst sind Han, Hiragana,
-Katakana, Hangul, Kyrillisch, Arabisch, Hebräisch, Griechisch, Devanagari und
-Thai.
+Treffer**, genau so schwer wie ein Stoppwort.
+
+Die Regel lautet *nicht lateinisch*, nicht „eine Liste von Schriften", also ist
+**jede** nichtlateinische Schrift erfasst, ohne dass sie jemand aufgezählt
+hätte — Han, Kana, Hangul, Kyrillisch, Arabisch, Hebräisch, Griechisch,
+Devanagari und Thai waren die entworfenen Fälle, aber Armenisch, Georgisch und
+alles Weitere zählen auf genau demselben Fuß.
+
+Lateinisch ist lateinisch, in welchem Codepunktblock es auch getippt wurde.
+Vollbreites `Ｆｉｘ` und mathematisches `𝐅𝐢𝐱` sind Kompatibilitätsformen
+gewöhnlicher Buchstaben; der Text wird darum normalisiert, bevor seine Schrift
+gelesen wird, und keines von beiden zählt.
 
 Je *Lauf*, nie je Zeichen. Ein chinesisches Wort ist eine Handvoll Zeichen;
 zählte man jedes, ginge jede Nachricht, die ein einziges chinesisches Wort
 nennt, sofort über jede brauchbare Schwelle. Ein Lauf ist ein Wort, und ein
-Wort ist ein Treffer. Ein kombinierendes Zeichen setzt den Lauf davor fort,
-statt einen neuen zu beginnen; sonst zerfiele ein Devanagari- oder Thai-Wort in
-einen Lauf je Konsonant und sein Gewicht vervielfachte sich.
+Wort ist ein Treffer.
+
+Zwei Regeln machen das wörtlich wahr statt beinahe wahr:
+
+- Ein **kombinierendes Zeichen setzt** den Lauf davor **fort**; sonst zerfiele
+  ein Devanagari- oder Thai-Wort in einen Lauf je Konsonant und sein Gewicht
+  vervielfachte sich.
+- **Han, beide Kana und das Längungszeichen sind eine Schriftklasse.** Sie
+  tragen getrennte Unicode-Namen, weshalb das bloße Lesen des Namens `パーサ`
+  in drei Läufe zerschnitt und ein einzelnes zitiertes Lehnwort für sich
+  ablehnte, `修復する` in zwei. Das Gate muss Chinesisch nie von Japanisch
+  unterscheiden — nur beides von der Zielsprache — also ist das Zusammenlegen
+  die richtige Körnung und kein Zugeständnis; ein Wort aus Han und Kana wird so
+  zu einem Lauf, wie ein Leser ihn zählt.
 
 Weil das Gewicht dasselbe ist, gilt alles, was um Stoppworttreffer herum schon
 gebaut ist, unverändert auch hier: die Schwelle, das Zählen je Zeile, die
@@ -749,14 +794,16 @@ Werkzeug verhindern soll.
 
 Die englische Richtung hat hier eine zweite Messung. `--calibrate 100
 --language en` über ultraloom selbst lehnt am 2026-08-27 zwei der letzten
-hundert Nachrichten bei Schwelle 2 ab, vier bei Schwelle 1 und keine bei
-Schwelle 4. Alle vier sind englische Commits *über* die Wortlisten, die fremde
+hundert Nachrichten bei Schwelle 2 ab, drei bei Schwelle 1 und keine bei
+Schwelle 4. Alle drei sind englische Commits *über* die Wortlisten, die fremde
 Funktionswörter blank in laufender Prosa zitieren — `das, und` in einer
 Klammer, `als, da, du` in einer Aufzählung von Homografen. Sie sind die
 ehrliche Grenze der Heuristik und der Grund, warum es Code-Spans und
 `[[commit.allow]]` gibt. Eine davon zeigt eine zweite Kante, die man kennen
 sollte: ein `de`, gezählt in `README.de.md,`, weil die Pfad-Ausnahme
-Leerraum hinter der Endung braucht und ein anhängendes Komma ihn verwehrt.
+Leerraum hinter der Endung braucht und ein anhängendes Komma ihn verwehrt. Die
+Trennerregel oben greift dort nicht — `.` ist kein Trenner, aus dem dort
+genannten Grund.
 
 ### Exit-Codes
 

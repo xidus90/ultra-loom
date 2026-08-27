@@ -494,6 +494,20 @@ Umlauts are folded before matching (`ä` to `ae`, `ö` to `oe`, `ü` to `ue`, `�
 to `ss`), so `für` and `fuer` are the same word to the check while the word
 list itself stays ASCII.
 
+**A list word welded into a larger name does not count.** Words split on `-`
+and `_`, so `de-duplication` would otherwise hand the counter a bare `de` and
+`fill_na_values` a bare `na` — and two of either clears the default threshold,
+refusing `Add de-duplication and de-serialization helpers`, which is ordinary
+English. So a list word with `-` or `_` immediately on either side is read as
+part of a compound or an identifier and passes. One side is enough: a compound
+may open or close with the word. Only those two joiners — a `.` is sentence
+punctuation as often as a separator, and `/` is already the path exemption's
+business.
+
+The alternative would have been to drop `de` and `na` from the lists, and that
+trades a false positive for a false negative: both are high-frequency Romance
+function words that carry real detections.
+
 #### Which languages are searched
 
 The list searched for a target is the union of every *other* language's
@@ -516,6 +530,16 @@ source list added later cannot smuggle back in what was excluded there. The
 filter is per target, not global — `in` is unusable against English and German
 both, `come` only against English, where German prose never writes it.
 
+**The filter is checked against a corpus, not against a hand-written list.**
+A homograph only gets excluded if somebody notices it, and a hand-enumerated
+list of "ordinary English" notices exactly what its author already thought of
+— the same fitting-to-the-guard the word lists themselves were cleared of.
+So the test reads this repository's own comments and docstrings, which are
+English by project rule, and asserts that no entry in `STOPWORDS["en"]` scores
+in them. That found `sense`, `contra`, `pendant`, `prima`, `est`, `dos`, `com`
+and `del` — all Romance function words, all ordinary in English technical
+prose, none of them in anybody's hand list. They are excluded now.
+
 **No one-letter word is in any source list.** Spanish `a`, Portuguese `o` and
 `e`, Spanish `y`, Catalan `i` are all real function words, and in a commit
 message they are all far more often loop variables and enumeration labels —
@@ -533,15 +557,33 @@ stands only in sentences about its subject.
 #### Scripts other than Latin
 
 A run of letters in a script that is not Latin counts as **one hit**, weighed
-exactly like a stopword. Covered: Han, Hiragana, Katakana, Hangul, Cyrillic,
-Arabic, Hebrew, Greek, Devanagari and Thai.
+exactly like a stopword.
+
+The rule is *not Latin*, not a list of scripts, so **every** non-Latin script
+is covered without anyone having enumerated it — Han, kana, Hangul, Cyrillic,
+Arabic, Hebrew, Greek, Devanagari and Thai were the ones designed for, but
+Armenian, Georgian and the rest count on exactly the same footing.
+
+Latin is Latin whatever codepoint block it was typed in. Fullwidth `Ｆｉｘ`
+and mathematical `𝐅𝐢𝐱` are compatibility forms of ordinary letters, so the
+text is normalised before its script is read and neither scores.
 
 Per *run*, never per character. A Chinese word is a handful of characters, so
 counting each one would put every message that names a single Chinese word
-over any usable threshold at once. A run is a word, and a word is one hit. A
-combining mark continues the run in front of it rather than starting a new
-one; otherwise a Devanagari or Thai word splits into one run per consonant and
-its weight multiplies.
+over any usable threshold at once. A run is a word, and a word is one hit.
+
+Two rules make that literally true rather than nearly true:
+
+- A **combining mark continues** the run in front of it; otherwise a
+  Devanagari or Thai word splits into one run per consonant and its weight
+  multiplies.
+- **Han, both kana and the prolonged sound mark are one script class.** They
+  have separate Unicode names, so reading the name alone cut `パーサ` into
+  three runs and refused a single quoted loanword on its own, and `修復する`
+  into two. The gate never has to tell Chinese from Japanese — only either
+  from the target — so collapsing them is the correct granularity, not a
+  concession, and it makes a mixed Han-and-kana word one run the way a reader
+  counts it.
 
 Because the weight is the same, everything already built around stopword hits
 applies to these unchanged: the threshold, the per-line counting, the blanked
@@ -653,13 +695,15 @@ measured one would be exactly the failure this tool argues against.
 
 The English direction has a second reading here. `--calibrate 100 --language
 en` over ultraloom itself on 2026-08-27 refuses two of the last hundred
-messages at threshold 2, four at threshold 1 and none at threshold 4. All four
-are English commits *about* the word lists, citing foreign function words bare
-in running prose — `das, und` in parentheses, `als, da, du` in a list of
-homographs. They are the honest limit of the heuristic, and the reason code
-spans and `[[commit.allow]]` exist. One of them shows a second edge worth
+messages at threshold 2, three at threshold 1 and none at threshold 4. All
+three are English commits *about* the word lists, citing foreign function
+words bare in running prose — `das, und` in parentheses, `als, da, du` in a
+list of homographs. They are the honest limit of the heuristic, and the reason
+code spans and `[[commit.allow]]` exist. One of them shows a second edge worth
 knowing: a `de` counted inside `README.de.md,` because the path exemption
-needs whitespace after the extension and a trailing comma denies it.
+needs whitespace after the extension and a trailing comma denies it. The
+joiner rule above does not reach it — `.` is not a joiner, for the reason
+given there.
 
 ### Exit codes
 
