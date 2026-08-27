@@ -29,6 +29,7 @@ from ultraloom.process import (
     _threads_of,
     _usable_handle,
     _walk_snapshot,
+    child_env,
     run,
     spawn_kwargs,
     terminator,
@@ -737,3 +738,24 @@ def test_the_snapshot_walk_reads_between_the_steps() -> None:
 
 def test_a_snapshot_whose_first_step_says_no_is_empty() -> None:
     assert _walk_snapshot(begin=lambda: False, advance=lambda: True, read=lambda: "never") == []
+
+
+def test_the_child_is_told_to_write_utf8() -> None:
+    """The decoder here is fixed at utf-8, so the encoder there has to be too.
+
+    Not a preference that a machine's own setting outranks: an inherited
+    cp1252 does not merely look different in the report, it takes the child
+    down at the first character outside it -- before a byte reaches the pipe,
+    where nothing on this side can still fix it.
+    """
+    assert child_env({"PATH": "/usr/bin"})["PYTHONIOENCODING"] == "utf-8"
+    assert child_env({"PATH": "/usr/bin"})["PATH"] == "/usr/bin"
+    assert child_env({"PYTHONIOENCODING": "cp1252"})["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_a_child_may_print_a_character_the_locale_cannot(tmp_path: Path) -> None:
+    """The measured failure: ruff wrote an umlaut and died on the console codec."""
+    completed = run(_python("print('✓ für')"), cwd=tmp_path, timeout=30)
+
+    assert completed.returncode == 0, completed.stderr
+    assert "✓ für" in completed.stdout

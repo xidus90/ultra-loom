@@ -54,7 +54,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TypeGuard, cast
@@ -133,6 +133,7 @@ def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
         cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=child_env(os.environ),
         **spawn_kwargs(sys.platform),
     )
     try:
@@ -282,6 +283,23 @@ def _drain(stream: IO[bytes] | None, name: str) -> _Drain:
     thread = threading.Thread(target=pump, daemon=True, name=f"ultraloom-{name}")
     thread.start()
     return _Drain(thread=thread, chunks=chunks, failed=failed)
+
+
+def child_env(parent: Mapping[str, str]) -> dict[str, str]:
+    """The environment a check command runs in: the parent's, plus utf-8.
+
+    `_decode` reads every pipe as utf-8, and a child left to the machine's
+    locale does not merely answer in another one. On Windows it writes through
+    a console codec of cp1252 and raises at the first character outside it --
+    inside the child, before a byte reaches the pipe, where no decoding on this
+    side can still recover it. Measured on `ruff`, whose finding carried an
+    umlaut: the check reported a crash instead of the finding.
+
+    So an inherited value is overwritten rather than respected. This is not a
+    preference a machine may hold against us; it is the other half of a
+    decoding that is already fixed.
+    """
+    return {**parent, "PYTHONIOENCODING": "utf-8"}
 
 
 def spawn_kwargs(platform: str) -> dict[str, object]:
