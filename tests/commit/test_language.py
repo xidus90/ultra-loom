@@ -11,9 +11,9 @@ from collections.abc import Iterator
 import pytest
 
 from ultraloom.commit.language import (
+    _SOURCES,
     LANGUAGES,
     STOPWORDS,
-    _SOURCES,
     _script_runs,
     scan,
 )
@@ -713,8 +713,13 @@ def test_fullwidth_and_mathematical_latin_are_latin() -> None:
     `Fix the parser` read as three runs of a foreign script. Normalising
     before the script is read folds them back to the letters they are.
     """
-    assert scan("\uff26\uff49\uff58 \uff54\uff48\uff45 \uff50\uff41\uff52\uff53\uff45\uff52", "en", 2) == ()
-    assert scan("\U0001d413\U0001d422\U0001d425 \U0001d41e\U0001d425\U0001d42b", "en", 2) == ()
+    # The suppression below is needed because the linter reads a bare
+    # fullwidth letter as a homoglyph typo -- which is exactly what it is
+    # everywhere except in this test.
+    fullwidth = "Ｆｉｘ ｔｈｅ ｐａｒｓｅｒ"  # noqa: RUF001
+    mathematical = "\U0001d413\U0001d422\U0001d425 \U0001d41e\U0001d425\U0001d42b"
+    assert scan(fullwidth, "en", 2) == ()
+    assert scan(mathematical, "en", 2) == ()
 
 
 def test_scripts_beyond_the_ten_named_ones_are_covered() -> None:
