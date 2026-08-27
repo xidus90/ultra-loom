@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import io
 import json
 import sys
 from collections.abc import Sequence
@@ -41,8 +42,26 @@ _COVERAGE_HINT = (
 )
 
 
+def _survive_the_console(stream: object) -> None:
+    """Let a stream drop what it cannot encode instead of raising.
+
+    A check tool may report anything -- a test file holding Chinese or Cyrillic
+    data is enough -- and a Windows console is still cp1252. Writing that output
+    through it raises UnicodeEncodeError, and the chain dies where it should
+    have reported findings. process.py already decodes the child's bytes with
+    errors="replace"; this is the same policy on the way back out.
+
+    Only a TextIOWrapper encodes anything. A StringIO or a stub a caller passed
+    in has no encoding to fail on, so there is nothing to do for it.
+    """
+    if isinstance(stream, io.TextIOWrapper):
+        stream.reconfigure(errors="replace")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one subcommand. Returns the process exit code."""
+    _survive_the_console(sys.stdout)
+    _survive_the_console(sys.stderr)
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command is None:

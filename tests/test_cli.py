@@ -1,5 +1,6 @@
 """Tests for the command line."""
 
+import io
 import subprocess
 import sys
 import time
@@ -1357,3 +1358,53 @@ def test_commit_msg_refuses_a_count_below_one(
 
     assert code == 1
     assert "at least 1" in capsys.readouterr().err
+
+
+def cp1252_stream() -> tuple[io.TextIOWrapper, io.BytesIO]:
+    """A stdout that behaves like a Windows console under code page 1252."""
+    raw = io.BytesIO()
+    return io.TextIOWrapper(raw, encoding="cp1252", newline="\n"), raw
+
+
+def test_a_cp1252_stream_cannot_write_the_output_a_check_may_produce() -> None:
+    """The premise of the two tests below, pinned so it cannot rot silently."""
+    stream, _raw = cp1252_stream()
+
+    with pytest.raises(UnicodeEncodeError):
+        stream.write("\u4e2d\u6587\u041a\u0438\u0440")
+
+
+def test_check_prints_non_ascii_tool_output_on_a_cp1252_console(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A check chain must report its findings, not die on the console encoding."""
+    write_config(
+        tmp_path,
+        "[verify]\nlint = '"
+        + python_command(
+            "import sys; sys.stdout.buffer.write(chr(20013).encode()); sys.exit(1)"
+        )
+        + "'\n",
+    )
+    stream, raw = cp1252_stream()
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    code = main(["check", "lint", "--root", str(tmp_path)])
+
+    stream.flush()
+    assert code == 1
+    assert b"lint" in raw.getvalue()
+
+
+def test_check_leaves_a_stream_that_cannot_be_reconfigured_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller may hand us a StringIO; it encodes nothing and needs nothing."""
+    write_config(tmp_path, f"[verify]\nlint = '{python_command('pass')}'\n")
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    code = main(["check", "lint", "--root", str(tmp_path)])
+
+    assert code == 0
+    assert "lint" in stream.getvalue()
