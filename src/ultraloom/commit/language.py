@@ -43,9 +43,11 @@ _ORDINARY: Mapping[Language, frozenset[str]] = {
     "en": frozenset(
         {
             "a", "an", "as", "at", "all", "and", "any", "are", "back", "be",
-            "been", "both", "by", "can", "care", "come", "den", "did", "die",
+            "been", "both", "by", "can", "car", "care", "come", "den",
+            "did", "die", "dove",
             "do", "does", "down", "each", "even", "fest", "first", "for",
-            "from", "get", "had", "has", "hat", "have", "her", "here", "him",
+            "fins", "from", "get", "had", "has", "hat", "have", "her",
+            "here", "him", "um",
             "his", "how", "if", "in", "into", "is", "it", "its", "just",
             "last", "le", "less", "lo", "made", "make", "man", "many", "may",
             "more", "most", "much", "new", "next", "no", "not", "now", "of",
@@ -66,7 +68,8 @@ _ORDINARY: Mapping[Language, frozenset[str]] = {
             "bis", "da", "dann", "das", "dass", "dem", "den", "der", "des",
             "die", "doch", "du", "durch", "ein", "eine", "einen", "er", "es",
             "fuer", "gegen", "gut", "haben", "hat", "hier", "ich", "ihr", "im",
-            "in", "ist", "jetzt", "kann", "mal", "man", "mehr", "mit", "muss",
+            "in", "ist", "ja", "jetzt", "kann", "mal", "man", "mehr", "mit",
+            "muss", "prima",
             "nach", "neu", "nicht", "noch", "nun", "nur", "oder", "ohne",
             "per", "plus", "schon", "sehr", "sein", "sie", "sind", "so",
             "soll", "ueber", "um", "und", "unter", "vor", "von", "war",
@@ -105,9 +108,16 @@ _ENGLISH_SOURCE = frozenset(
 # not. A third of the Spanish entries are also Portuguese, and that overlap
 # costs nothing once they share one set.
 #
-# Entries are ASCII throughout and carry no accents, since the text is folded
-# for umlauts only and an accented entry would never match anything. The
-# unaccented forms are the ones that matter here in any case.
+# Function words only -- articles, prepositions, conjunctions, pronouns,
+# demonstratives, and the copulas and modals that behave like them. No content
+# word, however well it would suit a test sentence: the heuristic rests on
+# words that stand in nearly every sentence of a language, and a content word
+# stands only in sentences about its subject. See the test named for that rule.
+#
+# Entries are ASCII and unaccented, and only words whose real spelling carries
+# no accent are here at all. The text is folded for umlauts and nothing else,
+# so tres for tres-with-an-accent or perche for perche-with-an-accent would sit
+# in the list matching nothing and read as coverage that does not exist.
 #
 # No one-letter word is here. Spanish a, Portuguese o and e, Spanish y and
 # Catalan i are all real function words, and in a commit message they are all
@@ -116,45 +126,58 @@ _ENGLISH_SOURCE = frozenset(
 # negation would tokenise into a hit.
 #
 # The six groups below only say where an entry was drawn from. Where two
-# languages share a spelling -- Portuguese da and Italian da, Spanish este and
-# Romanian este -- it is written once, under the first of them.
+# languages share a spelling -- Portuguese com and Catalan com, Spanish este
+# and Romanian este -- it is written once, under the first of them.
 _ROMANCE_SOURCE = frozenset(
     {
         # Spanish
-        "el", "la", "los", "las", "una", "uno", "unos", "unas", "que",
-        "con", "por", "para", "pero", "como", "cuando", "donde", "porque",
-        "este", "esta", "estos", "estas", "esto", "ese", "esa", "eso", "del",
-        "al", "sobre", "entre", "sin", "desde", "hasta", "muy", "mas",
-        "tambien", "ahora", "siempre", "cada", "otro", "otra", "todos",
-        "todas", "tan", "son", "no", "ser", "estar", "hace", "hacer",
-        "puede", "debe", "tiene", "aparece", "corrige", "entrada", "archivo",
+        "el", "la", "los", "las", "una", "uno", "unos", "unas", "que", "con",
+        "por", "para", "pero", "como", "cuando", "donde", "porque", "este",
+        "esta", "estos", "estas", "esto", "ese", "esa", "eso", "del", "al",
+        "sobre", "entre", "sin", "desde", "hasta", "muy", "cada", "otro",
+        "otra", "otros", "otras", "todos", "todas", "tan", "son", "no", "ser",
+        "estar", "puede", "debe", "tiene", "su", "sus", "mi", "mis", "tu",
+        "aqui", "asi", "cual", "cuales", "quien", "quienes", "todo", "toda",
+        "antes", "aunque", "mientras", "durante", "hacia", "contra", "mismo",
+        "misma", "alguna", "algunos", "cualquier", "tanto", "tanta", "poco",
+        "nada", "nadie", "siempre", "nunca", "entonces", "ahora",
         # Portuguese
-        "os", "as", "uma", "uns", "umas", "do", "da", "dos", "das", "na",
-        "nos", "nas", "sem", "muito", "erro", "quem", "qual", "quais",
-        "seja", "tem", "pode", "esse", "essa", "isso", "ficheiro",
+        "com", "as", "um", "uma", "uns", "umas", "do", "da", "dos",
+        "das", "na", "nos", "nas", "ao", "aos", "pelo", "pela", "pelos",
+        "pelas", "numa", "sem", "muito", "quem", "qual", "quais",
+        "tem", "pode", "esse", "essa", "aquele", "aquela", "aquilo", "isto",
+        "isso", "seu", "sua", "seus", "suas", "meu", "minha", "ele", "ela",
+        "eles", "elas", "ainda", "depois", "assim", "pois", "foi", "mas",
         # French
         "le", "lo", "les", "des", "du", "au", "aux", "ce", "cet", "cette",
-        "ces", "une", "qui", "quoi", "avec", "pour", "mais", "quand", "sur",
-        "sous", "sans", "depuis", "tres", "aussi", "maintenant", "toujours",
-        "chaque", "autre", "autres", "tous", "toutes", "tout", "dans",
-        "plus", "moins", "encore", "alors", "donc", "parce", "pourquoi",
-        "est", "sont", "etre", "avoir", "peut", "doit", "faire", "fait",
-        "erreur", "erreurs", "apparaissent", "entree", "fichier", "pas",
-        "se", "si", "leur", "leurs", "nous", "vous", "ils", "elles", "par",
+        "ces", "une", "qui", "quoi", "avec", "pour", "quand", "sur", "sous",
+        "sans", "depuis", "aussi", "toujours", "chaque", "autre", "autres",
+        "tous", "toutes", "tout", "toute", "dans", "plus", "moins", "encore",
+        "alors", "donc", "car", "parce", "pourquoi", "est", "sont", "peut",
+        "doit", "pas", "se", "si", "leur", "leurs", "nous", "vous", "ils",
+        "elle", "elles", "par", "je", "il", "on", "sa", "ses", "mon", "ma",
+        "mes", "notre", "votre", "cela", "ceci", "celui", "celle", "ceux",
+        "dont", "lorsque", "puisque", "afin", "chez", "avant", "pendant",
+        "selon", "aucun", "aucune", "plusieurs", "beaucoup", "peu", "bien",
+        "ainsi", "quel", "quelle", "quels", "quelles", "quelque", "soit",
         # Italian
-        "il", "gli", "che", "perche", "questo", "questa", "questi", "queste",
-        "quello", "tra", "fra", "senza", "ogni", "tutti", "tutte", "molto",
-        "anche", "adesso", "essere", "viene", "deve", "errore", "appare",
-        "corregge", "della", "dello", "dei", "degli", "delle", "nel",
-        "nella", "alla", "allo", "agli", "dal", "dalla", "come", "in",
+        "gli", "che", "questo", "questa", "questi", "queste", "quello",
+        "quella", "quelli", "della", "dello", "dei", "degli",
+        "delle", "nel", "nella", "nei", "negli", "nelle", "alla", "allo",
+        "agli", "alle", "dal", "dalla", "dai", "sul", "sulla", "tra", "fra",
+        "senza", "ogni", "tutti", "tutte", "tutta", "molto", "anche",
+        "ancora", "adesso", "essere", "sono", "siamo", "loro", "noi", "voi",
+        "lui", "lei", "essi", "dove", "quindi", "mentre", "dopo", "prima",
+        "stesso", "alcuni", "molti", "come", "in",
         # Romanian
-        "sau", "nu", "sunt", "care", "pentru", "cu", "din", "de",
-        "acest", "aceasta", "acum", "mereu", "fiecare", "toti", "toate",
-        "foarte", "deci", "eroare", "apare", "intrare", "fisier", "mult",
-        "dar",
+        "sau", "nu", "sunt", "care", "pentru", "cu", "din", "de", "acest",
+        "aceasta", "aceste", "acestea", "acum", "mereu", "fiecare", "toate",
+        "foarte", "deci", "mult", "dar", "pe", "prin", "asta", "orice",
+        "unde", "atunci",
         # Catalan
-        "els", "amb", "aquest", "aquesta", "aquests", "tambe", "ara",
-        "fitxer", "apareix", "dels", "als",
+        "els", "amb", "aquest", "aquesta", "aquests", "aquestes", "sense",
+        "ara", "dels", "als", "molt", "molts", "pels", "seva", "nosaltres",
+        "vosaltres", "ells", "fins", "encara", "llavors", "doncs", "ja",
     }
 )
 

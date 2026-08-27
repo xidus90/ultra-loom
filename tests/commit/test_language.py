@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from ultraloom.commit.language import STOPWORDS, scan
+from ultraloom.commit.language import LANGUAGES, STOPWORDS, scan
 
 
 def test_an_english_message_is_clean() -> None:
@@ -544,3 +544,23 @@ def test_no_source_word_is_ordinary_in_its_target_language() -> None:
         "es", "wie", "was", "nun", "hat", "bei", "aus", "als", "ich", "du",
     }
     assert not (STOPWORDS["de"] & ordinary_german)
+
+
+def test_the_lexicon_is_not_fitted_to_the_words_of_its_own_tests() -> None:
+    """No content word, however handy it is for a test sentence here.
+
+    The heuristic rests on words that stand in nearly every sentence of a
+    language. A content word stands only in sentences about its subject --
+    archivo only where the subject is files -- so it generalises to nothing,
+    inflates the list and carries a fresh homograph risk into every language
+    nobody has checked yet. Each word below was once in the list, and four of
+    them were the words that made this suite's Portuguese sentence fire.
+    """
+    content_words = {
+        "aparece", "corrige", "entrada", "archivo", "erro", "ficheiro",
+        "erreur", "erreurs", "apparaissent", "entree", "fichier", "errore",
+        "appare", "corregge", "eroare", "apare", "intrare", "fisier",
+        "fitxer", "apareix",
+    }
+    for target in LANGUAGES:
+        assert not (STOPWORDS[target] & content_words)
