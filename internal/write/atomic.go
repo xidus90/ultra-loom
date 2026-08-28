@@ -23,13 +23,28 @@ import (
 	"strings"
 )
 
-// Plan is what Prepare decided. Create maps the same slash-separated names
-// the renderer used to the body each file would get; Skip names the files
-// left alone, sorted, because a caller prints it and a run should read the
-// same twice.
+// Plan is what Prepare decided, in the same slash-separated names the
+// renderer used: Create maps each new file to its body, Skip names the files
+// left alone.
+//
+// A dry-run summary prints both halves, and two runs over an unchanged
+// project should read alike, so both halves come with an order: Skip is
+// sorted, and Names gives the sorted Create keys. Ranging over Create
+// directly gives a different order every time -- use Names.
 type Plan struct {
 	Create map[string]string
 	Skip   []string
+}
+
+// Names is the order Commit works in, so what a caller printed beforehand and
+// what a failed run left behind line up.
+func (p Plan) Names() []string {
+	names := make([]string, 0, len(p.Create))
+	for name := range p.Create {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Prepare sorts the rendered files into those that would be written and those
@@ -73,24 +88,33 @@ func checkName(name string) error {
 	return nil
 }
 
-// Commit writes the files Prepare chose. Names are taken in sorted order so a
-// failed run stops at the same place twice.
+// Commit writes the files Prepare chose. A Plan can also be built by hand, so
+// the names are checked again here: the promise not to write outside root
+// belongs to the package, not to one of its two entry points.
 func Commit(root string, plan Plan) error {
-	names := make([]string, 0, len(plan.Create))
-	for name := range plan.Create {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range plan.Names() {
+		if err := checkName(name); err != nil {
+			return err
+		}
 		full := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			return fmt.Errorf("creating the directory for %s: %w", name, err)
 		}
 		if err := writeNew(full, plan.Create[name]); err != nil {
-			return fmt.Errorf("writing %s: %w", name, err)
+			return commitFailure(name, err)
 		}
 	}
 	return nil
+}
+
+// commitFailure tells the two ways a planned file can fail to appear apart.
+// A refusal is the package working as designed and reads as such; anything
+// else is the disk saying no.
+func commitFailure(name string, err error) error {
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("refusing to overwrite %s: it appeared after the plan was made: %w", name, err)
+	}
+	return fmt.Errorf("writing %s: %w", name, err)
 }
 
 // writeNew creates a file that must not exist yet. O_EXCL is the skip

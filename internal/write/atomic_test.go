@@ -1,9 +1,11 @@
 package write
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +119,54 @@ func TestADirectoryThatCannotBeCreatedIsReported(t *testing.T) {
 	plan := Plan{Create: map[string]string{"a/b.txt": "x"}}
 	if err := Commit(root, plan); err == nil {
 		t.Fatal("Commit created a directory where a file stands")
+	}
+}
+
+func TestCommitRefusesAHostileNameInAHandBuiltPlan(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "project")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := Plan{Create: map[string]string{"../escape.txt": "x"}}
+	if err := Commit(root, plan); err == nil {
+		t.Fatal("Commit accepted a name that leaves the project")
+	}
+	if _, err := os.Stat(filepath.Join(root, "..", "escape.txt")); !os.IsNotExist(err) {
+		t.Fatalf("Commit wrote outside root: %v", err)
+	}
+}
+
+func TestTheRaceIsExplainedNotJustReported(t *testing.T) {
+	root := t.TempDir()
+	plan, err := Prepare(root, map[string]string{"late.txt": "theirs"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "late.txt"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = Commit(root, plan)
+	if err == nil {
+		t.Fatal("Commit did not report the race")
+	}
+	if !strings.Contains(err.Error(), "appeared after the plan was made") {
+		t.Fatalf("error does not explain itself: %v", err)
+	}
+}
+
+func TestNamesGivesCallersTheCommitOrder(t *testing.T) {
+	plan := Plan{Create: map[string]string{"e": "", "b": "", "d": "", "a": "", "c": "", "f": ""}}
+	want := []string{"a", "b", "c", "d", "e", "f"}
+	if !slices.Equal(plan.Names(), want) {
+		t.Fatalf("Names() = %v, want %v", plan.Names(), want)
+	}
+}
+
+func TestAFailureThatIsNotARaceReadsAsAFailure(t *testing.T) {
+	// No portable way exists to make an exclusive create fail with anything but
+	// "exists" once its directory is there, so the classifier is asked directly.
+	err := commitFailure("a.txt", errors.New("disk on fire"))
+	if !strings.Contains(err.Error(), "writing a.txt") || strings.Contains(err.Error(), "appeared after") {
+		t.Fatalf("wrong wording: %v", err)
 	}
 }
