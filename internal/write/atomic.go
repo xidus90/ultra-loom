@@ -1,0 +1,106 @@
+// Package write decides first and writes second.
+//
+// The split is what makes --dry-run honest: Prepare answers "what would
+// change?" by reading only, and Commit is the same answer applied. Nothing
+// Commit does can change an answer Prepare gave, because every decision was
+// taken before the first byte landed.
+//
+// It does not make the write a transaction. A failure on the third file
+// leaves the first two on disk, and this package offers no undo. What it
+// does guarantee is that init only ever adds: a file that already existed is
+// skipped, and Commit refuses -- rather than overwrites -- a file that
+// appeared after Prepare looked. Whatever a failed run leaves behind, none of
+// it is somebody else's content.
+package write
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// Plan is what Prepare decided. Create maps the same slash-separated names
+// the renderer used to the body each file would get; Skip names the files
+// left alone, sorted, because a caller prints it and a run should read the
+// same twice.
+type Plan struct {
+	Create map[string]string
+	Skip   []string
+}
+
+// Prepare sorts the rendered files into those that would be written and those
+// that already exist. It touches nothing.
+func Prepare(root string, files map[string]string) (Plan, error) {
+	plan := Plan{Create: map[string]string{}}
+	for name, body := range files {
+		if err := checkName(name); err != nil {
+			return Plan{}, err
+		}
+		full := filepath.Join(root, filepath.FromSlash(name))
+		switch _, err := os.Stat(full); {
+		case err == nil:
+			plan.Skip = append(plan.Skip, name)
+		case os.IsNotExist(err):
+			plan.Create[name] = body
+		default:
+			return Plan{}, fmt.Errorf("looking at %s: %w", name, err)
+		}
+	}
+	sort.Strings(plan.Skip)
+	return plan, nil
+}
+
+// checkName refuses anything that could land outside root. The renderer is
+// the only caller today, but a tool that writes into a stranger's project
+// earns its trust by not needing any: a name that escapes is a bug wherever
+// it came from, and the safe answer to a bug is to stop.
+func checkName(name string) error {
+	// fs.ValidPath is the slash-world rule: no empty name, no leading slash,
+	// no "." or ".." element, no doubled or trailing separator.
+	if !fs.ValidPath(name) || name == "." {
+		return fmt.Errorf("refusing the file name %q: it is not a relative path inside the project", name)
+	}
+	// Windows reads two more characters as structure that fs.ValidPath, which
+	// knows only slashes, hands through as ordinary letters: a backslash
+	// separates, and a colon opens a drive or an alternate data stream.
+	if strings.ContainsAny(name, `\:`) {
+		return fmt.Errorf("refusing the file name %q: it contains a separator or a drive letter", name)
+	}
+	return nil
+}
+
+// Commit writes the files Prepare chose. Names are taken in sorted order so a
+// failed run stops at the same place twice.
+func Commit(root string, plan Plan) error {
+	names := make([]string, 0, len(plan.Create))
+	for name := range plan.Create {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return fmt.Errorf("creating the directory for %s: %w", name, err)
+		}
+		if err := writeNew(full, plan.Create[name]); err != nil {
+			return fmt.Errorf("writing %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// writeNew creates a file that must not exist yet. O_EXCL is the skip
+// decision enforced at the last moment: between Prepare and here somebody may
+// have created the file, and this run has no claim on what they wrote.
+func writeNew(full, body string) error {
+	f, err := os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	_, werr := f.WriteString(body)
+	return errors.Join(werr, f.Close())
+}

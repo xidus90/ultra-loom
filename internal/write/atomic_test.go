@@ -1,0 +1,121 @@
+package write
+
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+)
+
+func TestAnExistingFileIsSkippedNotOverwritten(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "keep.txt")
+	if err := os.WriteFile(target, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Prepare(root, map[string]string{"keep.txt": "theirs"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if len(plan.Create) != 0 || len(plan.Skip) != 1 {
+		t.Fatalf("plan = %+v, want one skip and no create", plan)
+	}
+	if err := Commit(root, plan); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	body, _ := os.ReadFile(target)
+	if string(body) != "mine" {
+		t.Fatalf("file was overwritten: %q", body)
+	}
+}
+
+func TestDirectoriesAreCreatedForNewFiles(t *testing.T) {
+	root := t.TempDir()
+	plan, err := Prepare(root, map[string]string{".ultraloom/policy.toml": "x"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := Commit(root, plan); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".ultraloom", "policy.toml")); err != nil {
+		t.Fatalf("file missing: %v", err)
+	}
+}
+
+func TestSkipIsSortedRegardlessOfMapOrder(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{}
+	for _, name := range []string{"e.txt", "b.txt", "d.txt", "a.txt", "c.txt", "f.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("mine"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		files[name] = "theirs"
+	}
+	plan, err := Prepare(root, files)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	want := []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"}
+	if !slices.Equal(plan.Skip, want) {
+		t.Fatalf("Skip = %v, want %v", plan.Skip, want)
+	}
+}
+
+func TestHostileNamesAreRefused(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{
+		"",
+		".",
+		"..",
+		"../escape.txt",
+		"a/../../escape.txt",
+		"/etc/passwd",
+		"C:/Windows/system32/x",
+		`..\escape.txt`,
+		"a//b",
+		"a/",
+	} {
+		if _, err := Prepare(root, map[string]string{name: "x"}); err == nil {
+			t.Errorf("Prepare accepted %q", name)
+		}
+	}
+}
+
+func TestAFileAppearingAfterPrepareIsNotOverwritten(t *testing.T) {
+	root := t.TempDir()
+	plan, err := Prepare(root, map[string]string{"late.txt": "theirs"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	target := filepath.Join(root, "late.txt")
+	if err := os.WriteFile(target, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(root, plan); err == nil {
+		t.Fatal("Commit overwrote a file that appeared after Prepare")
+	}
+	body, _ := os.ReadFile(target)
+	if string(body) != "mine" {
+		t.Fatalf("file was overwritten: %q", body)
+	}
+}
+
+func TestAnUnreadableNameIsReported(t *testing.T) {
+	// A NUL byte in the root never reaches the OS: Go's own string conversion
+	// rejects it, on every platform, with something that is not "not found".
+	if _, err := Prepare("bad\x00root", map[string]string{"a.txt": "x"}); err == nil {
+		t.Fatal("Prepare accepted a root it cannot stat")
+	}
+}
+
+func TestADirectoryThatCannotBeCreatedIsReported(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a"), []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := Plan{Create: map[string]string{"a/b.txt": "x"}}
+	if err := Commit(root, plan); err == nil {
+		t.Fatal("Commit created a directory where a file stands")
+	}
+}
