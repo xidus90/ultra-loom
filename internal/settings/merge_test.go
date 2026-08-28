@@ -343,3 +343,43 @@ func TestMergePreservesExactLifecycleOrder(t *testing.T) {
 		t.Fatalf("Hook lifecycle order violated in settings JSON:\n%s", merged)
 	}
 }
+
+func TestHookBlockAndCommandKeyOrder(t *testing.T) {
+	entries := []Entry{
+		{Event: "PostToolUse", Matcher: "Write|Edit", Command: "run.sh", Timeout: 180},
+	}
+	res, err := Merge(nil, entries)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	merged := string(res.Merged)
+
+	// 1. In outer block: "matcher" must be before "hooks"
+	posMatcher := strings.Index(merged, `"matcher"`)
+	posHooks := strings.Index(merged, `"hooks": [`)
+	if !(posMatcher >= 0 && posHooks >= 0 && posMatcher < posHooks) {
+		t.Fatalf("want matcher before hooks:\n%s", merged)
+	}
+
+	// 2. In command block: "type" before "command" before "timeout"
+	posType := strings.Index(merged, `"type"`)
+	posCommand := strings.Index(merged, `"command"`)
+	posTimeout := strings.Index(merged, `"timeout"`)
+	if !(posType >= 0 && posCommand >= 0 && posTimeout >= 0 &&
+		posType < posCommand && posCommand < posTimeout) {
+		t.Fatalf("want type < command < timeout:\n%s", merged)
+	}
+}
+
+func TestFormatBlockAndCommandFallbacks(t *testing.T) {
+	// 1. Existing block that is a string instead of map
+	rawJSON := `{"hooks":{"CustomEvent":["not-a-map", {"hooks": "not-a-list"}, {"hooks": ["not-a-cmd-map"]}]}}`
+	res, err := Merge([]byte(rawJSON), nil)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if !strings.Contains(string(res.Merged), "not-a-map") {
+		t.Fatalf("fallback failed:\n%s", res.Merged)
+	}
+}
+

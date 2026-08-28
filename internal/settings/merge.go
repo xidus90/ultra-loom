@@ -89,11 +89,7 @@ func Merge(existing []byte, wanted []Entry) (Result, error) {
 		hooks[entry.Event] = list
 	}
 	if present || len(hooks) > 0 {
-		ordered, err := orderHooks(hooks)
-		if err != nil {
-			return Result{}, err
-		}
-		root["hooks"] = ordered
+		root["hooks"] = orderHooks(hooks)
 	}
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
@@ -111,9 +107,9 @@ var lifecycleOrder = []string{
 	"Stop",
 }
 
-func orderHooks(hooks map[string]any) (json.RawMessage, error) {
+func orderHooks(hooks map[string]any) json.RawMessage {
 	if len(hooks) == 0 {
-		return json.RawMessage("{}"), nil
+		return json.RawMessage("{}")
 	}
 	var keys []string
 	seen := map[string]bool{}
@@ -135,22 +131,128 @@ func orderHooks(hooks map[string]any) (json.RawMessage, error) {
 	var buf strings.Builder
 	buf.WriteString("{\n")
 	for i, key := range keys {
-		valJSON, err := json.MarshalIndent(hooks[key], "    ", "  ")
-		if err != nil {
-			return nil, err
-		}
 		keyJSON, _ := json.Marshal(key)
-		buf.WriteString("    ")
-		buf.WriteString(string(keyJSON))
-		buf.WriteString(": ")
-		buf.WriteString(string(valJSON))
+		buf.WriteString("    " + string(keyJSON) + ": ")
+		list, ok := hooks[key].([]any)
+		if ok {
+			buf.WriteString("[\n")
+			for j, block := range list {
+				buf.WriteString(formatBlock(block, "      "))
+				if j < len(list)-1 {
+					buf.WriteString(",")
+				}
+				buf.WriteString("\n")
+			}
+			buf.WriteString("    ]")
+		} else {
+			valJSON, _ := json.MarshalIndent(hooks[key], "    ", "  ")
+			buf.WriteString(string(valJSON))
+		}
 		if i < len(keys)-1 {
 			buf.WriteString(",")
 		}
 		buf.WriteString("\n")
 	}
 	buf.WriteString("  }")
-	return json.RawMessage(buf.String()), nil
+	return json.RawMessage(buf.String())
+}
+
+func formatCommand(cmd map[string]any, indent string) string {
+	keysOrder := []string{"type", "command", "timeout"}
+	seen := map[string]bool{}
+	var orderedKeys []string
+	for _, k := range keysOrder {
+		if _, ok := cmd[k]; ok {
+			orderedKeys = append(orderedKeys, k)
+			seen[k] = true
+		}
+	}
+	var rest []string
+	for k := range cmd {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	orderedKeys = append(orderedKeys, rest...)
+
+	var buf strings.Builder
+	buf.WriteString(indent + "{\n")
+	for i, k := range orderedKeys {
+		vJSON, _ := json.Marshal(cmd[k])
+		kJSON, _ := json.Marshal(k)
+		buf.WriteString(indent + "  " + string(kJSON) + ": " + string(vJSON))
+		if i < len(orderedKeys)-1 {
+			buf.WriteString(",")
+		}
+		buf.WriteString("\n")
+	}
+	buf.WriteString(indent + "}")
+	return buf.String()
+}
+
+func formatBlock(item any, indent string) string {
+	block, ok := item.(map[string]any)
+	if !ok {
+		b, _ := json.MarshalIndent(item, indent, "  ")
+		return indent + string(b)
+	}
+
+	keysOrder := []string{"matcher", "hooks", OwnerKey}
+	seen := map[string]bool{}
+	var orderedKeys []string
+	for _, k := range keysOrder {
+		if _, ok := block[k]; ok {
+			orderedKeys = append(orderedKeys, k)
+			seen[k] = true
+		}
+	}
+	var rest []string
+	for k := range block {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	orderedKeys = append(orderedKeys, rest...)
+
+	var buf strings.Builder
+	buf.WriteString(indent + "{\n")
+	for i, k := range orderedKeys {
+		kJSON, _ := json.Marshal(k)
+		buf.WriteString(indent + "  " + string(kJSON) + ": ")
+		if k == "hooks" {
+			hooksList, ok := block["hooks"].([]any)
+			if ok {
+				buf.WriteString("[\n")
+				for j, h := range hooksList {
+					if hMap, ok := h.(map[string]any); ok {
+						buf.WriteString(formatCommand(hMap, indent+"    "))
+					} else {
+						hJSON, _ := json.MarshalIndent(h, indent+"    ", "  ")
+						buf.WriteString(indent + "    " + string(hJSON))
+					}
+					if j < len(hooksList)-1 {
+						buf.WriteString(",")
+					}
+					buf.WriteString("\n")
+				}
+				buf.WriteString(indent + "  ]")
+			} else {
+				vJSON, _ := json.MarshalIndent(block[k], indent+"  ", "  ")
+				buf.WriteString(string(vJSON))
+			}
+		} else {
+			vJSON, _ := json.Marshal(block[k])
+			buf.WriteString(string(vJSON))
+		}
+		if i < len(orderedKeys)-1 {
+			buf.WriteString(",")
+		}
+		buf.WriteString("\n")
+	}
+	buf.WriteString(indent + "}")
+	return buf.String()
 }
 
 func find(list []any, matcher, cmd string, claimed map[int]bool) (int, bool) {
