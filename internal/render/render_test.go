@@ -36,7 +36,7 @@ func fixture() answers.Answers {
 }
 
 func TestEveryGeneratedFileSaysWhereItCameFrom(t *testing.T) {
-	files, err := Render(fixture())
+	files, err := Render(fixture(), true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -51,12 +51,26 @@ func TestEveryGeneratedFileSaysWhereItCameFrom(t *testing.T) {
 }
 
 func TestRenderMatchesTheGoldenFiles(t *testing.T) {
-	files, err := Render(fixture())
+	compareGolden(t, "", true)
+	// The second shape of config.toml, pinned by its own bytes: without a
+	// fail_under in reach the coverage check is not installed at all, and a
+	// section that quietly came back would be a lane nothing can fail.
+	compareGolden(t, "unenforced_", false)
+}
+
+func compareGolden(t *testing.T, prefix string, coverageEnforced bool) {
+	t.Helper()
+	files, err := Render(fixture(), coverageEnforced)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	for name, body := range files {
-		golden := filepath.Join("testdata", "golden", strings.ReplaceAll(name, "/", "_"))
+		if prefix != "" && name != ".ultraloom/config.toml" {
+			// Only that one file reads the flag; a second copy of the other
+			// two would be two more places to keep in step for nothing.
+			continue
+		}
+		golden := filepath.Join("testdata", "golden", prefix+strings.ReplaceAll(name, "/", "_"))
 		if *update {
 			if err := os.WriteFile(golden, []byte(body), 0o644); err != nil {
 				t.Fatalf("writing %s: %v", golden, err)
@@ -79,7 +93,7 @@ func TestRenderMatchesTheGoldenFiles(t *testing.T) {
 // tag changed without the template following would break the second run --
 // silently, because the first run would still look right.
 func TestTheRenderedAnswersReadBackAsTheyWentIn(t *testing.T) {
-	files, err := Render(fixture())
+	files, err := Render(fixture(), true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -98,7 +112,7 @@ func TestTheRenderedAnswersReadBackAsTheyWentIn(t *testing.T) {
 func TestAQuestionNeverAskedStaysUnaskedAndOneDeclinedStaysAnswered(t *testing.T) {
 	unasked := fixture()
 	unasked.Policy.ProtectedPaths = nil
-	files, err := Render(unasked)
+	files, err := Render(unasked, true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -118,7 +132,7 @@ func TestAQuestionNeverAskedStaysUnaskedAndOneDeclinedStaysAnswered(t *testing.T
 // what ultraloom's own config.toml learned the hard way: an anchored `^git
 // push` lets through exactly the form this is about, `git commit && git push`.
 func TestAForbiddenCommandBecomesARuleThatBitesInTheMiddleOfALine(t *testing.T) {
-	files, err := Render(fixture())
+	files, err := Render(fixture(), true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -133,7 +147,7 @@ func TestAForbiddenCommandBecomesARuleThatBitesInTheMiddleOfALine(t *testing.T) 
 func TestTheGitPushRuleCarriesItsOwnReason(t *testing.T) {
 	bare := fixture()
 	bare.Policy.ForbiddenCommands = []string{}
-	files, err := Render(bare)
+	files, err := Render(bare, true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -152,7 +166,7 @@ func TestTheGitPushRuleCarriesItsOwnReason(t *testing.T) {
 // TestTheGitPushAnswerDoesNotDuplicateTheBuiltInRule: a project that names it
 // anyway must not end up with the rule twice.
 func TestTheGitPushAnswerDoesNotDuplicateTheBuiltInRule(t *testing.T) {
-	files, err := Render(fixture())
+	files, err := Render(fixture(), true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -165,7 +179,7 @@ func TestTheStopProfileFollowsTheGates(t *testing.T) {
 	lean := fixture()
 	lean.Gates.TestsInStop = false
 	lean.Gates.TypesInStop = false
-	files, err := Render(lean)
+	files, err := Render(lean, true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -176,7 +190,7 @@ func TestTheStopProfileFollowsTheGates(t *testing.T) {
 }
 
 func TestRenderNamesEveryFileItWrites(t *testing.T) {
-	files, err := Render(fixture())
+	files, err := Render(fixture(), true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -194,14 +208,19 @@ func TestRenderNamesEveryFileItWrites(t *testing.T) {
 // TestEveryRenderedFileIsValidToml is the check the golden files cannot make:
 // they only say the output did not change, not that it can be read at all.
 func TestEveryRenderedFileIsValidToml(t *testing.T) {
-	files, err := Render(fixture())
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	for name, body := range files {
-		var parsed map[string]any
-		if _, err := toml.Decode(body, &parsed); err != nil {
-			t.Fatalf("%s is not valid TOML: %v\n%s", name, err, body)
+	// Both shapes: the branch that leaves [verify.coverage] out puts a comment
+	// block where a section stood, and a stray line there would be a file the
+	// generated project cannot read at all.
+	for _, coverageEnforced := range []bool{true, false} {
+		files, err := Render(fixture(), coverageEnforced)
+		if err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		for name, body := range files {
+			var parsed map[string]any
+			if _, err := toml.Decode(body, &parsed); err != nil {
+				t.Fatalf("%s is not valid TOML: %v\n%s", name, err, body)
+			}
 		}
 	}
 }
@@ -212,7 +231,7 @@ func TestEveryRenderedFileIsValidToml(t *testing.T) {
 func TestAWindowsPathSurvivesTheRender(t *testing.T) {
 	windows := fixture()
 	windows.Gates.Wiki.Bundle = `C:\projects\wiki`
-	files, err := Render(windows)
+	files, err := Render(windows, true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -230,7 +249,7 @@ func TestAWindowsPathSurvivesTheRender(t *testing.T) {
 func TestAQuoteInAnAnswerDoesNotBreakTheFile(t *testing.T) {
 	odd := fixture()
 	odd.Policy.ProtectedPaths = []string{`say "no"`}
-	files, err := Render(odd)
+	files, err := Render(odd, true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -253,7 +272,7 @@ func TestAQuoteInAnAnswerDoesNotBreakTheFile(t *testing.T) {
 func TestAPatternCarryingAnApostropheLeavesTheLiteralForm(t *testing.T) {
 	odd := fixture()
 	odd.Policy.ForbiddenCommands = []string{"rm dont's"}
-	files, err := Render(odd)
+	files, err := Render(odd, true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -277,7 +296,7 @@ func TestAPatternCarryingAnApostropheLeavesTheLiteralForm(t *testing.T) {
 func TestAControlCharacterIsEscapedTheWayTomlAllows(t *testing.T) {
 	odd := fixture()
 	odd.Gates.Wiki.Bundle = "wiki\vbundle"
-	files, err := Render(odd)
+	files, err := Render(odd, true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -325,5 +344,50 @@ func TestARegexCarryingAControlCharacterLeavesTheLiteralForm(t *testing.T) {
 	}
 	if got, want := tomlRegex(`\s+x`), `'\s+x'`; got != want {
 		t.Fatalf("tomlRegex = %s, want %s", got, want)
+	}
+}
+
+// The lane a project gets when nothing enforces the threshold: none.
+//
+// A `[verify.coverage]` section plus `coverage` in the precommit profile is a
+// check that runs `coverage report` against a configuration with no
+// fail_under -- green whatever the number, for the life of the project. The
+// note init prints at install time is read once; this file is read forever.
+func TestWithoutEnforcementNoCoverageLaneIsInstalled(t *testing.T) {
+	files, err := Render(fixture(), false)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	config := files[".ultraloom/config.toml"]
+	// The name at the start of a line, not anywhere: the comment that
+	// replaces the section names it too, and a bare substring test would
+	// read that mention as the section still being there.
+	if strings.Contains(config, "\n[verify.coverage]\n") {
+		t.Fatalf("a coverage section was written for a threshold nobody enforces:\n%s", config)
+	}
+	if strings.Contains(config, `precommit = ["lint", "types", "test", "coverage"]`) {
+		t.Fatalf("the precommit profile still runs the coverage check:\n%s", config)
+	}
+	if !strings.Contains(config, "fail_under") {
+		t.Fatalf("the file does not say what is missing:\n%s", config)
+	}
+	// The rest of the chain is untouched: this removes a lane that cannot
+	// fail, not the checks that can.
+	if !strings.Contains(config, `precommit = ["lint", "types", "test"]`) {
+		t.Fatalf("the remaining checks did not survive:\n%s", config)
+	}
+}
+
+func TestWithEnforcementTheCoverageLaneIsThere(t *testing.T) {
+	files, err := Render(fixture(), true)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	config := files[".ultraloom/config.toml"]
+	if !strings.Contains(config, "\n[verify.coverage]\n") {
+		t.Fatalf("the coverage section is missing:\n%s", config)
+	}
+	if !strings.Contains(config, `precommit = ["lint", "types", "test", "coverage"]`) {
+		t.Fatalf("the precommit profile lost the coverage check:\n%s", config)
 	}
 }

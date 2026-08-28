@@ -109,7 +109,11 @@ func run(opts Options) (int, string) {
 		return exitOwn, err.Error()
 	}
 
-	files, err := render.Render(filled)
+	// Read once and used twice: it decides whether a coverage check is
+	// installed, and it decides what the user is told about why.
+	enforced := coverage.Enforced(
+		readOr(opts.Root, "pyproject.toml"), readOr(opts.Root, ".coveragerc"))
+	files, err := render.Render(filled, coverageLane(filled, enforced))
 	// Unreachable while the embedded templates parse and execute, which the
 	// build settles rather than the run. Handled anyway: a swallowed template
 	// error would write half a configuration.
@@ -118,7 +122,7 @@ func run(opts Options) (int, string) {
 	}
 
 	var notes []string
-	notes = append(notes, coverageNote(filled, opts.Root)...)
+	notes = append(notes, coverageNote(filled, enforced)...)
 	mcp, wikiHooks, brainNote := brainEntry(filled, opts)
 	if mcp != "" {
 		files[mcpPath] = mcp
@@ -316,25 +320,34 @@ func ask(opts Options, current answers.Answers) (answers.Answers, error) {
 	return interview.Run(in, out, interactive, current)
 }
 
-// coverageNote reports rather than repairs. The threshold is enforced by the
-// coverage tool's own fail_under and by nothing else, and pyproject.toml is
-// somebody else's file: a green line for a threshold nobody checks is the one
-// failure of this system that does real damage.
+// coverageLane says whether the generated project gets a coverage check.
 //
-// Python only, because those two files are the only ones Enforced can read. A
-// project without that stack would be warned about a setting it has no place
-// to put.
-func coverageNote(filled answers.Answers, root string) []string {
-	if !has(filled.Project.Stacks, "python") {
-		return nil
-	}
-	if coverage.Enforced(readOr(root, "pyproject.toml"), readOr(root, ".coveragerc")) {
+// Dropped only where the answer is known. coverage.Enforced reads
+// pyproject.toml and .coveragerc, so it can speak for Python and for nothing
+// else: a Node project keeps its thresholds where this cannot see them, and
+// removing its check on a guess would open the same silent gap in the other
+// direction. Unknown therefore keeps the lane, which is the rule the whole
+// relevance mapping follows.
+func coverageLane(filled answers.Answers, enforced bool) bool {
+	return enforced || !has(filled.Project.Stacks, "python")
+}
+
+// coverageNote reports what the generated files no longer claim.
+//
+// The threshold is enforced by the coverage tool's own fail_under and by
+// nothing else, and pyproject.toml is somebody else's file -- init does not
+// write there. So the check is left out instead, and this says so: a person
+// who wanted that lane needs to know why it is missing and what brings it
+// back. Python only, for the reason coverageLane gives.
+func coverageNote(filled answers.Answers, enforced bool) []string {
+	if enforced || !has(filled.Project.Stacks, "python") {
 		return nil
 	}
 	return []string{fmt.Sprintf(
-		"nothing enforces the coverage threshold of %d%%: add fail_under to "+
-			"[tool.coverage.report] in pyproject.toml, or the coverage check "+
-			"reports a number it can never fail on",
+		"no coverage check was installed: nothing here enforces the threshold "+
+			"of %d%% -- add fail_under to [tool.coverage.report] in "+
+			"pyproject.toml and run init again, or the lane would report a "+
+			"number it can never fail on",
 		filled.Gates.CoverageThreshold)}
 }
 

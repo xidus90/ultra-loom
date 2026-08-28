@@ -60,10 +60,19 @@ type view struct {
 	Commands       []commandRule
 	EditKinds      []string
 	PrecommitKinds []string
+	// CoverageLane says whether this project gets a coverage check at all.
+	// False is not a smaller configuration but the honest one: without a
+	// fail_under nothing can turn that check red, and a lane that only ever
+	// reports green is the one failure this whole tool exists to prevent.
+	CoverageLane bool
 }
 
-func Render(a answers.Answers) (map[string]string, error) {
-	data := newView(a)
+// Render turns the answers into files. coverageEnforced is a fact about the
+// project rather than an answer -- it says whether the project's own coverage
+// tool can fail -- and it decides whether a coverage check is installed at
+// all. The caller reads it; nothing here touches the disk.
+func Render(a answers.Answers, coverageEnforced bool) (map[string]string, error) {
+	data := newView(a, coverageEnforced)
 	out := make(map[string]string, len(targets))
 	for name, target := range targets {
 		body, err := one(name, data)
@@ -78,8 +87,9 @@ func Render(a answers.Answers) (map[string]string, error) {
 	return out, nil
 }
 
-func newView(a answers.Answers) view {
-	data := view{Answers: a, EditKinds: []string{"lint", "types"}}
+func newView(a answers.Answers, coverageEnforced bool) view {
+	data := view{Answers: a, EditKinds: []string{"lint", "types"},
+		CoverageLane: coverageEnforced}
 	for _, path := range a.Policy.ProtectedPaths {
 		data.Paths = append(data.Paths, pathRule{Match: path, Reason: generatedPathReason})
 	}
@@ -99,7 +109,13 @@ func newView(a answers.Answers) view {
 		data.PrecommitKinds = append(data.PrecommitKinds, "types")
 	}
 	if a.Gates.TestsInStop {
-		data.PrecommitKinds = append(data.PrecommitKinds, "test", "coverage")
+		data.PrecommitKinds = append(data.PrecommitKinds, "test")
+		// Named only where it can fail. `coverage report` takes its exit code
+		// from fail_under and from nothing else, so in a project without one
+		// this entry would be a check that passes by construction.
+		if coverageEnforced {
+			data.PrecommitKinds = append(data.PrecommitKinds, "coverage")
+		}
 	}
 	return data
 }

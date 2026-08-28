@@ -1,24 +1,21 @@
 # generated from .ultraloom/answers.toml -- edit that and re-run init
 [project]
-commit_language = {{ quote .Answers.Project.CommitLanguage }}
+commit_language = "en"
 
-{{ if .CoverageLane }}# Reported, not enforced: the threshold that bites is `fail_under` in the
-# project's own coverage configuration, and init does not write there.
-[verify.coverage]
-threshold = {{ .Answers.Gates.CoverageThreshold }}
-{{ else }}# No coverage check, and no [verify.coverage] here on purpose. At the time
+# No coverage check, and no [verify.coverage] here on purpose. At the time
 # `init` ran, nothing in this project could make a coverage run fail: neither
 # `fail_under` under [tool.coverage.report] in pyproject.toml nor one in
 # .coveragerc. A check over that configuration reports a number and passes
 # whatever the number is, and a lane that cannot go red is worse than none.
 # Set fail_under and re-run `ultraloom init` to get the check.
-{{ end }}
+
 [verify.profiles]
-edit      = {{ list .EditKinds }}
-precommit = {{ list .PrecommitKinds }}
+edit      = ["lint", "types"]
+precommit = ["lint", "types", "test"]
 
 # Which checks a changed path is worth. An extension that does not appear here
 # draws the full chain: a gate that skips checks unnoticed is worse than none.
 [relevance]
-{{ range $pattern := keys .Answers.Relevance }}{{ quote $pattern }} = {{ list (index $.Answers.Relevance $pattern) }}
-{{ end }}
+"*.md" = []
+"*.py" = ["lint", "types"]
+

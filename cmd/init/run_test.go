@@ -242,8 +242,44 @@ func TestFlagsAnswerEveryQuestionAStackRaises(t *testing.T) {
 	if !strings.Contains(answersFile, "forbidden_commands = []") {
 		t.Fatalf("no did not become an empty list:\n%s", answersFile)
 	}
-	if !strings.Contains(report, "nothing enforces the coverage threshold of 90%") {
-		t.Fatalf("the unenforced threshold was not reported:\n%s", report)
+	if !strings.Contains(report, "no coverage check was installed") ||
+		!strings.Contains(report, "threshold of 90%") {
+		t.Fatalf("the missing coverage lane was not reported:\n%s", report)
+	}
+	// The report is read once; this file is read on every run. A project whose
+	// coverage cannot fail must not carry a check that says it can.
+	config := read(t, root, ".ultraloom/config.toml")
+	if strings.Contains(config, "\n[verify.coverage]\n") ||
+		strings.Contains(config, `"coverage"`) {
+		t.Fatalf("a coverage lane was installed that nothing can fail:\n%s", config)
+	}
+}
+
+// A project whose own configuration enforces the threshold keeps its lane.
+func TestAnEnforcedThresholdKeepsTheCoverageLane(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "pyproject.toml", "[tool.coverage.report]\nfail_under = 100\n")
+	makeFile(t, root, "uv.lock", "")
+	mustRun(t, answered(root))
+	config := read(t, root, ".ultraloom/config.toml")
+	if !strings.Contains(config, "\n[verify.coverage]\n") {
+		t.Fatalf("the coverage lane was dropped from a project that enforces it:\n%s", config)
+	}
+}
+
+// Only Python can be judged here: coverage.Enforced reads pyproject.toml and
+// .coveragerc and nothing else, so a project it cannot speak for keeps its
+// lane rather than losing it on a guess.
+func TestAProjectThisCannotJudgeKeepsItsCoverageLane(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "package.json", "{}")
+	report := mustRun(t, answered(root))
+	config := read(t, root, ".ultraloom/config.toml")
+	if !strings.Contains(config, "\n[verify.coverage]\n") {
+		t.Fatalf("a Node project lost its coverage lane on a guess:\n%s", config)
+	}
+	if strings.Contains(report, "no coverage check was installed") {
+		t.Fatalf("a project this cannot judge was told it was judged:\n%s", report)
 	}
 }
 
