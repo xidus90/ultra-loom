@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -828,5 +831,44 @@ func TestEveryOverruledFlagIsNamed(t *testing.T) {
 		if !strings.Contains(report, flag+" was ignored") {
 			t.Fatalf("%s was dropped without a word:\n%s", flag, report)
 		}
+	}
+}
+
+// The fifth file took its own road to the disk. CheckParents guards the four
+// that go through write.Commit; settingsWrite.apply did its own MkdirAll and
+// WriteFile, so a .claude that is a link to somewhere else put settings.json
+// outside the project, at exit 0, reported as created.
+func TestSettingsAreNotWrittenThroughALinkedDirectory(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	linkDir(t, outside, filepath.Join(root, ".claude"))
+	code, report := run(answered(root))
+	if code == 0 {
+		t.Fatalf("a write outside the project was reported as success:\n%s", report)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("settings.json landed outside the project: %v", err)
+	}
+}
+
+// linkDir points one name at another directory, by whichever of the two
+// mechanisms this machine allows -- a symlink where the account may make one,
+// a directory junction otherwise. internal/write has the same helper for the
+// same reason; both are three lines, and a shared test helper would need a
+// package of its own.
+func linkDir(t *testing.T, target, link string) {
+	t.Helper()
+	err := os.Symlink(target, link)
+	if err == nil {
+		return
+	}
+	if runtime.GOOS != "windows" {
+		if errors.Is(err, errors.ErrUnsupported) || errors.Is(err, os.ErrPermission) {
+			t.Skipf("cannot create a symlink here: %v", err)
+		}
+		t.Fatalf("creating a symlink failed for a reason this platform allows: %v", err)
+	}
+	if out, jerr := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); jerr != nil {
+		t.Skipf("neither a symlink (%v) nor a junction (%v: %s) can be made here", err, jerr, out)
 	}
 }

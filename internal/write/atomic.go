@@ -79,7 +79,7 @@ func Prepare(root string, files map[string]string) (Plan, error) {
 
 // checkName refuses a name that could escape root. It reads the name and
 // nothing else -- it does not resolve the path, so what the name means on
-// this disk is checkParents' question, not this one's. The renderer is the
+// this disk is CheckParents' question, not this one's. The renderer is the
 // only caller today, but a tool that writes into a stranger's project earns
 // its trust by not needing any: a name that escapes is a bug wherever it came
 // from, and the safe answer to a bug is to stop.
@@ -115,7 +115,7 @@ func Commit(root string, plan Plan) ([]string, error) {
 		if err := checkName(name); err != nil {
 			return written, err
 		}
-		if err := checkParents(root, name); err != nil {
+		if err := CheckParents(root, name); err != nil {
 			return written, err
 		}
 		full := filepath.Join(root, filepath.FromSlash(name))
@@ -143,7 +143,13 @@ func commitFailure(name string, err error) error {
 	return fmt.Errorf("writing %s: %w", name, err)
 }
 
-// checkParents is the half of the promise checkName cannot give.
+// CheckParents is the half of the promise checkName cannot give.
+//
+// Exported, because one file does not travel through Commit: settings.json
+// belongs to the project and may be written over, which is the one thing this
+// package never does, so that write cannot move in here. The guard moves out
+// instead -- "inside root" is a promise about the project, not about a code
+// path, and all five files answer to the same check.
 //
 // A name may be flawless and still land outside the project: if
 // .ultraloom is a symlink or a junction pointing somewhere else, MkdirAll and
@@ -154,7 +160,7 @@ func commitFailure(name string, err error) error {
 // Lstat each directory above the name, and stop at the first one that is not
 // there: everything below a missing component is created by this run, so
 // there is nothing left to follow.
-func checkParents(root, name string) error {
+func CheckParents(root, name string) error {
 	parts := strings.Split(name, "/")
 	full := root
 	for _, part := range parts[:len(parts)-1] {

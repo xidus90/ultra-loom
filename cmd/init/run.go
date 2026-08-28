@@ -545,6 +545,13 @@ func (s settingsWrite) apply() error {
 	if !s.changed {
 		return nil
 	}
+	// The same guard the other four files get. This one write does its own
+	// MkdirAll and OpenFile, and until 2026-08-28 that meant a .claude that is
+	// a link put settings.json outside the project, at exit 0, reported as
+	// created.
+	if err := write.CheckParents(s.root, settingsPath); err != nil {
+		return err
+	}
 	full := filepath.Join(s.root, filepath.FromSlash(settingsPath))
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return fmt.Errorf("creating the directory for %s: %w", settingsPath, err)

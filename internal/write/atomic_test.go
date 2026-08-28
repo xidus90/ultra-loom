@@ -274,9 +274,9 @@ func TestCommitRefusesToWriteThroughALinkedDirectory(t *testing.T) {
 
 // A directory above the name that cannot be looked at is not a free path.
 func TestAnUnreadableParentIsReported(t *testing.T) {
-	err := checkParents("bad"+string(rune(0))+"root", "a/b.txt")
+	err := CheckParents("bad"+string(rune(0))+"root", "a/b.txt")
 	if err == nil {
-		t.Fatal("checkParents accepted a root it cannot stat")
+		t.Fatal("CheckParents accepted a root it cannot stat")
 	}
 	if !strings.Contains(err.Error(), "above a/b.txt") {
 		t.Fatalf("the name was not reported: %v", err)
@@ -286,7 +286,7 @@ func TestAnUnreadableParentIsReported(t *testing.T) {
 // linkDir points one name at another directory, by whichever of the two
 // mechanisms this machine allows. A symlink needs a privilege on Windows that
 // an ordinary account does not have; a directory junction needs none, and Go
-// reports it as ModeIrregular. Both are what checkParents refuses, so either
+// reports it as ModeIrregular. Both are what CheckParents refuses, so either
 // one tests it.
 func linkDir(t *testing.T, target, link string) {
 	t.Helper()
