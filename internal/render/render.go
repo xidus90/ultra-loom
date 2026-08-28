@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"text/template"
 
@@ -120,18 +119,61 @@ func commandPattern(command string) string {
 // tomlString is the one way a value reaches a rendered file. Nothing here
 // interpolates a raw string: a wiki bundle is a path, and on Windows a path
 // carries backslashes -- written raw, `wikiundle` is an invalid escape that
-// takes the whole file down while the answers still look right.
-func tomlString(value string) string { return strconv.Quote(value) }
+// takes the whole file down while the answers still look right. One class
+// further in, this writes a TOML basic string, which is not what Go's %q
+// writes: TOML 1.0 knows \b \t \n \f \r \" \\ and the \u escapes and nothing
+// else, while %q reaches for \v and \x for the same characters. Ranging over
+// a string already turns invalid UTF-8 into the replacement character, which
+// the default branch writes like any other rune, so nothing is refused here.
+func tomlString(value string) string {
+	var out strings.Builder
+	out.WriteByte('"')
+	for _, r := range value {
+		switch r {
+		case '"':
+			out.WriteString(`\"`)
+		case '\\':
+			out.WriteString(`\\`)
+		case '\b':
+			out.WriteString(`\b`)
+		case '\t':
+			out.WriteString(`\t`)
+		case '\n':
+			out.WriteString(`\n`)
+		case '\f':
+			out.WriteString(`\f`)
+		case '\r':
+			out.WriteString(`\r`)
+		default:
+			// U+007F is a control character too, and TOML bars it from a basic
+			// string just as it bars the C0 range.
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&out, `\u%04X`, r)
+				continue
+			}
+			out.WriteRune(r)
+		}
+	}
+	out.WriteByte('"')
+	return out.String()
+}
 
 // tomlRegex prefers TOML's literal string, where a backslash is a backslash
-// and the pattern reads as it was written. An apostrophe cannot appear in one,
-// and it has no escape either, so a pattern carrying one falls back to the
-// basic string and its doubled backslashes.
+// and the pattern reads as it was written. It has no escape at all, so
+// whatever it cannot carry raw -- the apostrophe that would close it, and the
+// control characters TOML bars outright -- sends the pattern to the basic
+// string and its doubled backslashes instead.
 func tomlRegex(pattern string) string {
-	if strings.Contains(pattern, "'") {
-		return strconv.Quote(pattern)
+	if strings.ContainsFunc(pattern, literalUnsafe) {
+		return tomlString(pattern)
 	}
 	return "'" + pattern + "'"
+}
+
+// literalUnsafe names what a TOML literal string cannot hold. Tab is the one
+// control character it may, and it is the one this leaves alone.
+func literalUnsafe(r rune) bool {
+	return r == '\'' || (r != '\t' && (r < 0x20 || r == 0x7f))
 }
 
 var helpers = template.FuncMap{

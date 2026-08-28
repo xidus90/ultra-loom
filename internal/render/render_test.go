@@ -269,3 +269,61 @@ func TestAPatternCarryingAnApostropheLeavesTheLiteralForm(t *testing.T) {
 		t.Fatalf("policy.toml = %q, want the rule as %s", policy, escaped)
 	}
 }
+
+// TestAControlCharacterIsEscapedTheWayTomlAllows is the Windows-path lesson
+// one class further in: Go's %q knows escapes TOML does not, and a value
+// carrying U+000B renders as `\v` -- an invalid escape that takes the file
+// down while the answer still reads plainly.
+func TestAControlCharacterIsEscapedTheWayTomlAllows(t *testing.T) {
+	odd := fixture()
+	odd.Gates.Wiki.Bundle = "wiki\vbundle"
+	files, err := Render(odd)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	body := files[".ultraloom/answers.toml"]
+	if !strings.Contains(body, `\u000B`) {
+		t.Fatalf("answers.toml = %q, want the bundle escaped as %s", body, `\u000B`)
+	}
+	var parsed map[string]any
+	if _, err := toml.Decode(body, &parsed); err != nil {
+		t.Fatalf("answers.toml is not valid TOML: %v\n%s", err, body)
+	}
+}
+
+// TestTomlStringEscapesOnlyWhatTomlKnows walks every arm of the quoter: the
+// listed escapes, the two control ranges TOML bars from a basic string, and
+// the runes that pass through untouched.
+func TestTomlStringEscapesOnlyWhatTomlKnows(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`say "no"`, `"say \"no\""`},
+		{`C:\wiki`, `"C:\\wiki"`},
+		{"\b\t\n\f\r", `"\b\t\n\f\r"`},
+		{"\x01", `"\u0001"`},
+		{"\x7f", `"\u007F"`},
+		{"grüß", `"grüß"`},
+		// Outside the BMP TOML would want \U0001F600; the literal rune says
+		// the same thing and needs no second escape form.
+		{"\U0001F600", "\"\U0001F600\""},
+		// Ranging over a string already turns invalid UTF-8 into U+FFFD, and
+		// that is a printable rune like any other.
+		{"\xff", "\"\uFFFD\""},
+	}
+	for _, c := range cases {
+		if got := tomlString(c.in); got != c.want {
+			t.Fatalf("tomlString(%q) = %s, want %s", c.in, got, c.want)
+		}
+	}
+}
+
+// TestARegexCarryingAControlCharacterLeavesTheLiteralForm: TOML's literal
+// string has no escape at all, so a control character inside one is as fatal
+// as an apostrophe -- both have to send the pattern to the basic string.
+func TestARegexCarryingAControlCharacterLeavesTheLiteralForm(t *testing.T) {
+	if got, want := tomlRegex("a\vb"), `"a\u000Bb"`; got != want {
+		t.Fatalf("tomlRegex = %s, want %s", got, want)
+	}
+	if got, want := tomlRegex(`\s+x`), `'\s+x'`; got != want {
+		t.Fatalf("tomlRegex = %s, want %s", got, want)
+	}
+}
