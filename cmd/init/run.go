@@ -61,6 +61,7 @@ type Options struct {
 
 	CommitLanguage    string
 	DocsLanguage      string
+	Agents            string
 	WikiMode          string
 	CoverageThreshold int
 	// The two policy answers are strings rather than bools because they have
@@ -138,7 +139,7 @@ func run(opts Options) (int, string) {
 	// Decided before the clone, although it is applied last: the merge is the
 	// step that can still say no, and a project refused for a settings.json
 	// nobody may touch must not first get a runtime cloned into it.
-	merged, code, note := mergeSettings(opts, facts, wikiHooks)
+	merged, code, note := mergeSettings(opts, facts, filled, wikiHooks)
 	if code != exitDone {
 		return code, note
 	}
@@ -250,6 +251,7 @@ func decisions(root string, facts detect.Facts) (answers.Answers, bool, error) {
 func seed(facts detect.Facts) answers.Answers {
 	a := answers.Defaults(facts)
 	a.Project.CommitLanguage, a.Project.DocsLanguage = "", ""
+	a.Project.Agents = nil
 	a.Gates.CoverageThreshold = 0
 	a.Gates.Wiki.Mode = facts.WikiMode
 	return a
@@ -300,6 +302,15 @@ func applyFlags(current answers.Answers, opts Options, recorded bool) (answers.A
 	if opts.DocsLanguage != "" && !kept.text("--docs-language",
 		"[project].docs_language", current.Project.DocsLanguage, opts.DocsLanguage) {
 		current.Project.DocsLanguage = opts.DocsLanguage
+	}
+	if opts.Agents != "" {
+		var parsed []string
+		if err := applyAgentsFlag(opts.Agents, &parsed); err != nil {
+			return current, nil, fmt.Errorf("--agents %w", err)
+		}
+		if !kept.list("--agents", "[project].agents", current.Project.Agents, parsed) {
+			current.Project.Agents = parsed
+		}
 	}
 	if opts.WikiMode != "" {
 		if !has(answers.WikiModes, opts.WikiMode) {
@@ -567,7 +578,10 @@ func (s settingsWrite) apply() error {
 // mergeSettings folds this tool's hook entries into a file that belongs to
 // someone else. A file that is not JSON is the project saying no rather than
 // this program failing: exit 2, and nothing repaired.
-func mergeSettings(opts Options, facts detect.Facts, wikiHooks bool) (settingsWrite, int, string) {
+func mergeSettings(opts Options, facts detect.Facts, filled answers.Answers, wikiHooks bool) (settingsWrite, int, string) {
+	if !has(filled.Project.Agents, "claude") {
+		return settingsWrite{}, exitDone, ""
+	}
 	existing := readOr(opts.Root, settingsPath)
 	result, err := settings.Merge(existing, hookEntries(facts, wikiHooks))
 	if err != nil {
@@ -604,12 +618,21 @@ func hookCommand(argv string) string {
 // without a repository that question has no answer at all.
 func hookEntries(facts detect.Facts, wikiHooks bool) []settings.Entry {
 	entries := []settings.Entry{
+		{Event: "SessionStart", Command: hookCommand("hook session-start"), Timeout: 20},
 		{Event: "PreToolUse", Matcher: "Write|Edit|NotebookEdit|Bash|PowerShell",
 			Command: hookCommand("policy hook"), Timeout: 10},
-		{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-			Command: hookCommand("hook post-edit"), Timeout: 60},
-		{Event: "SessionStart", Command: hookCommand("hook session-start"), Timeout: 20},
 	}
+
+	postEdit := postEditEntries(facts.Stacks)
+	if len(postEdit) > 0 {
+		entries = append(entries, postEdit...)
+	} else {
+		entries = append(entries, settings.Entry{
+			Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+			Command: hookCommand("hook post-edit"), Timeout: 60,
+		})
+	}
+
 	if facts.HasGit {
 		entries = append(entries,
 			settings.Entry{Event: "SubagentStart",
@@ -624,6 +647,98 @@ func hookEntries(facts detect.Facts, wikiHooks bool) []settings.Entry {
 		// would make this entry replace the stop gate above.
 		entries = append(entries, settings.Entry{Event: "Stop", Matcher: "wiki",
 			Command: "brain lint", Timeout: 120})
+	}
+	return entries
+}
+
+func applyAgentsFlag(given string, target *[]string) error {
+	trimmed := strings.TrimSpace(given)
+	if strings.EqualFold(trimmed, "all") {
+		*target = []string{"claude", "gemini"}
+		return nil
+	}
+	if strings.EqualFold(trimmed, "none") {
+		*target = []string{}
+		return nil
+	}
+	parts := strings.Split(trimmed, ",")
+	var result []string
+	seen := map[string]bool{}
+	for _, p := range parts {
+		name := strings.ToLower(strings.TrimSpace(p))
+		if name == "" {
+			continue
+		}
+		if name != "claude" && name != "gemini" {
+			return fmt.Errorf("%q: it must be one of [claude, gemini, all, none]", name)
+		}
+		if !seen[name] {
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	*target = result
+	return nil
+}
+
+func postEditEntries(stacks []string) []settings.Entry {
+	var entries []settings.Entry
+	hasStack := func(name string) bool {
+		return has(stacks, name)
+	}
+
+	if hasStack("python") {
+		if hasStack("uv") {
+			entries = append(entries,
+				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+					Command: "uv run ruff check --output-format=concise .", Timeout: 15},
+				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+					Command: "uv run dmypy run -- --no-error-summary --no-pretty", Timeout: 30},
+			)
+		} else {
+			entries = append(entries,
+				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+					Command: "ruff check --output-format=concise .", Timeout: 15},
+				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+					Command: "mypy --no-error-summary --no-pretty", Timeout: 30},
+			)
+		}
+	}
+	if hasStack("gdscript") {
+		entries = append(entries, settings.Entry{
+			Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+			Command: "uvx gdlint .", Timeout: 15,
+		})
+	}
+	if hasStack("csharp") {
+		entries = append(entries,
+			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+				Command: "dotnet format --verify-no-changes", Timeout: 30},
+			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+				Command: "dotnet build --no-restore", Timeout: 45},
+		)
+	}
+	if hasStack("typescript") {
+		entries = append(entries,
+			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+				Command: "npx eslint .", Timeout: 20},
+			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+				Command: "npx tsc --noEmit", Timeout: 30},
+		)
+	}
+	if hasStack("rust") {
+		entries = append(entries,
+			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+				Command: "cargo clippy -- -D warnings", Timeout: 30},
+			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+				Command: "cargo fmt --check", Timeout: 15},
+		)
+	}
+	if hasStack("go") {
+		entries = append(entries, settings.Entry{
+			Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
+			Command: "go vet ./...", Timeout: 20,
+		})
 	}
 	return entries
 }

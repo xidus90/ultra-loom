@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xidus90/ultra-loom/internal/detect"
 	"github.com/xidus90/ultra-loom/internal/vendoring"
 )
 
@@ -85,7 +86,7 @@ func brainDir(name string) string {
 // about something else does not have to arrange an interview.
 func answered(root string) Options {
 	return Options{Root: root, Yes: true, CommitLanguage: "en",
-		DocsLanguage: "de", WikiMode: "none"}
+		DocsLanguage: "de", Agents: "claude,gemini", WikiMode: "none"}
 }
 
 func mustRun(t *testing.T, opts Options) string {
@@ -235,7 +236,7 @@ func TestFlagsAnswerEveryQuestionAStackRaises(t *testing.T) {
 	makeFile(t, root, "manage.py", "django")
 	makeFile(t, root, "requirements.txt", "Django==5.0\n")
 	report := mustRun(t, Options{Root: root, Interactive: false,
-		CommitLanguage: "en", DocsLanguage: "de", WikiMode: "none",
+		CommitLanguage: "en", DocsLanguage: "de", Agents: "claude,gemini", WikiMode: "none",
 		CoverageThreshold: 90, ProtectMigrations: "yes", ForbidPipInstall: "no"})
 	answersFile := read(t, root, ".ultraloom/answers.toml")
 	if !strings.Contains(answersFile, "coverage_threshold = 90") {
@@ -569,6 +570,7 @@ func TestABadFlagIsRefusedBeforeAnythingIsWritten(t *testing.T) {
 		names string
 	}{
 		{"wiki mode", func(o *Options) { o.WikiMode = "nonsense" }, "--wiki-mode"},
+		{"agents invalid", func(o *Options) { o.Agents = "gpt5" }, "--agents"},
 		{"threshold above a hundred", func(o *Options) { o.CoverageThreshold = 150 }, "--coverage-threshold"},
 		{"negative threshold", func(o *Options) { o.CoverageThreshold = -5 }, "--coverage-threshold"},
 		{"neither yes nor no", func(o *Options) { o.ProtectMigrations = "maybe" }, "--protect-migrations"},
@@ -651,7 +653,7 @@ func TestTheShortYesAndNoAreTheSameAnswerAsTheLongOnes(t *testing.T) {
 	makeFile(t, root, "manage.py", "django")
 	makeFile(t, root, "requirements.txt", "Django==5.0\n")
 	mustRun(t, Options{Root: root, Interactive: false,
-		CommitLanguage: "en", DocsLanguage: "de", WikiMode: "none",
+		CommitLanguage: "en", DocsLanguage: "de", Agents: "claude,gemini", WikiMode: "none",
 		CoverageThreshold: 100, ProtectMigrations: "y", ForbidPipInstall: "n"})
 	answersFile := read(t, root, ".ultraloom/answers.toml")
 	// The value, not the key: `protected_paths = []` carries the key too, so
@@ -881,5 +883,186 @@ func TestAFileWhereTheRuntimeBelongsIsNotARuntime(t *testing.T) {
 	makeFile(t, root, ".ultraloom/vendor/ultraloom", "not a clone")
 	if report := mustRun(t, answered(root)); !strings.Contains(report, "no runtime is vendored") {
 		t.Fatalf("a file was taken for a vendored runtime:\n%s", report)
+	}
+}
+
+func TestPostEditEntriesPerStack(t *testing.T) {
+	cases := []struct {
+		name     string
+		stacks   []string
+		commands []string
+	}{
+		{
+			name:     "python with uv",
+			stacks:   []string{"python", "uv"},
+			commands: []string{"uv run ruff check --output-format=concise .", "uv run dmypy run -- --no-error-summary --no-pretty"},
+		},
+		{
+			name:     "python plain",
+			stacks:   []string{"python"},
+			commands: []string{"ruff check --output-format=concise .", "mypy --no-error-summary --no-pretty"},
+		},
+		{
+			name:     "gdscript",
+			stacks:   []string{"gdscript", "godot"},
+			commands: []string{"uvx gdlint ."},
+		},
+		{
+			name:     "csharp",
+			stacks:   []string{"csharp"},
+			commands: []string{"dotnet format --verify-no-changes", "dotnet build --no-restore"},
+		},
+		{
+			name:     "typescript",
+			stacks:   []string{"typescript"},
+			commands: []string{"npx eslint .", "npx tsc --noEmit"},
+		},
+		{
+			name:     "rust",
+			stacks:   []string{"rust"},
+			commands: []string{"cargo clippy -- -D warnings", "cargo fmt --check"},
+		},
+		{
+			name:     "go",
+			stacks:   []string{"go"},
+			commands: []string{"go vet ./..."},
+		},
+		{
+			name:     "multi-stack csharp and godot",
+			stacks:   []string{"csharp", "gdscript", "godot"},
+			commands: []string{"uvx gdlint .", "dotnet format --verify-no-changes", "dotnet build --no-restore"},
+		},
+		{
+			name:     "unknown stack fallback",
+			stacks:   []string{"other"},
+			commands: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := postEditEntries(tc.stacks)
+			var gotCommands []string
+			for _, e := range entries {
+				gotCommands = append(gotCommands, e.Command)
+			}
+			if tc.commands == nil {
+				if len(entries) != 0 {
+					t.Fatalf("want 0 entries for unknown stack, got %v", gotCommands)
+				}
+				return
+			}
+			if len(gotCommands) != len(tc.commands) {
+				t.Fatalf("got %d commands %v, want %d %v", len(gotCommands), gotCommands, len(tc.commands), tc.commands)
+			}
+			for i, cmd := range tc.commands {
+				if gotCommands[i] != cmd {
+					t.Errorf("[%d] got %q, want %q", i, gotCommands[i], cmd)
+				}
+			}
+		})
+	}
+}
+
+func TestLifecycleHookOrder(t *testing.T) {
+	facts := detect.Facts{
+		Stacks: []string{"python", "uv"},
+		HasGit: true,
+	}
+	entries := hookEntries(facts, true)
+	var events []string
+	for _, e := range entries {
+		events = append(events, e.Event)
+	}
+	wantOrder := []string{"SessionStart", "PreToolUse", "PostToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "Stop"}
+	if len(events) != len(wantOrder) {
+		t.Fatalf("got %d events %v, want %d %v", len(events), events, len(wantOrder), wantOrder)
+	}
+	for i, ev := range wantOrder {
+		if events[i] != ev {
+			t.Errorf("[%d] got %q, want %q", i, events[i], ev)
+		}
+	}
+}
+
+func TestAgentsWithoutClaudeSkipsClaudeSettings(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.Agents = "gemini"
+	mustRun(t, o)
+	if _, err := osStat(root, ".claude/settings.json"); err == nil {
+		t.Fatal("want .claude/settings.json skipped when claude is not in agents")
+	}
+	answersFile := read(t, root, ".ultraloom/answers.toml")
+	if !strings.Contains(answersFile, `agents          = ["gemini"]`) {
+		t.Fatalf("agents not in answers.toml:\n%s", answersFile)
+	}
+}
+
+func TestDocumentTemplatesCreatedAndProtected(t *testing.T) {
+	root := t.TempDir()
+	// Pre-exist an existing custom AGENTS.md
+	existingAgents := "# My Custom Agents Doc\n"
+	makeFile(t, root, "AGENTS.md", existingAgents)
+
+	o := answered(root)
+	o.Agents = "claude,gemini"
+	report := mustRun(t, o)
+
+	// 1. AGENTS.md was skipped / protected
+	if !strings.Contains(report, "skipped, already there:") || !strings.Contains(report, "AGENTS.md") {
+		t.Fatalf("report does not list AGENTS.md under skipped:\n%s", report)
+	}
+	if got := read(t, root, "AGENTS.md"); got != existingAgents {
+		t.Fatalf("AGENTS.md was modified:\n%s", got)
+	}
+
+	// 2. CLAUDE.md, GEMINI.md, and skills were created
+	if !strings.Contains(report, "CLAUDE.md") || !strings.Contains(report, "GEMINI.md") {
+		t.Fatalf("report does not list CLAUDE.md or GEMINI.md under created:\n%s", report)
+	}
+	if !strings.Contains(report, ".claude/skills/verify-until-green/SKILL.md") {
+		t.Fatalf("report does not list claude skill under created:\n%s", report)
+	}
+	if !strings.Contains(report, ".agents/skills/verify-until-green/SKILL.md") {
+		t.Fatalf("report does not list agents skill under created:\n%s", report)
+	}
+	claudeContent := read(t, root, "CLAUDE.md")
+	if !strings.Contains(claudeContent, "@AGENTS.md") {
+		t.Fatalf("CLAUDE.md does not reference @AGENTS.md:\n%s", claudeContent)
+	}
+	geminiContent := read(t, root, "GEMINI.md")
+	if !strings.Contains(geminiContent, "Antigravity") {
+		t.Fatalf("GEMINI.md missing Antigravity text:\n%s", geminiContent)
+	}
+	skillContent := read(t, root, ".claude/skills/verify-until-green/SKILL.md")
+	if !strings.Contains(skillContent, "verify-until-green") {
+		t.Fatalf("skill file missing content:\n%s", skillContent)
+	}
+}
+
+func TestApplyAgentsFlag(t *testing.T) {
+	var target []string
+	if err := applyAgentsFlag("all", &target); err != nil || len(target) != 2 {
+		t.Fatalf("all failed: %v, %v", err, target)
+	}
+	if err := applyAgentsFlag("none", &target); err != nil || len(target) != 0 {
+		t.Fatalf("none failed: %v, %v", err, target)
+	}
+	if err := applyAgentsFlag("claude, gemini, claude, ", &target); err != nil || len(target) != 2 {
+		t.Fatalf("comma list failed: %v, %v", err, target)
+	}
+	if err := applyAgentsFlag("invalid", &target); err == nil {
+		t.Fatal("want error for invalid agent")
+	}
+}
+
+func TestLandedWithWrittenFiles(t *testing.T) {
+	out := landed("something failed", []string{".ultraloom/answers.toml", ".ultraloom/config.toml"})
+	if !strings.Contains(out, "something failed") || !strings.Contains(out, "answers.toml") {
+		t.Fatalf("landed output unexpected:\n%s", out)
+	}
+	if got := landed("only error", nil); got != "only error" {
+		t.Fatalf("landed empty list got %q", got)
 	}
 }

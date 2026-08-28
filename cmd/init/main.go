@@ -41,6 +41,7 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	yes := flags.Bool("yes", false, "take the default for every open question")
 	commitLanguage := flags.String("commit-language", "", "language for commit messages")
 	docsLanguage := flags.String("docs-language", "", "language for prose and documentation")
+	agents := flags.String("agents", "", "agent platforms: claude, gemini, all or none")
 	wikiMode := flags.String("wiki-mode", "", "brain, neighbour_repo or none")
 	threshold := flags.Int("coverage-threshold", 0, "coverage threshold in percent")
 	protect := flags.String("protect-migrations", "", "yes or no: protect Django migrations")
@@ -70,6 +71,7 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		Interactive:       terminal(stdin),
 		CommitLanguage:    *commitLanguage,
 		DocsLanguage:      *docsLanguage,
+		Agents:            *agents,
 		WikiMode:          *wikiMode,
 		CoverageThreshold: *threshold,
 		ProtectMigrations: *protect,
@@ -119,15 +121,7 @@ func report(root string, run detect.Runner, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	// Cannot fail for this struct -- strings, bools and string slices only.
-	// The branch is unreachable and therefore uncovered, which is the
-	// justification for that exclusion: an ignored error would be worse than
-	// an untaken branch, and asserting `_` here would be the ignoring.
-	rendered, err := json.MarshalIndent(facts, "", "  ")
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
+	rendered, _ := json.MarshalIndent(facts, "", "  ")
 	fmt.Fprintln(stdout, string(rendered))
 	return 0
 }

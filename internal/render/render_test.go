@@ -22,7 +22,7 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 func fixture() answers.Answers {
 	a := answers.Answers{}
 	a.Project = answers.Project{
-		Stacks: []string{"python", "uv"}, DocsLanguage: "de", CommitLanguage: "en"}
+		Stacks: []string{"python", "uv"}, Agents: []string{"claude", "gemini"}, DocsLanguage: "de", CommitLanguage: "en"}
 	a.Gates = answers.Gates{CoverageThreshold: 100, TestsInStop: true, TypesInStop: true}
 	a.Gates.Wiki = answers.Wiki{Mode: "none"}
 	// An answered-with-no list beside an answered-with-yes one: the empty one
@@ -41,8 +41,8 @@ func TestEveryGeneratedFileSaysWhereItCameFrom(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	for name, body := range files {
-		if name == ".ultraloom/answers.toml" {
-			continue // the source itself does not point at itself
+		if name == ".ultraloom/answers.toml" || strings.HasSuffix(name, ".md") {
+			continue // the source itself and markdown docs do not carry this comment
 		}
 		if !strings.Contains(body, "generated from .ultraloom/answers.toml") {
 			t.Fatalf("%s has no provenance header", name)
@@ -67,6 +67,9 @@ func compareGolden(t *testing.T, prefix string, coverageLane bool) {
 		t.Fatalf("Render: %v", err)
 	}
 	for name, body := range files {
+		if strings.HasSuffix(name, ".md") {
+			continue // markdown document templates are tested directly
+		}
 		if prefix != "" && name != ".ultraloom/config.toml" {
 			// Only that one file reads the flag; a second copy of the other
 			// two would be two more places to keep in step for nothing.
@@ -196,7 +199,18 @@ func TestRenderNamesEveryFileItWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	want := []string{".ultraloom/answers.toml", ".ultraloom/config.toml", ".ultraloom/policy.toml"}
+	want := []string{
+		".agents/skills/session-handover/SKILL.md",
+		".agents/skills/verify-until-green/SKILL.md",
+		".claude/skills/session-handover/SKILL.md",
+		".claude/skills/verify-until-green/SKILL.md",
+		".ultraloom/answers.toml",
+		".ultraloom/config.toml",
+		".ultraloom/policy.toml",
+		"AGENTS.md",
+		"CLAUDE.md",
+		"GEMINI.md",
+	}
 	var got []string
 	for name := range files {
 		got = append(got, name)
@@ -219,6 +233,9 @@ func TestEveryRenderedFileIsValidToml(t *testing.T) {
 			t.Fatalf("Render: %v", err)
 		}
 		for name, body := range files {
+			if strings.HasSuffix(name, ".md") {
+				continue
+			}
 			var parsed map[string]any
 			if _, err := toml.Decode(body, &parsed); err != nil {
 				t.Fatalf("%s is not valid TOML: %v\n%s", name, err, body)
@@ -393,5 +410,80 @@ func TestWithEnforcementTheCoverageLaneIsThere(t *testing.T) {
 	}
 	if !strings.Contains(config, `precommit = ["lint", "types", "test", "coverage"]`) {
 		t.Fatalf("the precommit profile lost the coverage check:\n%s", config)
+	}
+}
+
+func TestRenderDocumentTemplatesAccordingToAgents(t *testing.T) {
+	// 1. Both claude and gemini
+	f := fixture()
+	f.Project.Agents = []string{"claude", "gemini"}
+	files, err := Render(f, true)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if _, ok := files["AGENTS.md"]; !ok {
+		t.Fatal("want AGENTS.md rendered")
+	}
+	if _, ok := files["CLAUDE.md"]; !ok {
+		t.Fatal("want CLAUDE.md rendered")
+	}
+	if _, ok := files["GEMINI.md"]; !ok {
+		t.Fatal("want GEMINI.md rendered")
+	}
+	if _, ok := files[".claude/skills/verify-until-green/SKILL.md"]; !ok {
+		t.Fatal("want .claude verify-until-green skill")
+	}
+	if _, ok := files[".agents/skills/verify-until-green/SKILL.md"]; !ok {
+		t.Fatal("want .agents verify-until-green skill")
+	}
+	agentsMd := files["AGENTS.md"]
+	if !strings.Contains(agentsMd, "Whenever a tool invoked by a hook can be executed as a shim pinned to a specific version") {
+		t.Fatalf("AGENTS.md missing hook tools rule:\n%s", agentsMd)
+	}
+	if !strings.Contains(agentsMd, "README.de.md") {
+		t.Fatalf("AGENTS.md missing docs language de:\n%s", agentsMd)
+	}
+
+	// 2. Only gemini
+	fGemini := fixture()
+	fGemini.Project.Agents = []string{"gemini"}
+	filesGemini, err := Render(fGemini, true)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if _, ok := filesGemini["AGENTS.md"]; !ok {
+		t.Fatal("want AGENTS.md rendered")
+	}
+	if _, ok := filesGemini["CLAUDE.md"]; ok {
+		t.Fatal("CLAUDE.md should not be rendered when claude is not in agents")
+	}
+	if _, ok := filesGemini[".claude/skills/verify-until-green/SKILL.md"]; ok {
+		t.Fatal(".claude skills should not be rendered when claude is not in agents")
+	}
+	if _, ok := filesGemini["GEMINI.md"]; !ok {
+		t.Fatal("want GEMINI.md rendered")
+	}
+	if _, ok := filesGemini[".agents/skills/verify-until-green/SKILL.md"]; !ok {
+		t.Fatal("want .agents verify-until-green skill")
+	}
+
+	// 3. Only claude
+	fClaude := fixture()
+	fClaude.Project.Agents = []string{"claude"}
+	filesClaude, err := Render(fClaude, true)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if _, ok := filesClaude["GEMINI.md"]; ok {
+		t.Fatal("GEMINI.md should not be rendered when gemini is not in agents")
+	}
+	if _, ok := filesClaude[".agents/skills/verify-until-green/SKILL.md"]; ok {
+		t.Fatal(".agents skills should not be rendered when gemini is not in agents")
+	}
+	if _, ok := filesClaude["CLAUDE.md"]; !ok {
+		t.Fatal("want CLAUDE.md rendered")
+	}
+	if _, ok := filesClaude[".claude/skills/verify-until-green/SKILL.md"]; !ok {
+		t.Fatal("want .claude verify-until-green skill")
 	}
 }
