@@ -11,8 +11,22 @@ Windows gofmt is not reachable from there by its bare name.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
+from pathlib import Path
+
+_WINDOWS_GOFMT = Path(r"C:\Program Files\Go\bin\gofmt.exe")
+
+
+def _resolve_gofmt() -> str:
+    """Find the gofmt executable, checking PATH then standard install location."""
+    found = shutil.which("gofmt")
+    if found:
+        return found
+    if sys.platform == "win32" and _WINDOWS_GOFMT.is_file():
+        return str(_WINDOWS_GOFMT)
+    return "gofmt"
 
 
 def main(paths: list[str]) -> int:
@@ -20,9 +34,10 @@ def main(paths: list[str]) -> int:
     if not paths:
         print("usage: gofmt-check.py <path>...", file=sys.stderr)
         return 1
+    gofmt = _resolve_gofmt()
     try:
         done = subprocess.run(
-            ["gofmt", "-l", *paths],
+            [gofmt, "-l", *paths],
             capture_output=True,
             text=True,
             check=False,

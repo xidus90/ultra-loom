@@ -1,6 +1,6 @@
 # Generierte Dateien im Pfad-Guard — Entwurf
 
-Stand: 2026-08-27. Status: zur Durchsicht.
+Stand: 2026-08-27. Status: umgesetzt.
 
 ## Warum
 

@@ -61,7 +61,36 @@ def test_no_paths_is_refused(wrapper: ModuleType, capsys: pytest.CaptureFixture[
 def test_clean_tree_passes(wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     seen = answer(monkeypatch, wrapper, stdout="\n")
     assert wrapper.main(["cmd"]) == 0
-    assert seen == [["gofmt", "-l", "cmd"]]
+    assert len(seen) == 1
+    assert Path(seen[0][0]).stem.lower() == "gofmt"
+    assert seen[0][1:] == ["-l", "cmd"]
+
+
+def test_resolve_gofmt_prefers_path(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(wrapper.shutil, "which", lambda cmd: "/usr/bin/gofmt")
+    assert wrapper._resolve_gofmt() == "/usr/bin/gofmt"
+
+
+def test_resolve_gofmt_falls_back_on_windows(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_gofmt = tmp_path / "gofmt.exe"
+    fake_gofmt.write_text("")
+    monkeypatch.setattr(wrapper.shutil, "which", lambda cmd: None)
+    monkeypatch.setattr(wrapper.sys, "platform", "win32")
+    monkeypatch.setattr(wrapper, "_WINDOWS_GOFMT", fake_gofmt)
+    assert wrapper._resolve_gofmt() == str(fake_gofmt)
+
+
+def test_resolve_gofmt_defaults_to_bare_name_when_not_found(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(wrapper.shutil, "which", lambda cmd: None)
+    monkeypatch.setattr(wrapper.sys, "platform", "linux")
+    assert wrapper._resolve_gofmt() == "gofmt"
+
 
 
 def test_unformatted_files_fail(

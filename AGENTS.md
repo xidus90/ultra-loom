@@ -30,3 +30,9 @@ and plans are written once, read by a human, and never translated.
 A commit carries the user as its author and its committer, and nothing in the
 message credits a model or an agent — no `Co-Authored-By` line for Claude or
 for a subagent. The history says what changed, not which tool held the pen.
+
+## Hook Tools and Shims
+
+Whenever a tool invoked by a hook can be executed as a shim pinned to a specific version, it must be used that way. Direct pinned shims ensure deterministic runs, prevent toolchain drift across machines, and avoid monolithic wrapper overhead.
+
+

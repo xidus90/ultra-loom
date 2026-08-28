@@ -285,8 +285,18 @@ def _drain(stream: IO[bytes] | None, name: str) -> _Drain:
     return _Drain(thread=thread, chunks=chunks, failed=failed)
 
 
-def child_env(parent: Mapping[str, str]) -> dict[str, str]:
-    """The environment a check command runs in: the parent's, plus utf-8.
+# Standard toolchain directories on Windows that subshells (e.g. IDE hooks, minimal environments)
+# might omit from PATH.
+_WINDOWS_TOOLCHAIN_PATHS: tuple[Path, ...] = (Path(r"C:\Program Files\Go\bin"),)
+
+
+def child_env(
+    parent: Mapping[str, str],
+    *,
+    platform: str = sys.platform,
+    known_toolchain_paths: tuple[Path, ...] = _WINDOWS_TOOLCHAIN_PATHS,
+) -> dict[str, str]:
+    """The environment a check command runs in: the parent's, plus utf-8 and toolchain PATHs.
 
     `_decode` reads every pipe as utf-8, and a child left to the machine's
     locale does not merely answer in another one. On Windows it writes through
@@ -298,8 +308,26 @@ def child_env(parent: Mapping[str, str]) -> dict[str, str]:
     So an inherited value is overwritten rather than respected. This is not a
     preference a machine may hold against us; it is the other half of a
     decoding that is already fixed.
+
+    On Windows, known toolchain install directories (like Go) are appended to
+    PATH if present on disk and not already in PATH, so that gates running in
+    subshells with minimal PATH can still reach installed compilers.
     """
-    return {**parent, "PYTHONIOENCODING": "utf-8"}
+    env = {**parent, "PYTHONIOENCODING": "utf-8"}
+    if platform == "win32":
+        path_var = env.get("PATH", "")
+        existing = {os.path.normcase(p.strip()) for p in path_var.split(os.pathsep) if p.strip()}
+        additions = [
+            str(candidate)
+            for candidate in known_toolchain_paths
+            if candidate.is_dir() and os.path.normcase(str(candidate)) not in existing
+        ]
+        if additions:
+            env["PATH"] = (
+                os.pathsep.join([path_var, *additions]) if path_var else os.pathsep.join(additions)
+            )
+    return env
+
 
 
 def spawn_kwargs(platform: str) -> dict[str, object]:

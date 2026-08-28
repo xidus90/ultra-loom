@@ -47,6 +47,28 @@ DEFAULTS: Mapping[Kind, tuple[Rule, ...]] = {
             is_regex=False,
             tools=None,
         ),
+        # Only what is generated everywhere, never what merely looks generated.
+        # `requirements.txt` is kept by hand in many projects, and a numbered
+        # migration is a Django name that means something else under Alembic --
+        # both belong in the project's own file, and the README says so. The
+        # patterns bite at the root only: a lock file deeper in the tree belongs
+        # to another project, which should carry its own [policy.paths].
+        Rule(
+            patterns=(
+                "uv.lock",
+                "poetry.lock",
+                "package-lock.json",
+                "yarn.lock",
+                "pnpm-lock.yaml",
+                "Cargo.lock",
+                "composer.lock",
+                "Gemfile.lock",
+                "go.sum",
+            ),
+            reason="a lock file is written by its resolver, not by hand",
+            is_regex=False,
+            tools=None,
+        ),
     ),
     "content": (
         Rule(

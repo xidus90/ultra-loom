@@ -419,8 +419,9 @@ abgelehnt, dass der Modus `allow` ist.
 ### Was ohne jede Konfiguration gesperrt ist
 
 Ohne `.ultraloom/config.toml` greifen die eingebauten Regeln trotzdem — ein Repo
-ist geschützt, ohne dass jemand etwas eingerichtet hat. Sie decken Sicherheit und
-die Unversehrtheit des Gates ab, sonst nichts, und stehen als Konstante in `ultraloom.policy.config`, nicht
+ist geschützt, ohne dass jemand etwas eingerichtet hat. Sie decken Sicherheit,
+die Unversehrtheit des Gates und generierte Dateien ab, sonst nichts, und stehen
+als Konstante in `ultraloom.policy.config`, nicht
 in einer mitgelieferten TOML-Datei: eine Datei kann fehlen, eine Konstante
 nicht.
 
@@ -444,6 +445,24 @@ tun. Für einen Menschen ist beides weiter erreichbar — die Shell schreibt bei
 Dateien, und `commands` verbietet per Voreinstellung nichts. Die Regel hält nur
 den beiläufigen Werkzeugaufruf davon ab.
 
+Pfade, Begründung *a lock file is written by its resolver, not by hand*:
+
+    uv.lock   poetry.lock   package-lock.json   yarn.lock   pnpm-lock.yaml
+    Cargo.lock   composer.lock   Gemfile.lock   go.sum
+
+Eine Lockdatei ist die Ausgabe eines Resolverlaufs und sagt aus, was der
+Resolver aufgelöst hat. Wer eine Zeile darin von Hand ändert, hat nicht das
+Projekt geändert, sondern die Behauptung über das Projekt — und das gilt in jeder
+Sprache und in jedem Projekt, weshalb die Regel eingebaut ist. Der
+Merge-Konflikt sieht wie ein Gegenbeispiel aus und ist keins: auch dort ist die
+Auflösung ein erneuter Resolverlauf. Die Muster greifen nur im
+Wurzelverzeichnis; ein `vendor/uv.lock` ist ein eigenes Projekt und soll seine
+eigene `[policy.paths]` tragen.
+
+Nicht in der Liste steht `requirements.txt`. Sie wird vielerorts von Hand
+gepflegt, und eine Regel dort wäre genau der Fehlalarm, den diese Gruppe
+vermeidet — ein Fehlalarm kostet das Vertrauen in alle anderen Regeln.
+
 Inhalte, Begründung *this looks like a credential in plain text*:
 
     -----BEGIN [A-Z ]*PRIVATE KEY-----
@@ -460,6 +479,27 @@ Projektregeln in der Reihenfolge der Datei. Sie gelten **nur im Modus `deny`**:
 wer eine Art auf `allow` dreht, bekommt die Allowlist und sonst nichts, die
 Voreinstellungen eingeschlossen. Den Modus umzudrehen heißt, die Verantwortung
 ganz zu übernehmen.
+
+### Was ein Projekt selbst ergänzen sollte
+
+Manches ist ebenfalls generiert, aber nur hier. Eine generierte
+Django-Migration schreibt `makemigrations` neu; ein Agent, der eine Zeile darin
+korrigiert, hat das Protokoll verschoben statt das Schema:
+
+```toml
+[[policy.paths.rules]]
+regex  = '(^|/)migrations/\d{4}_[^/]+\.py$'
+reason = "a generated migration is rewritten by makemigrations, not by hand"
+```
+
+Das steht hier und nicht in den Voreinstellungen, und das ist der Punkt, kein
+Versäumnis: dasselbe Verzeichnis trägt anderswo handgeschriebene
+SQL-Migrationen, die geändert werden *sollen*, und Alembic benennt seine Dateien
+ohne die vierstellige Nummer. Eine eingebaute Regel würde dort eine legitime
+Änderung blocken. `regex` und nicht `match`, weil die Nummer als Glob —
+`[0-9][0-9][0-9][0-9]` — unlesbar ist; die beiden Schlüssel schließen einander
+aus. Das Muster steht in einfachen Anführungszeichen: TOML liest `"\d"` als
+Escape und verweigert die Datei.
 
 ### Exit-Codes
 

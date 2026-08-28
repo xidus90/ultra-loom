@@ -748,9 +748,42 @@ def test_the_child_is_told_to_write_utf8() -> None:
     down at the first character outside it -- before a byte reaches the pipe,
     where nothing on this side can still fix it.
     """
-    assert child_env({"PATH": "/usr/bin"})["PYTHONIOENCODING"] == "utf-8"
-    assert child_env({"PATH": "/usr/bin"})["PATH"] == "/usr/bin"
-    assert child_env({"PYTHONIOENCODING": "cp1252"})["PYTHONIOENCODING"] == "utf-8"
+    assert child_env({"PATH": "/usr/bin"}, platform="linux")["PYTHONIOENCODING"] == "utf-8"
+    assert child_env({"PATH": "/usr/bin"}, platform="linux")["PATH"] == "/usr/bin"
+    env = child_env({"PYTHONIOENCODING": "cp1252"}, platform="linux")
+    assert env["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_child_env_appends_windows_toolchain_if_present(tmp_path: Path) -> None:
+    go_bin = tmp_path / "Go" / "bin"
+    go_bin.mkdir(parents=True)
+    env = child_env(
+        {"PATH": r"C:\Windows\System32"},
+        platform="win32",
+        known_toolchain_paths=(go_bin,),
+    )
+    assert env["PATH"] == f"C:\\Windows\\System32;{go_bin}"
+
+
+def test_child_env_does_not_duplicate_existing_windows_toolchain(tmp_path: Path) -> None:
+    go_bin = tmp_path / "Go" / "bin"
+    go_bin.mkdir(parents=True)
+    env = child_env(
+        {"PATH": f"C:\\Windows\\System32;{str(go_bin).lower()}"},
+        platform="win32",
+        known_toolchain_paths=(go_bin,),
+    )
+    assert env["PATH"] == f"C:\\Windows\\System32;{str(go_bin).lower()}"
+
+
+def test_child_env_ignores_missing_windows_toolchains(tmp_path: Path) -> None:
+    missing_bin = tmp_path / "Go" / "bin"
+    env = child_env(
+        {"PATH": r"C:\Windows\System32"},
+        platform="win32",
+        known_toolchain_paths=(missing_bin,),
+    )
+    assert env["PATH"] == r"C:\Windows\System32"
 
 
 def test_a_child_may_print_a_character_the_locale_cannot(tmp_path: Path) -> None:

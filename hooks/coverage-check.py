@@ -23,6 +23,7 @@ the Go tree's coverage is measured by nobody and reported by nobody.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,18 @@ TERSE_PYTEST = ("-q", "--tb=short", "--no-header")
 # What `go tool cover -func` prints on its last line. The percentage is the
 # only number on it, and the word before it names what was counted.
 TOTAL = re.compile(r"^total:\s+\(statements\)\s+([0-9.]+)%", re.MULTILINE)
+
+_WINDOWS_GO = Path(r"C:\Program Files\Go\bin\go.exe")
+
+
+def _resolve_go() -> str:
+    """Find the go executable, checking PATH then standard install location."""
+    found = shutil.which("go")
+    if found:
+        return found
+    if sys.platform == "win32" and _WINDOWS_GO.is_file():
+        return str(_WINDOWS_GO)
+    return "go"
 
 
 def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -64,15 +77,16 @@ def python_arm() -> tuple[bool, str]:
 
 def go_arm(floor: float) -> tuple[bool, str]:
     """Measure the Go tree and hold it to a floor `go test` cannot hold itself."""
+    go = _resolve_go()
     with tempfile.TemporaryDirectory() as workspace:
         profile = str(Path(workspace) / "cover.out")
         try:
-            measured = run(["go", "test", "./...", "-covermode=set", f"-coverprofile={profile}"])
+            measured = run([go, "test", "./...", "-covermode=set", f"-coverprofile={profile}"])
         except OSError as error:
             return False, f"go could not be run: {error}"
         if measured.returncode != 0:
             return False, "go test failed:\n" + tail(measured)
-        summary = run(["go", "tool", "cover", f"-func={profile}"])
+        summary = run([go, "tool", "cover", f"-func={profile}"])
     if summary.returncode != 0:
         return False, "go tool cover failed:\n" + tail(summary)
     found = TOTAL.search(summary.stdout)

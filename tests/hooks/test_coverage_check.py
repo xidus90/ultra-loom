@@ -46,7 +46,10 @@ def answers(
 
     def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         seen.append(list(argv))
-        key = " ".join(argv[:3])
+        words = list(argv[:3])
+        if words:
+            words[0] = Path(words[0]).stem.lower()
+        key = " ".join(words)
         for prefix, error in (raises or {}).items():
             if key.startswith(prefix):
                 raise error
@@ -64,6 +67,32 @@ GREEN = {
     "go test": (0, "ok\n"),
     "go tool cover": (0, GO_FUNC_OUTPUT),
 }
+
+
+def test_resolve_go_prefers_path(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(wrapper.shutil, "which", lambda cmd: "/usr/bin/go")
+    assert wrapper._resolve_go() == "/usr/bin/go"
+
+
+def test_resolve_go_falls_back_on_windows(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_go = tmp_path / "go.exe"
+    fake_go.write_text("")
+    monkeypatch.setattr(wrapper.shutil, "which", lambda cmd: None)
+    monkeypatch.setattr(wrapper.sys, "platform", "win32")
+    monkeypatch.setattr(wrapper, "_WINDOWS_GO", fake_go)
+    assert wrapper._resolve_go() == str(fake_go)
+
+
+def test_resolve_go_defaults_to_bare_name_when_not_found(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(wrapper.shutil, "which", lambda cmd: None)
+    monkeypatch.setattr(wrapper.sys, "platform", "linux")
+    assert wrapper._resolve_go() == "go"
 
 
 def test_both_arms_green_passes(
@@ -102,11 +131,12 @@ def test_a_red_python_report_fails(
     replies["uv run coverage"] = (0, "")
 
     def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        stem = Path(argv[0]).stem.lower() if argv else ""
         if argv[:4] == ["uv", "run", "coverage", "report"]:
             return subprocess.CompletedProcess(argv, 2, "TOTAL 83%\n", "")
-        if argv[:2] == ["go", "test"]:
+        if stem == "go" and len(argv) >= 2 and argv[1] == "test":
             return subprocess.CompletedProcess(argv, 0, "ok\n", "")
-        if argv[:3] == ["go", "tool", "cover"]:
+        if stem == "go" and len(argv) >= 3 and argv[1:3] == ["tool", "cover"]:
             return subprocess.CompletedProcess(argv, 0, GO_FUNC_OUTPUT, "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
@@ -117,6 +147,7 @@ def test_a_red_python_report_fails(
     # ever hears about the first failure spends one round per language.
     assert "TOTAL 83%" in said.err
     assert "go coverage 98.6%" in said.out
+
 
 
 def test_a_red_suite_is_not_reported_over(

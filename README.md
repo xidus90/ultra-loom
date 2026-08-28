@@ -249,21 +249,21 @@ leaves it out of the decision to give up.
 
 ### Where the tools come from
 
-A preset names its tool bare â€” `godot`, `eslint`, `vitest`. Before such a
+A preset names its tool bare — `godot`, `eslint`, `vitest`. Before such a
 command runs, ultraloom looks for that first word in three places, in order,
 and checks each one instead of believing it:
 
-1. `ULTRALOOM_TOOL_<NAME>` â€” the tool name upper-cased, `-` turned into `_`.
+1. `ULTRALOOM_TOOL_<NAME>` — the tool name upper-cased, `-` turned into `_`.
    `ULTRALOOM_TOOL_GODOT=D:/Godot/godot.exe` is this machine's answer. A
    variable that points at nothing falls through to the next candidate rather
    than being handed on; an empty value counts as unset, so a machine can
    switch it off again for one run.
-2. `.ultraloom/tools/<name>` in the project â€” on Windows also with `.exe`,
+2. `.ultraloom/tools/<name>` in the project — on Windows also with `.exe`,
    `.cmd` and `.bat`, tried in that order.
 3. `PATH`.
 
 Found in 1 or 2, the command runs against that exact file. Found on `PATH`, it
-keeps its bare name â€” the argv reaches the same file either way, and the report
+keeps its bare name — the argv reaches the same file either way, and the report
 stays readable. Found nowhere, the check comes back `unavailable` with a
 message naming all three ways out, so a repairing agent can see that no source
 change will close it.
@@ -274,7 +274,7 @@ ultraloom's business.
 Three things are deliberately left alone: a command from `[verify]`, because a
 person wrote that path and meant it; every command when `[exec].prefix` is set,
 because it then runs in a container where a path from this machine would be
-wrong; and every word after the first â€” in `uvx ruff check .` the tool is
+wrong; and every word after the first — in `uvx ruff check .` the tool is
 `uvx`, and `ruff` is an argument uvx resolves for itself.
 
 ### Before you configure a check
@@ -382,9 +382,10 @@ is refused with the note that the mode is `allow`.
 ### What is blocked without any configuration
 
 With no `.ultraloom/config.toml` at all, the built-in rules still apply — a repo
-is protected without anyone having set anything up. They are security and the
-gate's own integrity, nothing else, and they live as a constant in `ultraloom.policy.config`, not in a shipped TOML
-file: a file can go missing, a constant cannot.
+is protected without anyone having set anything up. They are security, the
+gate's own integrity and generated files, nothing else, and they live as a
+constant in `ultraloom.policy.config`, not in a shipped TOML file: a file can go
+missing, a constant cannot.
 
 Paths, reason *secrets are not written by an agent*:
 
@@ -405,6 +406,23 @@ moves the baseline instead of doing the work. Neither is out of reach for a
 human — the shell writes both, and `commands` denies nothing by default. The
 rule only keeps a tool call from doing it in passing.
 
+Paths, reason *a lock file is written by its resolver, not by hand*:
+
+    uv.lock   poetry.lock   package-lock.json   yarn.lock   pnpm-lock.yaml
+    Cargo.lock   composer.lock   Gemfile.lock   go.sum
+
+A lock file is the output of a resolver run and states what the resolver
+resolved. Editing one by hand does not change the project, it changes the claim
+about the project — and that is true in every language and every project, which
+is what makes it a built-in. A merge conflict looks like the counter-example and
+is none: there too the resolution is another resolver run. The patterns match at
+the root only; a `vendor/uv.lock` is a project of its own and should carry its
+own `[policy.paths]`.
+
+Not in the list: `requirements.txt`. It is kept by hand in many projects, and a
+rule there would be exactly the false alarm this group avoids — one false alarm
+costs the trust in all the other rules.
+
 Content, reason *this looks like a credential in plain text*:
 
     -----BEGIN [A-Z ]*PRIVATE KEY-----
@@ -420,6 +438,26 @@ The built-ins come first in the list of reasons, then the project's rules in the
 order of the file. They apply **only in `deny` mode**: whoever turns a kind
 around to `allow` gets the allowlist and nothing else, the built-ins included.
 Turning the mode around means taking the responsibility whole.
+
+### What a project should add itself
+
+Some files are generated too, but only here. A generated Django migration is
+rewritten by `makemigrations`, and an agent that corrects a line in one has
+moved the record instead of the schema:
+
+```toml
+[[policy.paths.rules]]
+regex  = '(^|/)migrations/\d{4}_[^/]+\.py$'
+reason = "a generated migration is rewritten by makemigrations, not by hand"
+```
+
+This is not built in, and that is the point rather than an omission: the same
+directory carries hand-written SQL migrations elsewhere that are *meant* to be
+edited, and Alembic names its files without the four-digit number. A built-in
+rule would block a legitimate change there. `regex` and not `match` because the
+number as a glob — `[0-9][0-9][0-9][0-9]` — is unreadable; the two keys exclude
+each other. The pattern stands in single quotes: TOML reads `"\d"` as an escape
+and refuses the file.
 
 ### Exit codes
 
