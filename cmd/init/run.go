@@ -146,11 +146,11 @@ func run(opts Options) (int, string) {
 	// commit it pinned, so the clone is the one write that goes first -- and it
 	// goes into a directory of ours, never over somebody's file.
 	ref, commit := opts.VendorRef, ""
+	present, err := vendorPresent(opts.Root)
+	if err != nil {
+		return exitOwn, err.Error()
+	}
 	if opts.VendorURL != "" {
-		present, err := vendorPresent(opts.Root)
-		if err != nil {
-			return exitOwn, err.Error()
-		}
 		switch {
 		case present:
 			// Not an error: a project that already carries a runtime is the
@@ -175,6 +175,18 @@ func run(opts Options) (int, string) {
 				return exitOwn, discardClone(opts.Root, err)
 			}
 		}
+	}
+	if opts.VendorURL == "" && !present {
+		// Every generated hook points at the vendored runtime, and there is no
+		// second road: a project without one has a settings.json whose
+		// PreToolUse hook fails on every Write, Edit and Bash. Reported rather
+		// than filled in from a default url -- a plain init would then reach
+		// the network on a machine that may have none, and this tool has no
+		// version of itself it can honestly pin a stranger's project to.
+		notes = append(notes, "no runtime is vendored: every generated hook "+
+			"runs the ultraloom in "+vendoring.VendorDir+", and nothing is "+
+			"there yet -- pass --vendor-url and --vendor-ref to clone it, or "+
+			"the hooks fail on every edit")
 	}
 
 	// The list names what init owns in this project, not what this one run
@@ -363,26 +375,43 @@ func ask(opts Options, current answers.Answers) (answers.Answers, error) {
 // relevance mapping follows.
 //
 // The residual, so nobody has to work it out from the return line: a Node
-// project gets a coverage lane whose enforcement was never established, and
-// no note either, because coverageNote is Python-only for the same reason
-// this is. Its vitest thresholds live in the vitest configuration, which
-// nothing here reads. That is unverified, not verified-absent -- the
-// fail-safe of the two -- and closing it means teaching this to read a second
-// language's configuration, not narrowing what it drops.
+// project gets a coverage lane whose enforcement was never established. Its
+// vitest thresholds live in the vitest configuration, which nothing here
+// reads. That is unverified, not verified-absent -- the fail-safe of the two
+// -- and closing it means teaching this to read a second language's
+// configuration, not narrowing what it drops. coverageNote says so in the
+// report, which is where the person who can close it will see it.
 func coverageLane(filled answers.Answers, enforced bool) bool {
 	return enforced || !has(filled.Project.Stacks, "python")
 }
 
-// coverageNote reports what the generated files no longer claim.
+// coverageNote reports what the generated files no longer claim, and what
+// they claim without having checked.
 //
-// The threshold is enforced by the coverage tool's own fail_under and by
-// nothing else, and pyproject.toml is somebody else's file -- init does not
-// write there. So the check is left out instead, and this says so: a person
-// who wanted that lane needs to know why it is missing and what brings it
-// back. Python only, for the reason coverageLane gives.
+// Two different answers, and neither of them is silence. For Python the
+// threshold is enforced by the coverage tool's own fail_under and by nothing
+// else, and pyproject.toml is somebody else's file -- init does not write
+// there. So the check is left out instead, and this says why and what brings
+// it back.
+//
+// Everywhere else the lane is kept, because dropping a lane a project may
+// well enforce opens the same silent gap from the other side. But kept is not
+// verified: the Node preset is `vitest run --coverage`, which exits 0 at any
+// number unless the project configured coverage.thresholds where nothing here
+// looks. Until this fix the reasoning lived only in a Go comment, so the one
+// person who could close the gap never heard about it.
 func coverageNote(filled answers.Answers, enforced bool) []string {
-	if enforced || !has(filled.Project.Stacks, "python") {
+	if enforced {
 		return nil
+	}
+	if !has(filled.Project.Stacks, "python") {
+		return []string{fmt.Sprintf(
+			"the coverage lane was kept but not verified: nothing here reads "+
+				"this stack's coverage configuration, so whether the threshold "+
+				"of %d%% is enforced at all is unknown -- check that your test "+
+				"runner fails below it, or the lane reports a number it can "+
+				"never fail on",
+			filled.Gates.CoverageThreshold)}
 	}
 	return []string{fmt.Sprintf(
 		"no coverage check was installed: nothing here enforces the threshold "+

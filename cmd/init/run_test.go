@@ -710,3 +710,42 @@ func TestAnUnreadableVendorNameIsReported(t *testing.T) {
 		t.Fatalf("the unreadable name was not named: %v", err)
 	}
 }
+
+// A plain run installs hooks that all point into the vendored runtime, and
+// clones nothing. Without a word about it the project gets a settings.json
+// whose PreToolUse hook fails on every Write, Edit and Bash, reported as
+// success.
+func TestARunWithoutARuntimeSaysTheHooksCannotRunYet(t *testing.T) {
+	report := mustRun(t, answered(t.TempDir()))
+	if !strings.Contains(report, "no runtime is vendored") {
+		t.Fatalf("the missing runtime was not reported:\n%s", report)
+	}
+	for _, flag := range []string{"--vendor-url", "--vendor-ref"} {
+		if !strings.Contains(report, flag) {
+			t.Fatalf("%s was not named as the way out:\n%s", flag, report)
+		}
+	}
+}
+
+// Once the runtime stands, the hooks can run and there is nothing to warn
+// about -- a note that never goes away is a note nobody reads.
+func TestARuntimeInPlaceIsNotWarnedAbout(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".ultraloom/vendor/ultraloom/pyproject.toml", "")
+	if report := mustRun(t, answered(root)); strings.Contains(report, "no runtime is vendored") {
+		t.Fatalf("a project with a runtime was told it has none:\n%s", report)
+	}
+}
+
+// Keeping the lane for a stack this cannot judge is the safe half. The other
+// half is saying so: the reasoning lived in a Go comment the user never reads,
+// while `vitest run --coverage` exits 0 at any number unless the project
+// configured thresholds of its own.
+func TestALaneThisCannotVerifyIsNamedAsUnverified(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "package.json", "{}")
+	report := mustRun(t, answered(root))
+	if !strings.Contains(report, "the coverage lane was kept but not verified") {
+		t.Fatalf("the unverified lane was not reported:\n%s", report)
+	}
+}
