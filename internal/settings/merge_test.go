@@ -1,0 +1,189 @@
+package settings
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestAMissingEventIsAdded(t *testing.T) {
+	got, err := Merge([]byte(`{}`), []Entry{{Event: "PreToolUse", Matcher: "Write", Command: "guard"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if !strings.Contains(string(got.Merged), "PreToolUse") {
+		t.Fatal("the entry was not added")
+	}
+}
+
+func TestOurOwnEntryIsReplacedNotDuplicated(t *testing.T) {
+	before := `{"hooks":{"PreToolUse":[{"matcher":"Write","ultraloomOwned":true,
+	  "hooks":[{"type":"command","command":"old"}]}]}}`
+	got, err := Merge([]byte(before), []Entry{{Event: "PreToolUse", Matcher: "Write", Command: "new"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if strings.Count(string(got.Merged), "\"matcher\"") != 1 {
+		t.Fatalf("want one entry, got %s", got.Merged)
+	}
+	if !strings.Contains(string(got.Merged), "new") {
+		t.Fatal("the entry was not replaced")
+	}
+}
+
+func TestAForeignEntryIsLeftAloneAndReported(t *testing.T) {
+	before := `{"hooks":{"PostToolUse":[{"matcher":"Write|Edit",
+	  "hooks":[{"type":"command","command":"bash run.sh post_edit.py"}]}]}}`
+	got, err := Merge([]byte(before), []Entry{{Event: "PostToolUse", Matcher: "Write|Edit", Command: "ours"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if strings.Contains(string(got.Merged), "ours") {
+		t.Fatal("a second hook was added next to a foreign one")
+	}
+	if len(got.Skipped) != 1 {
+		t.Fatalf("skipped = %v, want one report", got.Skipped)
+	}
+}
+
+func TestForeignKeysSurvive(t *testing.T) {
+	before := `{"permissions":{"defaultMode":"auto"},"model":"opus"}`
+	got, err := Merge([]byte(before), nil)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	var after map[string]any
+	if err := json.Unmarshal(got.Merged, &after); err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	if _, ok := after["permissions"]; !ok {
+		t.Fatal("permissions were lost")
+	}
+	if after["model"] != "opus" {
+		t.Fatal("model was lost")
+	}
+}
+
+func TestBrokenJsonIsRefused(t *testing.T) {
+	if _, err := Merge([]byte("{not json"), nil); err == nil {
+		t.Fatal("want an error, not a repair")
+	}
+}
+
+// TestAMatcherlessEntryDoesNotClaimEveryEntry: Stop and SessionStart carry no
+// matcher, and an entry that matches everything would report the first
+// unrelated hook in the list as holding its slot.
+func TestAMatcherlessEntryDoesNotClaimEveryEntry(t *testing.T) {
+	before := `{"hooks":{"Stop":[{"matcher":"Write","hooks":[{"type":"command","command":"theirs"}]}]}}`
+	got, err := Merge([]byte(before), []Entry{{Event: "Stop", Command: "ours"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if len(got.Skipped) != 0 {
+		t.Fatalf("skipped = %v, want the unrelated matcher left out of it", got.Skipped)
+	}
+	if !strings.Contains(string(got.Merged), "ours") {
+		t.Fatalf("merged = %s, want our matcherless entry added", got.Merged)
+	}
+}
+
+// TestOurOwnMatcherlessEntryIsStillReplaced is the same lookup from the other
+// side: a missing matcher and an empty one are the same slot.
+func TestOurOwnMatcherlessEntryIsStillReplaced(t *testing.T) {
+	before := `{"hooks":{"Stop":[{"ultraloomOwned":true,"hooks":[{"type":"command","command":"old"}]}]}}`
+	got, err := Merge([]byte(before), []Entry{{Event: "Stop", Command: "new"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if strings.Contains(string(got.Merged), "old") {
+		t.Fatalf("merged = %s, want the old command gone", got.Merged)
+	}
+	if strings.Count(string(got.Merged), "command\":") != 1 {
+		t.Fatalf("merged = %s, want one command", got.Merged)
+	}
+}
+
+// TestHooksOfTheWrongShapeAreRefusedNotOverwritten: the file belongs to
+// someone else. Reading `"hooks": []` as "nothing configured" and writing an
+// object over it is the same silent repair TestBrokenJsonIsRefused forbids.
+func TestHooksOfTheWrongShapeAreRefusedNotOverwritten(t *testing.T) {
+	if _, err := Merge([]byte(`{"hooks":[]}`), nil); err == nil {
+		t.Fatal("want an error, not a silent overwrite of [hooks]")
+	}
+}
+
+func TestAnEventOfTheWrongShapeIsRefusedNotOverwritten(t *testing.T) {
+	before := `{"hooks":{"PreToolUse":{"matcher":"Write"}}}`
+	_, err := Merge([]byte(before), []Entry{{Event: "PreToolUse", Matcher: "Write", Command: "ours"}})
+	if err == nil {
+		t.Fatal("want an error, not a silent overwrite of the event")
+	}
+	if !strings.Contains(err.Error(), "PreToolUse") {
+		t.Fatalf("err = %v, want the event named", err)
+	}
+}
+
+// TestAFileWithoutHooksStaysWithoutThem: init must not leave its fingerprint
+// on a file it had nothing to add to.
+func TestAFileWithoutHooksStaysWithoutThem(t *testing.T) {
+	got, err := Merge([]byte(`{"model":"opus"}`), nil)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if strings.Contains(string(got.Merged), "hooks") {
+		t.Fatalf("merged = %s, want no empty hooks table", got.Merged)
+	}
+}
+
+func TestAnEmptyFileBecomesOneWithJustOurHook(t *testing.T) {
+	got, err := Merge(nil, []Entry{{Event: "Stop", Command: "ours", Timeout: 60}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	var after map[string]any
+	if err := json.Unmarshal(got.Merged, &after); err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	if !strings.Contains(string(got.Merged), `"timeout": 60`) {
+		t.Fatalf("merged = %s, want the timeout carried", got.Merged)
+	}
+}
+
+// TestATimeoutOfZeroIsLeftOut: absent means "the default", and writing a zero
+// would mean "no time at all".
+func TestATimeoutOfZeroIsLeftOut(t *testing.T) {
+	got, err := Merge(nil, []Entry{{Event: "Stop", Command: "ours"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if strings.Contains(string(got.Merged), "timeout") {
+		t.Fatalf("merged = %s, want no timeout key", got.Merged)
+	}
+}
+
+func TestANullFileIsTreatedAsAnEmptyOne(t *testing.T) {
+	got, err := Merge([]byte("null"), []Entry{{Event: "Stop", Command: "ours"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if !strings.Contains(string(got.Merged), "ours") {
+		t.Fatalf("merged = %s, want the entry added", got.Merged)
+	}
+}
+
+// TestAForeignEntryOfTheWrongShapeIsSkippedNotRead: a list holding a string
+// is someone else's mistake, not ours to repair -- but it must not be read as
+// an empty slot either.
+func TestAnEntryThatIsNotAnObjectIsIgnoredForTheLookup(t *testing.T) {
+	before := `{"hooks":{"Stop":["nonsense"]}}`
+	got, err := Merge([]byte(before), []Entry{{Event: "Stop", Command: "ours"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if !strings.Contains(string(got.Merged), "nonsense") {
+		t.Fatalf("merged = %s, want the foreign item kept", got.Merged)
+	}
+	if !strings.Contains(string(got.Merged), "ours") {
+		t.Fatalf("merged = %s, want our entry added beside it", got.Merged)
+	}
+}
