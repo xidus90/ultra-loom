@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/xidus90/ultra-loom/internal/answers"
@@ -93,11 +94,11 @@ func run(opts Options) (int, string) {
 		return exitOwn, err.Error()
 	}
 
-	current, err := decisions(opts.Root, facts)
+	current, recorded, err := decisions(opts.Root, facts)
 	if err != nil {
 		return exitOwn, err.Error()
 	}
-	chosen, err := applyFlags(current, opts)
+	chosen, ignored, err := applyFlags(current, opts, recorded)
 	if err != nil {
 		return exitOwn, err.Error()
 	}
@@ -122,6 +123,7 @@ func run(opts Options) (int, string) {
 	}
 
 	var notes []string
+	notes = append(notes, ignored...)
 	notes = append(notes, coverageNote(filled, enforced)...)
 	mcp, wikiHooks, brainNote := brainEntry(filled, opts)
 	if mcp != "" {
@@ -220,20 +222,22 @@ func run(opts Options) (int, string) {
 }
 
 // decisions is what this run starts from: the answer file a previous run left,
-// and the conventions of this tool where there is none.
-func decisions(root string, facts detect.Facts) (answers.Answers, error) {
+// and the conventions of this tool where there is none. The second value says
+// which of the two it was -- a recorded answer outranks a flag, and only a
+// caller that knows the difference can say so.
+func decisions(root string, facts detect.Facts) (answers.Answers, bool, error) {
 	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(answersPath)))
 	if err != nil {
-		return seed(facts), nil
+		return seed(facts), false, nil
 	}
 	loaded, err := answers.Load(raw)
 	if err != nil {
-		return answers.Answers{}, err
+		return answers.Answers{}, false, err
 	}
 	// Stacks are a fact, not a decision: they are re-read on every run, so a
 	// project that grew a second language gets its checks without an edit.
 	loaded.Project.Stacks = facts.Stacks
-	return loaded, nil
+	return loaded, true, nil
 }
 
 // seed is answers.Defaults minus the answers the interview owns.
@@ -262,7 +266,17 @@ func seed(facts detect.Facts) answers.Answers {
 //
 // A bad flag is the caller's error, and it is caught before anything is
 // written: exit 1, the flag named, and the accepted values with it.
-func applyFlags(current answers.Answers, opts Options) (answers.Answers, error) {
+//
+// Where answers.toml already holds an answer, that answer wins and the flag is
+// reported as ignored. The recorded value is the one on disk and the one the
+// generated files were made from, and that file is skipped like every other
+// existing one, so letting the flag through would render a project against a
+// number its own answers.toml does not contain. Until 2026-08-28 it did
+// exactly that: `--coverage-threshold 55` over a project recorded at 100
+// printed "nothing here enforces the threshold of 55%" while the file said 100
+// and every file was listed as skipped. Changing a recorded answer is an edit
+// of answers.toml, not a flag.
+func applyFlags(current answers.Answers, opts Options, recorded bool) (answers.Answers, []string, error) {
 	// Vendoring takes both flags or neither, and each half alone is refused
 	// rather than read as an intention. A url with no ref is not a pin --
 	// vendoring.Clone refuses the empty ref, but only once a run reaches it,
@@ -271,51 +285,118 @@ func applyFlags(current answers.Answers, opts Options) (answers.Answers, error) 
 	// names a version of something nobody asked to fetch, and quietly ignoring
 	// it leaves the caller believing their project is pinned.
 	if opts.VendorURL != "" && opts.VendorRef == "" {
-		return current, fmt.Errorf(
+		return current, nil, fmt.Errorf(
 			"--vendor-url without --vendor-ref: name the branch, tag or commit to pin")
 	}
 	if opts.VendorRef != "" && opts.VendorURL == "" {
-		return current, fmt.Errorf(
+		return current, nil, fmt.Errorf(
 			"--vendor-ref without --vendor-url: name the repository to clone")
 	}
-	if opts.CommitLanguage != "" {
+	kept := keeper{recorded: recorded}
+	if opts.CommitLanguage != "" && !kept.text("--commit-language",
+		"[project].commit_language", current.Project.CommitLanguage, opts.CommitLanguage) {
 		current.Project.CommitLanguage = opts.CommitLanguage
 	}
-	if opts.DocsLanguage != "" {
+	if opts.DocsLanguage != "" && !kept.text("--docs-language",
+		"[project].docs_language", current.Project.DocsLanguage, opts.DocsLanguage) {
 		current.Project.DocsLanguage = opts.DocsLanguage
 	}
 	if opts.WikiMode != "" {
 		if !has(answers.WikiModes, opts.WikiMode) {
-			return current, fmt.Errorf("--wiki-mode %q: it must be one of %v",
+			return current, nil, fmt.Errorf("--wiki-mode %q: it must be one of %v",
 				opts.WikiMode, answers.WikiModes)
 		}
-		current.Gates.Wiki.Mode = opts.WikiMode
+		if !kept.text("--wiki-mode", "[gates.wiki].mode",
+			current.Gates.Wiki.Mode, opts.WikiMode) {
+			current.Gates.Wiki.Mode = opts.WikiMode
+		}
 	}
 	if opts.CoverageThreshold != 0 {
 		// Zero is the unset flag rather than a threshold of nothing: a project
 		// that really wants no floor says so by leaving the coverage tool
 		// unconfigured, which is what coverageNote then reports.
 		if opts.CoverageThreshold < 0 || opts.CoverageThreshold > 100 {
-			return current, fmt.Errorf(
+			return current, nil, fmt.Errorf(
 				"--coverage-threshold %d: it must be between 0 and 100",
 				opts.CoverageThreshold)
 		}
-		current.Gates.CoverageThreshold = opts.CoverageThreshold
+		if !kept.text("--coverage-threshold", "[gates].coverage_threshold",
+			number(current.Gates.CoverageThreshold), number(opts.CoverageThreshold)) {
+			current.Gates.CoverageThreshold = opts.CoverageThreshold
+		}
 	}
 	protected, err := choice("--protect-migrations", opts.ProtectMigrations,
 		current.Policy.ProtectedPaths, migrationGlob)
 	if err != nil {
-		return current, err
+		return current, nil, err
 	}
-	current.Policy.ProtectedPaths = protected
+	if opts.ProtectMigrations != "" && !kept.list("--protect-migrations",
+		"[policy].protected_paths", current.Policy.ProtectedPaths, protected) {
+		current.Policy.ProtectedPaths = protected
+	}
 	forbidden, err := choice("--forbid-pip-install", opts.ForbidPipInstall,
 		current.Policy.ForbiddenCommands, pipInstall)
 	if err != nil {
-		return current, err
+		return current, nil, err
 	}
-	current.Policy.ForbiddenCommands = forbidden
-	return current, nil
+	if opts.ForbidPipInstall != "" && !kept.list("--forbid-pip-install",
+		"[policy].forbidden_commands", current.Policy.ForbiddenCommands, forbidden) {
+		current.Policy.ForbiddenCommands = forbidden
+	}
+	return current, kept.notes, nil
 }
+
+// keeper collects the flags a recorded answer overruled.
+//
+// One place rather than six, because the sentence has to read the same every
+// time: which field decided, what it says, and which flag was dropped. A
+// caller told only "ignored" would have to go and read the file to learn what
+// won.
+type keeper struct {
+	recorded bool
+	notes    []string
+}
+
+// text reports whether the recorded answer stands. It does for a run that read
+// an answers.toml and found something under the field: an empty field is a
+// question that file never answered, and a flag may still answer it. An
+// identical value is no conflict and stays silent.
+func (k *keeper) text(flag, field, was, wanted string) bool {
+	if !k.recorded || was == "" || was == wanted {
+		return false
+	}
+	k.notes = append(k.notes, fmt.Sprintf(
+		"%s was ignored: %s already answers %s in %s, and a recorded answer is "+
+			"changed by editing that file, not by a flag", flag, field, was, answersPath))
+	return true
+}
+
+// list is text for the two answers that are lists. Empty cannot be told from
+// "answered no" here -- both are an empty list -- so a file that was read
+// speaks for both, and only a flag that would change the list is reported.
+func (k *keeper) list(flag, field string, was, wanted []string) bool {
+	if !k.recorded || same(was, wanted) {
+		return false
+	}
+	k.notes = append(k.notes, fmt.Sprintf(
+		"%s was ignored: %s already answers %v in %s, and a recorded answer is "+
+			"changed by editing that file, not by a flag", flag, field, was, answersPath))
+	return true
+}
+
+// same compares two answer lists as one word each. The separator is the one
+// byte neither a path glob nor a command line can hold, so joining cannot make
+// two different lists look alike -- and it is one expression rather than a
+// loop whose body no caller here can reach: choice only ever returns the fixed
+// entry or nothing.
+func same(left, right []string) bool {
+	const sep = "\x00"
+	return strings.Join(left, sep) == strings.Join(right, sep)
+}
+
+// number puts an int where keeper.text wants a word, so the six answers are
+// reported by one sentence rather than by two that drift apart.
+func number(value int) string { return strconv.Itoa(value) }
 
 // migrationGlob repeats internal/interview's own constant rather than
 // importing it: that one is unexported, and a rule this specific belongs

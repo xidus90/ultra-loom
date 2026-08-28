@@ -774,3 +774,56 @@ func TestAFailureAfterTheFilesLandedNamesWhatItLeft(t *testing.T) {
 		}
 	}
 }
+
+// A second run leaves every existing file alone, which is the spec's rule.
+// The report has to match it: a flag that names another answer than the one
+// answers.toml holds is ignored, and quoting the ignored value made the report
+// assert a threshold that exists nowhere.
+func TestAFlagAgainstARecordedAnswerIsReportedAsIgnored(t *testing.T) {
+	root := t.TempDir()
+	mustRun(t, answered(root))
+	second := answered(root)
+	second.CoverageThreshold = 55
+	report := mustRun(t, second)
+	if strings.Contains(report, "threshold of 55%") {
+		t.Fatalf("the report quotes a threshold that is nowhere on disk:\n%s", report)
+	}
+	if !strings.Contains(report, "--coverage-threshold was ignored") ||
+		!strings.Contains(report, "[gates].coverage_threshold already answers 100") {
+		t.Fatalf("the overruled flag was not named with the answer that won:\n%s", report)
+	}
+	if !strings.Contains(read(t, root, ".ultraloom/answers.toml"), "coverage_threshold = 100") {
+		t.Fatal("the recorded answer was changed after all")
+	}
+}
+
+// A flag that agrees with the file is not a conflict, and a first run has no
+// file to disagree with.
+func TestAFlagThatChangesNothingIsNotReported(t *testing.T) {
+	root := t.TempDir()
+	if report := mustRun(t, answered(root)); strings.Contains(report, "was ignored") {
+		t.Fatalf("a first run reported its own flags as ignored:\n%s", report)
+	}
+	if report := mustRun(t, answered(root)); strings.Contains(report, "was ignored") {
+		t.Fatalf("flags repeating what the file says were reported:\n%s", report)
+	}
+}
+
+// The other five answers take the same road, lists included.
+func TestEveryOverruledFlagIsNamed(t *testing.T) {
+	root := t.TempDir()
+	first := answered(root)
+	first.ProtectMigrations, first.ForbidPipInstall = "no", "no"
+	mustRun(t, first)
+	second := answered(root)
+	second.CommitLanguage, second.DocsLanguage, second.WikiMode = "fr", "fr", "brain"
+	second.ProtectMigrations, second.ForbidPipInstall = "yes", "yes"
+	second.Look, second.Getenv = notOnPath, noEnv
+	report := mustRun(t, second)
+	for _, flag := range []string{"--commit-language", "--docs-language", "--wiki-mode",
+		"--protect-migrations", "--forbid-pip-install"} {
+		if !strings.Contains(report, flag+" was ignored") {
+			t.Fatalf("%s was dropped without a word:\n%s", flag, report)
+		}
+	}
+}
