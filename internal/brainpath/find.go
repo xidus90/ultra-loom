@@ -32,9 +32,10 @@ const (
 
 // Find answers what a generated project should call to reach brain.
 //
-// Both look and env are required; a nil one panics rather than being read as
-// "nothing found", because a caller that forgot to wire up a source would
-// otherwise silently skip that source.
+// Both look and env are required. Neither is guarded, so a source a caller
+// forgot to wire up surfaces as a panic rather than as "nothing found" -- but
+// only where it is reached: a nil look panics at the lookup, a nil env only
+// when the lookup has already failed.
 //
 // look is asked for the bare name "brain". Resolving that to brain.exe through
 // PATHEXT on Windows belongs to exec.LookPath, not here -- the name that goes
