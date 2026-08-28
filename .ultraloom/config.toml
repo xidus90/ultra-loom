@@ -16,9 +16,10 @@
 # PATH names first, and on this machine that is WSL's -- from there a Windows
 # gofmt cannot be reached by its bare name, and the lane failed with
 # `command not found` while `go vet` beside it ran fine.
-# It is given `cmd` alone: `internal/` does not exist yet, and gofmt does not
-# shrug at a missing path -- it exits 2. The task that creates `internal/` adds
-# it here.
+# It is given every Go source root by name -- `cmd` and, since `internal/detect`
+# exists, `internal`. Named and not `.`, because gofmt does not shrug at a
+# missing path but exits 2, and a root added here before it exists would take
+# the whole lane down.
 #
 # `types` is named only to trade mypy for its daemon. A/B over this hook's own
 # post-edit path, back to back on 2026-08-27: warm 1400 ms -> 988 ms, cold
@@ -51,7 +52,7 @@ tests = ["tests/", "pyproject.toml"]
 [verify.lint]
 commands = [
   "uv run ruff check .",
-  "uv run --script hooks/gofmt-check.py cmd",
+  "uv run --script hooks/gofmt-check.py cmd internal",
   "go vet ./...",
 ]
 threaded = true

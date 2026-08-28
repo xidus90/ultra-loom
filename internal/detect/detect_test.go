@@ -1,0 +1,174 @@
+package detect
+
+import (
+	"io/fs"
+	"testing"
+	"testing/fstest"
+)
+
+func TestUvManagedPythonIsDetected(t *testing.T) {
+	tree := fstest.MapFS{
+		"pyproject.toml": {Data: []byte("[project]\nname = \"x\"\n")},
+		"uv.lock":        {Data: []byte("")},
+	}
+	facts := Detect(tree)
+	if !has(facts.Stacks, "python") {
+		t.Fatalf("stacks = %v, want python", facts.Stacks)
+	}
+	if !has(facts.Stacks, "uv") {
+		t.Fatalf("stacks = %v, want uv", facts.Stacks)
+	}
+}
+
+func TestGodotWithDotnetKeepsBothStacks(t *testing.T) {
+	tree := fstest.MapFS{
+		"project.godot": {Data: []byte("config_version=5\n\n[dotnet]\n\nproject/assembly_name=\"space\"\n")},
+		"space.csproj":  {Data: []byte("<Project/>")},
+	}
+	facts := Detect(tree)
+	for _, want := range []string{"godot", "gdscript", "csharp"} {
+		if !has(facts.Stacks, want) {
+			t.Fatalf("stacks = %v, want %s", facts.Stacks, want)
+		}
+	}
+}
+
+func TestAnEmptyTreeDetectsNothingAndSaysSo(t *testing.T) {
+	facts := Detect(fstest.MapFS{})
+	if len(facts.Stacks) != 0 {
+		t.Fatalf("stacks = %v, want none", facts.Stacks)
+	}
+}
+
+// A Godot project without the C# section is the false alarm this must not
+// raise: separating the two is the whole reason `contains` exists.
+func TestGodotWithoutDotnetStaysGdscript(t *testing.T) {
+	tree := fstest.MapFS{
+		"project.godot": {Data: []byte("config_version=5\n")},
+	}
+	facts := Detect(tree)
+	if !has(facts.Stacks, "gdscript") {
+		t.Fatalf("stacks = %v, want gdscript", facts.Stacks)
+	}
+	if has(facts.Stacks, "csharp") {
+		t.Fatalf("stacks = %v, want no csharp", facts.Stacks)
+	}
+}
+
+func TestAWorkspaceMemberIsSeenOneLevelDown(t *testing.T) {
+	tree := fstest.MapFS{
+		"README.md":               {Data: []byte("workspace\n")},
+		"services/api/Cargo.toml": {Data: []byte("[package]\n")},
+		"backend/pyproject.toml":  {Data: []byte("[project]\n")},
+		"frontend/tsconfig.json":  {Data: []byte("{}")},
+		"game/project.godot":      {Data: []byte("config_version=5\n\n[dotnet]\n")},
+		"game/game.csproj":        {Data: []byte("<Project/>")},
+	}
+	facts := Detect(tree)
+	for _, want := range []string{"python", "typescript", "godot", "gdscript", "csharp"} {
+		if !has(facts.Stacks, want) {
+			t.Fatalf("stacks = %v, want %s", facts.Stacks, want)
+		}
+	}
+	// Two levels down is a member's own layout, not a member.
+	if has(facts.Stacks, "rust") {
+		t.Fatalf("stacks = %v, want no rust from two levels down", facts.Stacks)
+	}
+}
+
+// Dot directories carry tooling, not workspace members -- `.godot/` alone
+// holds an import cache wide enough to make several rows fire on it.
+func TestDotDirectoriesAreNotWorkspaceMembers(t *testing.T) {
+	tree := fstest.MapFS{
+		".cache/Cargo.toml": {Data: []byte("[package]\n")},
+	}
+	facts := Detect(tree)
+	if len(facts.Stacks) != 0 {
+		t.Fatalf("stacks = %v, want none", facts.Stacks)
+	}
+}
+
+func TestGitAndWikiAreFacts(t *testing.T) {
+	tree := fstest.MapFS{
+		".git/HEAD":      {Data: []byte("ref: refs/heads/master\n")},
+		"wiki/README.md": {Data: []byte("# wiki\n")},
+	}
+	facts := Detect(tree)
+	if !facts.HasGit {
+		t.Fatal("HasGit = false, want true")
+	}
+	if facts.WikiMode != "brain" || facts.WikiPath != "wiki/" {
+		t.Fatalf("wiki = %q %q, want \"brain\" \"wiki/\"", facts.WikiMode, facts.WikiPath)
+	}
+}
+
+func TestATreeWithoutGitOrWikiSaysNeither(t *testing.T) {
+	facts := Detect(fstest.MapFS{"README.md": {Data: []byte("nothing here\n")}})
+	if facts.HasGit {
+		t.Fatal("HasGit = true, want false")
+	}
+	if facts.WikiMode != "" || facts.WikiPath != "" {
+		t.Fatalf("wiki = %q %q, want empty", facts.WikiMode, facts.WikiPath)
+	}
+}
+
+// An unreadable tree is a fact, not an error: what cannot be read carries no
+// signal, and detection reports what is left of the tree.
+func TestAnUnlistableTreeYieldsNoStacks(t *testing.T) {
+	facts := Detect(closedFS{})
+	if len(facts.Stacks) != 0 {
+		t.Fatalf("stacks = %v, want none", facts.Stacks)
+	}
+	if facts.HasGit {
+		t.Fatal("HasGit = true, want false")
+	}
+}
+
+// The narrower failure: the names are there, the contents are not. A row that
+// needs to look inside must then decline rather than guess.
+func TestAnUnreadableFileDoesNotSatisfyContains(t *testing.T) {
+	facts := Detect(listableFS{fstest.MapFS{
+		"project.godot": {Data: []byte("config_version=5\n\n[dotnet]\n")},
+	}})
+	if !has(facts.Stacks, "gdscript") {
+		t.Fatalf("stacks = %v, want gdscript", facts.Stacks)
+	}
+	if has(facts.Stacks, "csharp") {
+		t.Fatalf("stacks = %v, want no csharp", facts.Stacks)
+	}
+}
+
+// closedFS refuses every access, which is what an unreadable root looks like
+// from here: no listing, no stat, no content.
+type closedFS struct{}
+
+func (closedFS) Open(name string) (fs.File, error) {
+	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrPermission}
+}
+
+// listableFS answers about names and refuses their contents. Stat and ReadDir
+// are delegated; Open, which is all that is left for reading a file, is not.
+type listableFS struct {
+	tree fstest.MapFS
+}
+
+func (f listableFS) Open(name string) (fs.File, error) {
+	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrPermission}
+}
+
+func (f listableFS) Stat(name string) (fs.FileInfo, error) {
+	return fs.Stat(f.tree, name)
+}
+
+func (f listableFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	return fs.ReadDir(f.tree, name)
+}
+
+func has(all []string, one string) bool {
+	for _, candidate := range all {
+		if candidate == one {
+			return true
+		}
+	}
+	return false
+}
