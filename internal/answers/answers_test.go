@@ -94,3 +94,20 @@ func TestLoadAcceptsAPartialFile(t *testing.T) {
 		t.Fatalf("gates = %+v, want them unset", got.Gates)
 	}
 }
+
+// The relevance table the spec gives has a second row, and it is the one that
+// matters for a brain project: a wiki page that changed has to be reindexed,
+// or search answers out of yesterday's text.
+func TestTheSeededRelevanceReindexesTheWiki(t *testing.T) {
+	got := Defaults(detect.Facts{}).Relevance
+	commands, listed := got["wiki/**"]
+	if !listed {
+		t.Fatalf("wiki/** is not in the seeded relevance: %v", got)
+	}
+	if len(commands) != 1 || commands[0] != "brain reindex" {
+		t.Fatalf("wiki/** maps to %v, want [brain reindex]", commands)
+	}
+	if _, listed := got["*.md"]; !listed {
+		t.Fatalf("the row that was already there is gone: %v", got)
+	}
+}

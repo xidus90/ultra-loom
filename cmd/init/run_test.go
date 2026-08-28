@@ -651,7 +651,10 @@ func TestTheShortYesAndNoAreTheSameAnswerAsTheLongOnes(t *testing.T) {
 		CommitLanguage: "en", DocsLanguage: "de", WikiMode: "none",
 		CoverageThreshold: 100, ProtectMigrations: "y", ForbidPipInstall: "n"})
 	answersFile := read(t, root, ".ultraloom/answers.toml")
-	if !strings.Contains(answersFile, "protected_paths") {
+	// The value, not the key: `protected_paths = []` carries the key too, so
+	// the substring this regression is named after matched even when y had
+	// been read as no.
+	if !strings.Contains(answersFile, migrationGlob) {
 		t.Fatalf("y was not read as yes:\n%s", answersFile)
 	}
 	if !strings.Contains(answersFile, "forbidden_commands = []") {

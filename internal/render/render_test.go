@@ -52,9 +52,11 @@ func TestEveryGeneratedFileSaysWhereItCameFrom(t *testing.T) {
 
 func TestRenderMatchesTheGoldenFiles(t *testing.T) {
 	compareGolden(t, "", true)
-	// The second shape of config.toml, pinned by its own bytes: without a
-	// fail_under in reach the coverage check is not installed at all, and a
-	// section that quietly came back would be a lane nothing can fail.
+	// The second shape of config.toml, pinned by its own bytes: with the
+	// coverage lane switched off the check is not installed at all, and a
+	// section that quietly came back would be a lane nothing can fail. Why the
+	// caller switched it off is the caller's business -- this package takes a
+	// bool and no longer knows about fail_under.
 	compareGolden(t, "unenforced_", false)
 }
 
@@ -347,11 +349,13 @@ func TestARegexCarryingAControlCharacterLeavesTheLiteralForm(t *testing.T) {
 	}
 }
 
-// The lane a project gets when nothing enforces the threshold: none.
+// The lane a project gets when the caller says there is none: none.
 //
 // A `[verify.coverage]` section plus `coverage` in the precommit profile is a
-// check that runs `coverage report` against a configuration with no
-// fail_under -- green whatever the number, for the life of the project. The
+// check that runs `coverage report` against whatever the project configured.
+// Where nothing enforces a floor that is green at any number, for the life of
+// the project -- and the caller is the one who knows that, which is why the
+// parameter is a bool rather than this package reading pyproject.toml. The
 // note init prints at install time is read once; this file is read forever.
 func TestWithoutEnforcementNoCoverageLaneIsInstalled(t *testing.T) {
 	files, err := Render(fixture(), false)

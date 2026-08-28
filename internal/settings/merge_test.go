@@ -187,3 +187,52 @@ func TestAnEntryThatIsNotAnObjectIsIgnoredForTheLookup(t *testing.T) {
 		t.Fatalf("merged = %s, want our entry added beside it", got.Merged)
 	}
 }
+
+// The rule this package exists for, in the one arrangement nothing tested:
+// our entry and a foreign one on the same matcher. The first on the slot
+// decides, so here ours is updated and the foreign one is left exactly where
+// it is -- the mirror of the case where the foreign entry comes first and the
+// slot is reported as taken.
+func TestOursFirstOnASharedSlotKeepsTheSlot(t *testing.T) {
+	existing := []byte(`{"hooks":{"PreToolUse":[
+		{"matcher":"Bash","ultraloomOwned":true,"hooks":[{"type":"command","command":"old"}]},
+		{"matcher":"Bash","hooks":[{"type":"command","command":"theirs"}]}
+	]}}`)
+	result, err := Merge(existing, []Entry{{Event: "PreToolUse", Matcher: "Bash", Command: "new"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Skipped) != 0 {
+		t.Fatalf("a slot we hold was reported as taken: %v", result.Skipped)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(result.Merged, &root); err != nil {
+		t.Fatal(err)
+	}
+	list, ok := root["hooks"].(map[string]any)["PreToolUse"].([]any)
+	if !ok || len(list) != 2 {
+		t.Fatalf("the list lost or gained an entry: %s", result.Merged)
+	}
+	ours, _ := list[0].(map[string]any)
+	if commandOf(t, ours) != "new" {
+		t.Fatalf("our own entry was not updated: %s", result.Merged)
+	}
+	theirs, _ := list[1].(map[string]any)
+	if _, owned := theirs[OwnerKey]; owned {
+		t.Fatalf("the foreign entry was claimed: %s", result.Merged)
+	}
+	if commandOf(t, theirs) != "theirs" {
+		t.Fatalf("the foreign entry was rewritten: %s", result.Merged)
+	}
+}
+
+func commandOf(t *testing.T, block map[string]any) string {
+	t.Helper()
+	hooks, ok := block["hooks"].([]any)
+	if !ok || len(hooks) != 1 {
+		t.Fatalf("not one hook in %v", block)
+	}
+	command, _ := hooks[0].(map[string]any)
+	text, _ := command["command"].(string)
+	return text
+}

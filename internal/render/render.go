@@ -14,6 +14,7 @@ import (
 	"text/template"
 
 	"github.com/xidus90/ultra-loom/internal/answers"
+	"github.com/xidus90/ultra-loom/internal/tomlstr"
 )
 
 //go:embed templates/*.tmpl
@@ -138,45 +139,11 @@ func commandPattern(command string) string {
 }
 
 // tomlString is the one way a value reaches a rendered file. Nothing here
-// interpolates a raw string: a wiki bundle is a path, and on Windows a path
-// carries backslashes -- written raw, `wiki\bundle` is an invalid escape that
-// takes the whole file down while the answers still look right. One class
-// further in, this writes a TOML basic string, which is not what Go's %q
-// writes: TOML 1.0 knows \b \t \n \f \r \" \\ and the \u escapes and nothing
-// else, while %q reaches for \v and \x for the same characters. Ranging over
-// a string already turns invalid UTF-8 into the replacement character, which
-// the default branch writes like any other rune, so nothing is refused here.
+// interpolates a raw string, and the escape table itself lives in
+// internal/tomlstr: internal/vendoring writes TOML by hand too, and one table
+// written twice is two answers to "is this file still valid TOML?".
 func tomlString(value string) string {
-	var out strings.Builder
-	out.WriteByte('"')
-	for _, r := range value {
-		switch r {
-		case '"':
-			out.WriteString(`\"`)
-		case '\\':
-			out.WriteString(`\\`)
-		case '\b':
-			out.WriteString(`\b`)
-		case '\t':
-			out.WriteString(`\t`)
-		case '\n':
-			out.WriteString(`\n`)
-		case '\f':
-			out.WriteString(`\f`)
-		case '\r':
-			out.WriteString(`\r`)
-		default:
-			// U+007F is a control character too, and TOML bars it from a basic
-			// string just as it bars the C0 range.
-			if r < 0x20 || r == 0x7f {
-				fmt.Fprintf(&out, `\u%04X`, r)
-				continue
-			}
-			out.WriteRune(r)
-		}
-	}
-	out.WriteByte('"')
-	return out.String()
+	return tomlstr.Quote(value)
 }
 
 // tomlRegex prefers TOML's literal string, where a backslash is a backslash

@@ -67,7 +67,14 @@ func Defaults(facts detect.Facts) Answers {
 			TypesInStop:       true,
 			Wiki:              Wiki{Mode: modeOr(facts.WikiMode, "none"), Bundle: facts.WikiPath},
 		},
-		Relevance: map[string][]string{"*.md": {}},
+		// Two rows, and the second one only earns its place for a brain
+		// project: a wiki page that changed has to be reindexed, or search
+		// answers from yesterday's text. The rows that map to nothing --
+		// docs/** and *.txt -- are pure cost and stay out.
+		Relevance: map[string][]string{
+			"*.md":    {},
+			"wiki/**": {"brain reindex"},
+		},
 	}
 }
 

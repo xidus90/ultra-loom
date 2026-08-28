@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+	"github.com/xidus90/ultra-loom/internal/tomlstr"
 )
 
 func TestCloneAsksGitForTheExactRef(t *testing.T) {
@@ -156,8 +157,8 @@ func TestQuotingStaysInsideTomlsEscapes(t *testing.T) {
 		string([]byte{0x41, 0xff}): "\"A\uFFFD\"",
 	}
 	for in, want := range cases {
-		if got := quote(in); got != want {
-			t.Fatalf("quote(%q) = %s, want %s", in, got, want)
+		if got := tomlstr.Quote(in); got != want {
+			t.Fatalf("tomlstr.Quote(%q) = %s, want %s", in, got, want)
 		}
 	}
 }

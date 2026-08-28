@@ -5,6 +5,14 @@
 // project's own hook would make both fire. Two parallel quality.py runs hung
 // overnight on 2026-08-27 for exactly that reason.
 //
+// The JSON is carried as map[string]any throughout, and that is the reason
+// this package may use it at all: settings.json belongs to the project, and
+// everything in it that is not one of our own hook entries has to come back
+// out byte for byte the way it went in. A typed struct would model the keys
+// this tool knows about and drop the rest on the next encode -- somebody's
+// permissions, somebody's env, somebody's model setting, gone without a word.
+// The untyped map is the round trip.
+//
 // Where the file is not shaped the way this expects, nothing is repaired.
 // A `"hooks": []` is someone's decision or someone's mistake; writing an
 // object over it would take their configuration with it, and a settings.json
