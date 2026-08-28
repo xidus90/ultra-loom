@@ -148,3 +148,19 @@ func TestASectionHeaderWithATrailingCommentCounts(t *testing.T) {
 		t.Fatal("a comment after the header hid the section")
 	}
 }
+
+// A section name may hold a comment character; configparser calls that
+// section oth#er and attributes nothing after it to report.
+func TestAHashInASectionNameDoesNotProlongReport(t *testing.T) {
+	src := "[report]\n[oth#er]\nfail_under = 90\n"
+	if Enforced(nil, []byte(src)) {
+		t.Fatal("attributed a foreign section's threshold to report")
+	}
+}
+
+// An unterminated header ends the section it follows, whatever it means.
+func TestAnUnterminatedHeaderDoesNotProlongReport(t *testing.T) {
+	if Enforced(nil, []byte("[report]\n[oops\nfail_under = 90\n")) {
+		t.Fatal("a broken header kept report alive")
+	}
+}

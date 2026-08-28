@@ -67,13 +67,14 @@ func iniEnforces(src []byte) bool {
 			continue
 		}
 		if strings.HasPrefix(line, "[") {
-			// A header may carry a comment behind it; a value may not, so
-			// the cut stays inside this branch.
-			if cut := strings.IndexAny(line, "#;"); cut >= 0 {
-				line = strings.TrimSpace(line[:cut])
-			}
-			if strings.HasSuffix(line, "]") {
-				section = strings.TrimSpace(line[1 : len(line)-1])
+			// A comment character before the closing bracket is part of the
+			// section name, so the search for one starts behind the name.
+			section = ""
+			if end := strings.Index(line, "]"); end >= 0 {
+				rest := strings.TrimSpace(line[end+1:])
+				if rest == "" || strings.HasPrefix(rest, "#") || strings.HasPrefix(rest, ";") {
+					section = strings.TrimSpace(line[1:end])
+				}
 			}
 			continue
 		}
