@@ -58,9 +58,9 @@ func TestRenderMatchesTheGoldenFiles(t *testing.T) {
 	compareGolden(t, "unenforced_", false)
 }
 
-func compareGolden(t *testing.T, prefix string, coverageEnforced bool) {
+func compareGolden(t *testing.T, prefix string, coverageLane bool) {
 	t.Helper()
-	files, err := Render(fixture(), coverageEnforced)
+	files, err := Render(fixture(), coverageLane)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -211,8 +211,8 @@ func TestEveryRenderedFileIsValidToml(t *testing.T) {
 	// Both shapes: the branch that leaves [verify.coverage] out puts a comment
 	// block where a section stood, and a stray line there would be a file the
 	// generated project cannot read at all.
-	for _, coverageEnforced := range []bool{true, false} {
-		files, err := Render(fixture(), coverageEnforced)
+	for _, coverageLane := range []bool{true, false} {
+		files, err := Render(fixture(), coverageLane)
 		if err != nil {
 			t.Fatalf("Render: %v", err)
 		}

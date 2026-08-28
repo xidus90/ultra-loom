@@ -61,18 +61,22 @@ type view struct {
 	EditKinds      []string
 	PrecommitKinds []string
 	// CoverageLane says whether this project gets a coverage check at all.
-	// False is not a smaller configuration but the honest one: without a
-	// fail_under nothing can turn that check red, and a lane that only ever
-	// reports green is the one failure this whole tool exists to prevent.
+	// False is not a smaller configuration but the honest one: where nothing
+	// can turn that check red, a lane that only ever reports green is the one
+	// failure this whole tool exists to prevent.
 	CoverageLane bool
 }
 
-// Render turns the answers into files. coverageEnforced is a fact about the
-// project rather than an answer -- it says whether the project's own coverage
-// tool can fail -- and it decides whether a coverage check is installed at
-// all. The caller reads it; nothing here touches the disk.
-func Render(a answers.Answers, coverageEnforced bool) (map[string]string, error) {
-	data := newView(a, coverageEnforced)
+// Render turns the answers into files.
+//
+// coverageLane says whether the generated project gets a coverage check at
+// all -- no more than that. It is not a claim that anything enforces the
+// threshold: the caller decides, and for a language it cannot read the
+// configuration of it keeps the lane rather than dropping one that may well
+// be enforced. Where that decision is argued is the caller's business; this
+// package only installs what it is told to. Nothing here touches the disk.
+func Render(a answers.Answers, coverageLane bool) (map[string]string, error) {
+	data := newView(a, coverageLane)
 	out := make(map[string]string, len(targets))
 	for name, target := range targets {
 		body, err := one(name, data)
@@ -87,9 +91,9 @@ func Render(a answers.Answers, coverageEnforced bool) (map[string]string, error)
 	return out, nil
 }
 
-func newView(a answers.Answers, coverageEnforced bool) view {
+func newView(a answers.Answers, coverageLane bool) view {
 	data := view{Answers: a, EditKinds: []string{"lint", "types"},
-		CoverageLane: coverageEnforced}
+		CoverageLane: coverageLane}
 	for _, path := range a.Policy.ProtectedPaths {
 		data.Paths = append(data.Paths, pathRule{Match: path, Reason: generatedPathReason})
 	}
@@ -110,10 +114,11 @@ func newView(a answers.Answers, coverageEnforced bool) view {
 	}
 	if a.Gates.TestsInStop {
 		data.PrecommitKinds = append(data.PrecommitKinds, "test")
-		// Named only where it can fail. `coverage report` takes its exit code
-		// from fail_under and from nothing else, so in a project without one
-		// this entry would be a check that passes by construction.
-		if coverageEnforced {
+		// Named only where the lane exists. Dropping the section alone would
+		// heal nothing: a missing [verify.coverage] falls back to a threshold
+		// of 100, and the check would go on running against a report that
+		// cannot fail.
+		if coverageLane {
 			data.PrecommitKinds = append(data.PrecommitKinds, "coverage")
 		}
 	}
