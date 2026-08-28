@@ -2,9 +2,23 @@
 # reaches for `uvx ruff` and thereby gets whichever version uvx happens to
 # fetch, whereas `uv run` resolves the development dependency this project
 # pins -- the same ruff version the gates run, then.
-# `test` is absent on purpose: the preset already gets it right, and an entry
-# repeating it silently loses whatever hangs off it -- here the measurement
-# `coverage` picks up in the same run.
+# `test` is named although the preset would get Python right on its own: since
+# 2026-08-28 the repository holds a second language, and a kind takes either the
+# preset or the configured list -- there is no appending to a preset. The cost is
+# known and accepted: with `test` configured, `coverage` no longer reads what the
+# suite left behind but falls back on its own measuring run, so `precommit` runs
+# pytest twice. A green report over stale data is the one thing this must not
+# buy, and it does not.
+#
+# `gofmt -l` prints the unformatted files and *exits 0* even then, so it cannot
+# be a gate entry by itself; `hooks/gofmt-check.py` turns that output into an
+# exit code. In Python and not in bash, because the gate spawns whichever `bash`
+# PATH names first, and on this machine that is WSL's -- from there a Windows
+# gofmt cannot be reached by its bare name, and the lane failed with
+# `command not found` while `go vet` beside it ran fine.
+# It is given `cmd` alone: `internal/` does not exist yet, and gofmt does not
+# shrug at a missing path -- it exits 2. The task that creates `internal/` adds
+# it here.
 #
 # `types` is named only to trade mypy for its daemon. A/B over this hook's own
 # post-edit path, back to back on 2026-08-27: warm 1400 ms -> 988 ms, cold
@@ -22,7 +36,6 @@
 # when the flags behind it change; a daemon still judging by the previous
 # settings is worse than no daemon.
 [verify]
-lint  = "uv run ruff check ."
 types = "uv run dmypy run -- --no-error-summary --no-pretty"
 
 # What the repairer must not touch. `pyproject.toml` stands beside the tests
@@ -30,6 +43,22 @@ types = "uv run dmypy run -- --no-error-summary --no-pretty"
 # `fail_under` is the same cheat as a weakened test. The prompt forbids it, yes,
 # but a prohibition in a prompt is a request -- `guard` is the mechanism.
 tests = ["tests/", "pyproject.toml"]
+
+# The table form, because both languages have to run under one kind. `threaded`
+# because the commands of a kind are equal-ranking and independent: they all run
+# even after a red one, so running them side by side changes nothing but the
+# wall clock.
+[verify.lint]
+commands = [
+  "uv run ruff check .",
+  "uv run --script hooks/gofmt-check.py cmd",
+  "go vet ./...",
+]
+threaded = true
+
+[verify.test]
+commands = ["uv run pytest", "go test ./..."]
+threaded = true
 
 [verify.coverage]
 threshold = 100

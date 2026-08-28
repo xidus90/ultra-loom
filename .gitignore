@@ -21,3 +21,7 @@ htmlcov/
 # Per-session hook state: a block counter and remote snapshots, worthless to
 # anyone but the session that wrote them.
 .ultraloom/hooks/
+
+# The init binary is built, not written.
+/ultraloom-init
+/ultraloom-init.exe
