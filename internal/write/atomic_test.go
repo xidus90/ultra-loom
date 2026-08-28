@@ -3,9 +3,12 @@ package write
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -175,8 +178,7 @@ func TestADanglingSymlinkIsSkippedNotWritten(t *testing.T) {
 	root := t.TempDir()
 	link := filepath.Join(root, "dangling.txt")
 	if err := os.Symlink(filepath.Join(root, "nowhere.txt"), link); err != nil {
-		// Creating a link is a privilege on Windows, not a given.
-		t.Skipf("cannot create a symlink here: %v", err)
+		skipIfLinksAreNotAllowed(t, err)
 	}
 	plan, err := Prepare(root, map[string]string{"dangling.txt": "theirs"})
 	if err != nil {
@@ -228,5 +230,75 @@ func TestCommitNamesNothingWhenTheFirstFileFails(t *testing.T) {
 	}
 	if len(written) != 0 {
 		t.Fatalf("written = %v, want none", written)
+	}
+}
+
+// privilegeNotHeld is ERROR_PRIVILEGE_NOT_HELD, what Windows answers when the
+// account may not create a symlink -- which is every account without developer
+// mode or an elevated shell. Go maps ERROR_ACCESS_DENIED to os.ErrPermission
+// and this one to nothing, so it has to be named. The number is harmless
+// elsewhere: no other platform returns it.
+const privilegeNotHeld = syscall.Errno(1314)
+
+// skipIfLinksAreNotAllowed skips only where the platform says no, and fails on
+// anything else. Creating a link is a privilege on Windows and unsupported on
+// some filesystems; a plain failure on Linux is a broken test, and skipping on
+// every error would hide it.
+func skipIfLinksAreNotAllowed(t *testing.T, err error) {
+	t.Helper()
+	if errors.Is(err, errors.ErrUnsupported) || errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, privilegeNotHeld) {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	t.Fatalf("creating a symlink failed for a reason this platform allows: %v", err)
+}
+
+// A name that is above reproach can still land outside the project: MkdirAll
+// and OpenFile follow a symlinked directory without a word. Nothing is
+// overwritten, but "inside root" was the promise.
+func TestCommitRefusesToWriteThroughALinkedDirectory(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	linkDir(t, outside, filepath.Join(root, "elsewhere"))
+	plan, err := Prepare(root, map[string]string{"elsewhere/new.txt": "ours"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Commit(root, plan); err == nil {
+		t.Fatal("Commit wrote through a linked directory")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("a new file landed outside the project: %v", err)
+	}
+}
+
+// A directory above the name that cannot be looked at is not a free path.
+func TestAnUnreadableParentIsReported(t *testing.T) {
+	err := checkParents("bad"+string(rune(0))+"root", "a/b.txt")
+	if err == nil {
+		t.Fatal("checkParents accepted a root it cannot stat")
+	}
+	if !strings.Contains(err.Error(), "above a/b.txt") {
+		t.Fatalf("the name was not reported: %v", err)
+	}
+}
+
+// linkDir points one name at another directory, by whichever of the two
+// mechanisms this machine allows. A symlink needs a privilege on Windows that
+// an ordinary account does not have; a directory junction needs none, and Go
+// reports it as ModeIrregular. Both are what checkParents refuses, so either
+// one tests it.
+func linkDir(t *testing.T, target, link string) {
+	t.Helper()
+	err := os.Symlink(target, link)
+	if err == nil {
+		return
+	}
+	if runtime.GOOS != "windows" {
+		skipIfLinksAreNotAllowed(t, err)
+		return
+	}
+	if out, jerr := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); jerr != nil {
+		t.Skipf("neither a symlink (%v) nor a junction (%v: %s) can be made here", err, jerr, out)
 	}
 }

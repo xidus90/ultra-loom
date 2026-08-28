@@ -77,10 +77,12 @@ func Prepare(root string, files map[string]string) (Plan, error) {
 	return plan, nil
 }
 
-// checkName refuses anything that could land outside root. The renderer is
-// the only caller today, but a tool that writes into a stranger's project
-// earns its trust by not needing any: a name that escapes is a bug wherever
-// it came from, and the safe answer to a bug is to stop.
+// checkName refuses a name that could escape root. It reads the name and
+// nothing else -- it does not resolve the path, so what the name means on
+// this disk is checkParents' question, not this one's. The renderer is the
+// only caller today, but a tool that writes into a stranger's project earns
+// its trust by not needing any: a name that escapes is a bug wherever it came
+// from, and the safe answer to a bug is to stop.
 func checkName(name string) error {
 	// fs.ValidPath is the slash-world rule: no empty name, no leading slash,
 	// no "." or ".." element, no doubled or trailing separator.
@@ -113,6 +115,9 @@ func Commit(root string, plan Plan) ([]string, error) {
 		if err := checkName(name); err != nil {
 			return written, err
 		}
+		if err := checkParents(root, name); err != nil {
+			return written, err
+		}
 		full := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			return written, fmt.Errorf("creating the directory for %s: %w", name, err)
@@ -136,6 +141,43 @@ func commitFailure(name string, err error) error {
 		return fmt.Errorf("refusing to overwrite %s: the plan had it as new, but it exists: %w", name, err)
 	}
 	return fmt.Errorf("writing %s: %w", name, err)
+}
+
+// checkParents is the half of the promise checkName cannot give.
+//
+// A name may be flawless and still land outside the project: if
+// .ultraloom is a symlink or a junction pointing somewhere else, MkdirAll and
+// OpenFile follow it without a word and a new file appears there. Nothing is overwritten -- the
+// exclusive create sees to that -- but "inside root" was the promise, and a
+// new file outside it breaks that promise just as well.
+//
+// Lstat each directory above the name, and stop at the first one that is not
+// there: everything below a missing component is created by this run, so
+// there is nothing left to follow.
+func checkParents(root, name string) error {
+	parts := strings.Split(name, "/")
+	full := root
+	for _, part := range parts[:len(parts)-1] {
+		full = filepath.Join(full, part)
+		info, err := os.Lstat(full)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("looking at the directory above %s: %w", name, err)
+		}
+		// Symlink and irregular together, because Windows has two of these:
+		// Go reports a symlink as ModeSymlink and a directory junction --
+		// which any account may create, no privilege needed -- as
+		// ModeIrregular. Both redirect, and neither is a directory of this
+		// project.
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+			return fmt.Errorf(
+				"refusing %s: %s is a link, and writing through it would put a new file outside the project",
+				name, part)
+		}
+	}
+	return nil
 }
 
 // writeNew creates a file that must not exist yet. O_EXCL is the skip
