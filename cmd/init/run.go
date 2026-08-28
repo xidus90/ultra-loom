@@ -146,16 +146,34 @@ func run(opts Options) (int, string) {
 	// commit it pinned, so the clone is the one write that goes first -- and it
 	// goes into a directory of ours, never over somebody's file.
 	ref, commit := opts.VendorRef, ""
-	if opts.VendorURL != "" && opts.DryRun {
-		// Named, because a clone is the largest thing this run would do and a
-		// dry run that stayed silent about it would promise the smaller run.
-		notes = append(notes, fmt.Sprintf("would clone %s at %s into %s",
-			opts.VendorURL, ref, vendoring.VendorDir))
-	}
-	if opts.VendorURL != "" && !opts.DryRun {
-		commit, err = vendoring.Clone(gitOnly(opts.Exec), opts.Root, opts.VendorURL, ref)
+	if opts.VendorURL != "" {
+		present, err := vendorPresent(opts.Root)
 		if err != nil {
-			return exitOwn, discardClone(opts.Root, err)
+			return exitOwn, err.Error()
+		}
+		switch {
+		case present:
+			// Not an error: a project that already carries a runtime is the
+			// normal second run, and the same rule holds here as for every
+			// other file -- what is already there belongs to the project.
+			// The pin goes with it: this run fetched nothing, so it records
+			// nothing.
+			ref = ""
+			notes = append(notes, vendoring.VendorDir+" is already there: "+
+				"nothing was cloned and the runtime standing in this project "+
+				"was left untouched -- replacing a pinned runtime is an "+
+				"upgrade, not an install")
+		case opts.DryRun:
+			// Named, because a clone is the largest thing this run would do
+			// and a dry run that stayed silent about it would promise the
+			// smaller run.
+			notes = append(notes, fmt.Sprintf("would clone %s at %s into %s",
+				opts.VendorURL, ref, vendoring.VendorDir))
+		default:
+			commit, err = vendoring.Clone(gitOnly(opts.Exec), opts.Root, opts.VendorURL, ref)
+			if err != nil {
+				return exitOwn, discardClone(opts.Root, err)
+			}
 		}
 	}
 
@@ -538,10 +556,12 @@ func names(files map[string]string) []string {
 //
 // vendoring.Clone holds nothing but a Runner, so it can neither see nor remove
 // a half-written clone; its doc comment hands that to the caller, and this is
-// the caller. The directory is init's own -- a clone into an existing
-// non-empty one would have failed before git wrote a byte -- so removing it
-// takes nobody's work with it, and an exit 1 that says "nothing written" then
-// says something true.
+// the caller. What makes the removal safe is not git's refusal of an occupied
+// destination -- that refusal is precisely the common failure, and until
+// 2026-08-28 this took the previous run's clone down with it under an exit
+// code that says "nothing written". It is safe because vendorPresent ran
+// first: the clone is only ever started into a name that did not exist, so
+// everything under it was put there by this run.
 //
 // A removal that fails is reported beside the clone's own error rather than
 // instead of it: the reason the run stopped is the first one. That branch is
@@ -557,6 +577,23 @@ func discardClone(root string, cause error) string {
 			cause, vendoring.VendorDir, err)
 	}
 	return cause.Error()
+}
+
+// vendorPresent answers whether the project already carries a runtime.
+//
+// Lstat rather than Stat, for internal/write's reason: a symlink pointing
+// nowhere is still somebody's property, and following it would report a free
+// name over a link that has been there all along.
+func vendorPresent(root string) (bool, error) {
+	full := filepath.Join(root, filepath.FromSlash(vendoring.VendorDir))
+	switch _, err := os.Lstat(full); {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, fmt.Errorf("looking at %s: %w", vendoring.VendorDir, err)
+	}
 }
 
 // gitOnly adapts the one command runner this program has to vendoring, whose

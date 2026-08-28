@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xidus90/ultra-loom/internal/vendoring"
 )
 
 // osStat asks about a file by the same slash-separated name the report uses.
@@ -654,5 +656,57 @@ func TestTheShortYesAndNoAreTheSameAnswerAsTheLongOnes(t *testing.T) {
 	}
 	if !strings.Contains(answersFile, "forbidden_commands = []") {
 		t.Fatalf("n was not read as no:\n%s", answersFile)
+	}
+}
+
+// The reviewer's reproduction: a project that already carries a vendored
+// runtime, run again with --vendor-url. The clone git refuses on an occupied
+// destination used to take the previous run's work down with it, under an exit
+// code whose documented meaning is "nothing written".
+func TestAVendoredRuntimeAlreadyThereIsNeverTouched(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".ultraloom/vendor/ultraloom/keepme.txt", "PRECIOUS")
+	o := answered(root)
+	o.VendorURL, o.VendorRef = "https://example.invalid/x.git", "v1"
+	o.Exec = func(dir string, argv ...string) (string, error) {
+		t.Fatalf("a project that already has a runtime was cloned into: %v", argv)
+		return "", nil
+	}
+	report := mustRun(t, o)
+	if got := read(t, root, ".ultraloom/vendor/ultraloom/keepme.txt"); got != "PRECIOUS" {
+		t.Fatalf("the pre-existing runtime was destroyed: %q", got)
+	}
+	if !strings.Contains(report, vendoring.VendorDir+" is already there") {
+		t.Fatalf("the untouched runtime was not reported:\n%s", report)
+	}
+}
+
+// The pin belongs to whoever cloned it. A run that cloned nothing must not
+// record a ref it never fetched.
+func TestASkippedCloneRecordsNoPin(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".ultraloom/vendor/ultraloom/keepme.txt", "PRECIOUS")
+	o := answered(root)
+	o.VendorURL, o.VendorRef = "https://example.invalid/x.git", "v1"
+	o.Exec = quietGit
+	mustRun(t, o)
+	if strings.Contains(read(t, root, ".ultraloom/installed.toml"), `ref    = "v1"`) {
+		t.Fatal("a run that cloned nothing wrote the pin anyway")
+	}
+}
+
+// A vendor directory that cannot even be looked at is this program's own
+// error, not a free name: reading "not there" out of it would start a clone
+// into whatever is standing in the way. Driven directly, because a root this
+// broken never reaches the clone -- gather stops on it first.
+func TestAnUnreadableVendorNameIsReported(t *testing.T) {
+	// A NUL byte in the root never reaches the OS: Go's own string conversion
+	// rejects it, on every platform, with something that is not "not found".
+	present, err := vendorPresent("bad" + string(rune(0)) + "root")
+	if err == nil {
+		t.Fatalf("an unstattable name came back as present = %v", present)
+	}
+	if !strings.Contains(err.Error(), "looking at "+vendoring.VendorDir) {
+		t.Fatalf("the unreadable name was not named: %v", err)
 	}
 }
