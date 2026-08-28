@@ -118,7 +118,7 @@ func commandPattern(command string) string {
 
 // tomlString is the one way a value reaches a rendered file. Nothing here
 // interpolates a raw string: a wiki bundle is a path, and on Windows a path
-// carries backslashes -- written raw, `wikiundle` is an invalid escape that
+// carries backslashes -- written raw, `wiki\bundle` is an invalid escape that
 // takes the whole file down while the answers still look right. One class
 // further in, this writes a TOML basic string, which is not what Go's %q
 // writes: TOML 1.0 knows \b \t \n \f \r \" \\ and the \u escapes and nothing
