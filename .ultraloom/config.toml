@@ -70,11 +70,19 @@ threaded = true
 # `hooks/coverage-check.py` is that one command: it measures and reports Python
 # -- fail_under in pyproject.toml still passes the verdict -- and holds the Go
 # tree to the floor named here, because `go test` has no fail_under of its own.
-# 98 and not 100: the Go tree carries five branches that no test can reach --
-# `os.Exit`, a `json.Marshal` over strings and bools, a `filepath.Abs` that only
-# fails when the working directory is gone. Each of them is justified in the
-# source beside the code. Measured at 98.6% on 2026-08-28, so the floor bites
-# before a whole test file could go missing unnoticed.
+# The number, measured on 2026-08-28: 745 statements, 11 of them in ten blocks
+# that no test can reach, which is 98.5%. Each block carries its justification
+# in the source beside it -- `os.Exit`, a `json.Marshal` over a struct of
+# strings and bools, a `filepath.Abs` that fails only once the working
+# directory is gone, template errors the build settles rather than the run.
+# That is why the tree is not at 100. It is not why the floor is at 98, and
+# those are two different questions.
+# The floor is a tripwire, not a target, and the half point of slack is what
+# makes it one. One statement is 0.13% here, so 98 absorbs about three further
+# unreachable error branches -- the kind this code gains whenever a new call
+# can fail -- without turning the gate red for something that is not a
+# regression. A deleted test file costs tens of statements and trips it in the
+# same run. Raise it when the slack has been spent rather than widening it.
 # `threshold` below stays the Python number: nothing folds it into a command,
 # ultraloom only prints it.
 [verify.coverage]
