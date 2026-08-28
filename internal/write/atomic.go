@@ -6,8 +6,11 @@
 // taken before the first byte landed.
 //
 // It does not make the write a transaction. A failure on the third file
-// leaves the first two on disk, and this package offers no undo. What it
-// does guarantee is that init only ever adds: anything already standing under
+// leaves the first two on disk, and this package offers no undo -- Commit
+// names them instead, so a caller can report exactly what landed rather than
+// claiming nothing did. Temporary names and a rename at the end would not
+// change that: renaming three of five can fail on the fourth just as well.
+// What it does guarantee is that init only ever adds: anything already standing under
 // a name -- file, directory, symlink, even one pointing nowhere -- is skipped,
 // and Commit refuses rather than overwrites whatever is there when it arrives.
 // Whatever a failed run leaves behind, none of it is somebody else's content.
@@ -93,23 +96,33 @@ func checkName(name string) error {
 	return nil
 }
 
-// Commit writes the files Prepare chose. A Plan can also be built by hand, so
-// the names are checked again here: the promise not to write outside root
-// belongs to the package, not to one of its two entry points.
-func Commit(root string, plan Plan) error {
+// Commit writes the files Prepare chose and reports which of them landed. A
+// Plan can also be built by hand, so the names are checked again here: the
+// promise not to write outside root belongs to the package, not to one of its
+// two entry points.
+//
+// The written names come back on the failure path too, and that is what they
+// are for: this is not a transaction, so a failure on the third file leaves
+// the first two standing, and a caller that reported "nothing written" over
+// that would be lying by two files. Whatever stands there is this run's own
+// -- Commit never overwrites -- but it stands, and the caller has to be able
+// to say which.
+func Commit(root string, plan Plan) ([]string, error) {
+	var written []string
 	for _, name := range plan.Names() {
 		if err := checkName(name); err != nil {
-			return err
+			return written, err
 		}
 		full := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			return fmt.Errorf("creating the directory for %s: %w", name, err)
+			return written, fmt.Errorf("creating the directory for %s: %w", name, err)
 		}
 		if err := writeNew(full, plan.Create[name]); err != nil {
-			return commitFailure(name, err)
+			return written, commitFailure(name, err)
 		}
+		written = append(written, name)
 	}
-	return nil
+	return written, nil
 }
 
 // commitFailure tells the two ways a planned file can fail to appear apart.

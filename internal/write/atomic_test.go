@@ -22,7 +22,7 @@ func TestAnExistingFileIsSkippedNotOverwritten(t *testing.T) {
 	if len(plan.Create) != 0 || len(plan.Skip) != 1 {
 		t.Fatalf("plan = %+v, want one skip and no create", plan)
 	}
-	if err := Commit(root, plan); err != nil {
+	if _, err := Commit(root, plan); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	body, _ := os.ReadFile(target)
@@ -37,7 +37,7 @@ func TestDirectoriesAreCreatedForNewFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if err := Commit(root, plan); err != nil {
+	if _, err := Commit(root, plan); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".ultraloom", "policy.toml")); err != nil {
@@ -94,7 +94,7 @@ func TestAFileAppearingAfterPrepareIsNotOverwritten(t *testing.T) {
 	if err := os.WriteFile(target, []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Commit(root, plan); err == nil {
+	if _, err := Commit(root, plan); err == nil {
 		t.Fatal("Commit overwrote a file that appeared after Prepare")
 	}
 	body, _ := os.ReadFile(target)
@@ -117,7 +117,7 @@ func TestADirectoryThatCannotBeCreatedIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := Plan{Create: map[string]string{"a/b.txt": "x"}}
-	if err := Commit(root, plan); err == nil {
+	if _, err := Commit(root, plan); err == nil {
 		t.Fatal("Commit created a directory where a file stands")
 	}
 }
@@ -128,7 +128,7 @@ func TestCommitRefusesAHostileNameInAHandBuiltPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := Plan{Create: map[string]string{"../escape.txt": "x"}}
-	if err := Commit(root, plan); err == nil {
+	if _, err := Commit(root, plan); err == nil {
 		t.Fatal("Commit accepted a name that leaves the project")
 	}
 	if _, err := os.Stat(filepath.Join(root, "..", "escape.txt")); !os.IsNotExist(err) {
@@ -145,7 +145,7 @@ func TestTheRaceIsExplainedNotJustReported(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "late.txt"), []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err = Commit(root, plan)
+	_, err = Commit(root, plan)
 	if err == nil {
 		t.Fatal("Commit did not report the race")
 	}
@@ -185,7 +185,7 @@ func TestADanglingSymlinkIsSkippedNotWritten(t *testing.T) {
 	if len(plan.Create) != 0 || !slices.Equal(plan.Skip, []string{"dangling.txt"}) {
 		t.Fatalf("plan = %+v, want the link skipped", plan)
 	}
-	if err := Commit(root, plan); err != nil {
+	if _, err := Commit(root, plan); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	if _, err := os.Lstat(link); err != nil {
@@ -193,5 +193,40 @@ func TestADanglingSymlinkIsSkippedNotWritten(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "nowhere.txt")); !os.IsNotExist(err) {
 		t.Fatalf("Commit wrote through the link: %v", err)
+	}
+}
+
+// A Commit that stops halfway has still written: the names of what landed are
+// the caller's only way to report the truth about it.
+func TestCommitNamesWhatItWroteBeforeItFailed(t *testing.T) {
+	root := t.TempDir()
+	plan, err := Prepare(root, map[string]string{"a.txt": "1", "b.txt": "2", "c.txt": "3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Planned as new, and there by the time Commit arrives -- the race the
+	// exclusive create is for, arranged on purpose in the middle of the order.
+	if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("theirs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	written, err := Commit(root, plan)
+	if err == nil {
+		t.Fatal("Commit overwrote a file that appeared after Prepare")
+	}
+	if len(written) != 1 || written[0] != "a.txt" {
+		t.Fatalf("written = %v, want [a.txt]", written)
+	}
+}
+
+// Nothing written is the other half, and the one a caller may report as
+// "nothing happened".
+func TestCommitNamesNothingWhenTheFirstFileFails(t *testing.T) {
+	root := t.TempDir()
+	written, err := Commit(root, Plan{Create: map[string]string{"../escape.txt": "x"}})
+	if err == nil {
+		t.Fatal("Commit accepted a name that leaves the project")
+	}
+	if len(written) != 0 {
+		t.Fatalf("written = %v, want none", written)
 	}
 }

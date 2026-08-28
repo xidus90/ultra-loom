@@ -749,3 +749,28 @@ func TestALaneThisCannotVerifyIsNamedAsUnverified(t *testing.T) {
 		t.Fatalf("the unverified lane was not reported:\n%s", report)
 	}
 }
+
+// internal/write is not a transaction and says so, while the spec asks for
+// all or nothing. What can still be made true is the report: a run that
+// stopped after the five files were on disk must not exit under a code whose
+// meaning is "nothing written" and name none of them.
+func TestAFailureAfterTheFilesLandedNamesWhatItLeft(t *testing.T) {
+	root := t.TempDir()
+	// A directory under the settings file's name: every rendered file is
+	// written, and only the merge at the very end cannot land.
+	if err := os.MkdirAll(filepath.Join(root, ".claude", "settings.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, report := run(answered(root))
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+	if !strings.Contains(report, "left standing") {
+		t.Fatalf("a run that wrote five files claimed it wrote nothing:\n%s", report)
+	}
+	for _, name := range []string{answersPath, installedPath, ".ultraloom/policy.toml"} {
+		if !strings.Contains(report, name) {
+			t.Fatalf("%s landed and was not named:\n%s", name, report)
+		}
+	}
+}

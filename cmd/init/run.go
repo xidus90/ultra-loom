@@ -207,11 +207,14 @@ func run(opts Options) (int, string) {
 	if opts.DryRun {
 		return exitDone, describe(plan, merged.what, notes, true)
 	}
-	if err := write.Commit(opts.Root, plan); err != nil {
-		return exitOwn, err.Error()
+	written, err := write.Commit(opts.Root, plan)
+	if err != nil {
+		return exitOwn, landed(err.Error(), written)
 	}
 	if err := merged.apply(); err != nil {
-		return exitOwn, err.Error()
+		// Everything write.Commit had to do is done by now, so the whole plan
+		// is what this run left standing.
+		return exitOwn, landed(err.Error(), written)
 	}
 	return exitDone, describe(plan, merged.what, notes, false)
 }
@@ -566,6 +569,27 @@ func describe(plan write.Plan, settingsWhat string, notes []string, dry bool) st
 		if note != "" {
 			fmt.Fprintf(&out, "note: %s\n", note)
 		}
+	}
+	return out.String()
+}
+
+// landed says what a failed run left behind.
+//
+// internal/write is honest about not being a transaction, and the spec asks
+// for all-or-nothing; between the two the report is what can still be made
+// true. An exit 1 whose documented meaning is "own error, nothing written"
+// over three files on disk is the same lie C1 was, one step further in, and
+// the names come in write.Commit's own order so a person can read this list
+// against the directory.
+func landed(cause string, written []string) string {
+	if len(written) == 0 {
+		return cause
+	}
+	var out strings.Builder
+	out.WriteString(cause)
+	out.WriteString("\nthis run had already written, and left standing:\n")
+	for _, name := range written {
+		fmt.Fprintf(&out, "  %s\n", name)
 	}
 	return out.String()
 }
