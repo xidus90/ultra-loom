@@ -61,8 +61,25 @@ threaded = true
 commands = ["uv run pytest", "go test ./..."]
 threaded = true
 
+# Two languages, one slot. `[verify.coverage]` takes `report` and no `commands`
+# list -- a threshold belongs next to the command that reports against it -- so
+# the Go arm cannot simply be appended the way it was under `lint` and `test`.
+# Until 2026-08-28 that meant `go test` ran with no threshold at all while the
+# report claimed a coverage lane, which is the one shape of green this project
+# exists to prevent.
+# `hooks/coverage-check.py` is that one command: it measures and reports Python
+# -- fail_under in pyproject.toml still passes the verdict -- and holds the Go
+# tree to the floor named here, because `go test` has no fail_under of its own.
+# 98 and not 100: the Go tree carries five branches that no test can reach --
+# `os.Exit`, a `json.Marshal` over strings and bools, a `filepath.Abs` that only
+# fails when the working directory is gone. Each of them is justified in the
+# source beside the code. Measured at 98.6% on 2026-08-28, so the floor bites
+# before a whole test file could go missing unnoticed.
+# `threshold` below stays the Python number: nothing folds it into a command,
+# ultraloom only prints it.
 [verify.coverage]
 threshold = 100
+report    = "uv run --script hooks/coverage-check.py 98"
 
 [verify.profiles]
 edit      = ["lint", "types"]
