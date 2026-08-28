@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/xidus90/ultra-loom/internal/detect"
 )
 
@@ -92,19 +94,21 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // A pipe, a closed stdin and a test buffer all say no, and then an unanswered
 // question ends the run instead of waiting for input that never comes -- the
 // same lesson as space's invisible uv failure, which read as "nothing to
-// report" for a whole session. Only a character device is a person.
+// report" for a whole session.
+//
+// The question the operating system answers is the one that has to be asked:
+// term.IsTerminal is an ioctl on Unix and GetConsoleMode on Windows, and both
+// speak about a console rather than about a file type. The mode bit that
+// stood here until 2026-08-28 asked something else -- os.ModeCharDevice is
+// true of the null device too, so `init < /dev/null` (and `init < NUL`) read
+// as a person, printed four prompts to nobody, took every default and
+// installed. That is precisely the agent and CI shape the no-TTY rule is for.
 func terminal(stdin io.Reader) bool {
 	file, ok := stdin.(*os.File)
 	if !ok {
 		return false
 	}
-	info, err := file.Stat()
-	// An unstattable stdin is not a terminal to ask on either, so the two
-	// answers are the same one.
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(file.Fd()))
 }
 
 // report takes the runner rather than reaching for git itself, so a failing

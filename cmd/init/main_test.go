@@ -214,3 +214,18 @@ func TestOnlyACharacterDeviceCountsAsATerminal(t *testing.T) {
 		t.Fatal("a closed file was taken for a terminal")
 	}
 }
+
+// The null device is the shape an agent or a CI job hands in -- `init < NUL`
+// on Windows, `init < /dev/null` everywhere else. It is a character device,
+// so the mode bit alone read it as a person: four prompts went to nobody, the
+// defaults were taken, and a full install landed at exit 0.
+func TestTheNullDeviceIsNobodyToAsk(t *testing.T) {
+	file, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if terminal(file) {
+		t.Fatal("the null device was taken for a person")
+	}
+}
