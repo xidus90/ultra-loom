@@ -126,3 +126,25 @@ func TestOtherKeysInTheReportSectionAreSteppedOver(t *testing.T) {
 		t.Fatal("read a line without a delimiter as a threshold")
 	}
 }
+
+// An indented line continues the value above it, so this threshold is a
+// piece of exclude_lines and not an option at all.
+func TestAContinuationLineIsNotAnOption(t *testing.T) {
+	src := "[report]\nexclude_lines =\n    pragma: no cover\n    fail_under = 90\n"
+	if Enforced(nil, []byte(src)) {
+		t.Fatal("read a continuation line as a threshold")
+	}
+}
+
+// configparser folds option names to lower case before it looks them up.
+func TestAnUpperCaseOptionNameCounts(t *testing.T) {
+	if !Enforced(nil, []byte("[report]\nFAIL_UNDER = 90\n")) {
+		t.Fatal("case cost a project its threshold")
+	}
+}
+
+func TestASectionHeaderWithATrailingCommentCounts(t *testing.T) {
+	if !Enforced(nil, []byte("[report] # the threshold lives here\nfail_under = 90\n")) {
+		t.Fatal("a comment after the header hid the section")
+	}
+}

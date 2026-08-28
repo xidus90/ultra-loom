@@ -51,17 +51,30 @@ func tomlEnforces(src []byte) bool {
 }
 
 // iniEnforces reads .coveragerc, which is configparser rather than TOML: the
-// continuation lines under exclude_lines are not valid TOML, so the parser
-// above would call every real file unreadable.
+// indented continuation lines under exclude_lines are not valid TOML, so the
+// parser above would call every real file unreadable.
 func iniEnforces(src []byte) bool {
 	section := ""
 	for _, raw := range strings.Split(string(src), "\n") {
+		// An indented line belongs to the value above it, so nothing on it
+		// is an option -- exclude_lines may well list a threshold-shaped
+		// pattern.
+		if raw != strings.TrimLeft(raw, " 	") {
+			continue
+		}
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
 		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section = strings.TrimSpace(line[1 : len(line)-1])
+		if strings.HasPrefix(line, "[") {
+			// A header may carry a comment behind it; a value may not, so
+			// the cut stays inside this branch.
+			if cut := strings.IndexAny(line, "#;"); cut >= 0 {
+				line = strings.TrimSpace(line[:cut])
+			}
+			if strings.HasSuffix(line, "]") {
+				section = strings.TrimSpace(line[1 : len(line)-1])
+			}
 			continue
 		}
 		if section != "report" {
@@ -70,7 +83,9 @@ func iniEnforces(src []byte) bool {
 		// configparser takes either character as the delimiter, and a file
 		// that writes the colon enforces just as much as one that does not.
 		cut := strings.IndexAny(line, "=:")
-		if cut < 0 || strings.TrimSpace(line[:cut]) != "fail_under" {
+		// configparser folds option names to lower case before it looks
+		// them up, so the spelling in the file decides nothing.
+		if cut < 0 || !strings.EqualFold(strings.TrimSpace(line[:cut]), "fail_under") {
 			continue
 		}
 		value, err := strconv.ParseFloat(strings.TrimSpace(line[cut+1:]), 64)
