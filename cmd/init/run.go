@@ -125,14 +125,29 @@ func run(opts Options) (int, string) {
 			"(stop gate, subagent reports) were left out")
 	}
 
+	// Decided before the clone, although it is applied last: the merge is the
+	// step that can still say no, and a project refused for a settings.json
+	// nobody may touch must not first get a runtime cloned into it.
+	merged, code, note := mergeSettings(opts, facts, wikiHooks)
+	if code != exitDone {
+		return code, note
+	}
+	notes = append(notes, note)
+
 	// The vendored runtime has to stand before installed.toml can name the
 	// commit it pinned, so the clone is the one write that goes first -- and it
 	// goes into a directory of ours, never over somebody's file.
 	ref, commit := opts.VendorRef, ""
+	if opts.VendorURL != "" && opts.DryRun {
+		// Named, because a clone is the largest thing this run would do and a
+		// dry run that stayed silent about it would promise the smaller run.
+		notes = append(notes, fmt.Sprintf("would clone %s at %s into %s",
+			opts.VendorURL, ref, vendoring.VendorDir))
+	}
 	if opts.VendorURL != "" && !opts.DryRun {
 		commit, err = vendoring.Clone(gitOnly(opts.Exec), opts.Root, opts.VendorURL, ref)
 		if err != nil {
-			return exitOwn, err.Error()
+			return exitOwn, discardClone(opts.Root, err)
 		}
 	}
 
@@ -150,12 +165,6 @@ func run(opts Options) (int, string) {
 	if err != nil {
 		return exitOwn, err.Error()
 	}
-
-	merged, code, note := mergeSettings(opts, facts, wikiHooks)
-	if code != exitDone {
-		return code, note
-	}
-	notes = append(notes, note)
 
 	if opts.DryRun {
 		return exitDone, describe(plan, merged.what, notes, true)
@@ -443,6 +452,31 @@ func names(files map[string]string) []string {
 	}
 	sort.Strings(all)
 	return all
+}
+
+// discardClone takes back what a failed clone left standing.
+//
+// vendoring.Clone holds nothing but a Runner, so it can neither see nor remove
+// a half-written clone; its doc comment hands that to the caller, and this is
+// the caller. The directory is init's own -- a clone into an existing
+// non-empty one would have failed before git wrote a byte -- so removing it
+// takes nobody's work with it, and an exit 1 that says "nothing written" then
+// says something true.
+//
+// A removal that fails is reported beside the clone's own error rather than
+// instead of it: the reason the run stopped is the first one. That branch is
+// uncovered -- making os.RemoveAll fail portably needs a locked handle on
+// Windows and a permission on Unix, and a test that only passes on one of them
+// says less than the code it guards. It is handled rather than ignored,
+// because a directory left standing under a message that says nothing was
+// written is exactly the lie this function exists to prevent.
+func discardClone(root string, cause error) string {
+	full := filepath.Join(root, filepath.FromSlash(vendoring.VendorDir))
+	if err := os.RemoveAll(full); err != nil {
+		return fmt.Sprintf("%v\nand %s could not be cleaned up: %v",
+			cause, vendoring.VendorDir, err)
+	}
+	return cause.Error()
 }
 
 // gitOnly adapts the one command runner this program has to vendoring, whose

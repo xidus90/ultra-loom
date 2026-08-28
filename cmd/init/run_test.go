@@ -405,7 +405,10 @@ func TestADryRunClonesNothing(t *testing.T) {
 		t.Fatalf("a dry run started %v", argv)
 		return "", nil
 	}
-	mustRun(t, o)
+	report := mustRun(t, o)
+	if !strings.Contains(report, "would clone https://example.invalid/x.git at v1") {
+		t.Fatalf("the dry run kept the largest step to itself:\n%s", report)
+	}
 }
 
 func TestVendoringPinsTheCommitItGot(t *testing.T) {
@@ -478,5 +481,40 @@ func TestAWikiInTheProjectAnswersTheWikiQuestion(t *testing.T) {
 	answersFile := read(t, root, ".ultraloom/answers.toml")
 	if !strings.Contains(answersFile, "mode   = \"brain\"") {
 		t.Fatalf("the detected wiki did not reach the answers:\n%s", answersFile)
+	}
+}
+
+// A project that says no must not first get a runtime cloned into it: the
+// merge is the last step that can refuse, so it decides before the clone.
+func TestARefusedProjectIsNotClonedInto(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".claude/settings.json", "{not json")
+	o := answered(root)
+	o.VendorURL, o.VendorRef = "https://example.invalid/x.git", "v1"
+	o.Exec = func(dir string, argv ...string) (string, error) {
+		t.Fatalf("a refused run started %v", argv)
+		return "", nil
+	}
+	if code, report := run(o); code != 2 {
+		t.Fatalf("code = %d, want 2 (%s)", code, report)
+	}
+}
+
+// vendoring.Clone leaves whatever git left and hands the cleanup to its
+// caller. Without it, an exit that says "nothing written" would be a lie.
+func TestAFailedCloneLeavesNoHalfClone(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.VendorURL, o.VendorRef = "https://example.invalid/x.git", "v1"
+	o.Exec = func(dir string, argv ...string) (string, error) {
+		makeFile(t, root, ".ultraloom/vendor/ultraloom/README.md", "half a clone")
+		return "", fmt.Errorf("the remote hung up")
+	}
+	code, report := run(o)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+	if _, err := osStat(root, ".ultraloom/vendor/ultraloom"); err == nil {
+		t.Fatal("the half-written clone was left behind")
 	}
 }
