@@ -708,9 +708,9 @@ func TestASkippedCloneRecordsNoPin(t *testing.T) {
 func TestAnUnreadableVendorNameIsReported(t *testing.T) {
 	// A NUL byte in the root never reaches the OS: Go's own string conversion
 	// rejects it, on every platform, with something that is not "not found".
-	present, err := vendorPresent("bad" + string(rune(0)) + "root")
+	occupied, usable, err := vendorPresent("bad" + string(rune(0)) + "root")
 	if err == nil {
-		t.Fatalf("an unstattable name came back as present = %v", present)
+		t.Fatalf("an unstattable name came back as occupied = %v, usable = %v", occupied, usable)
 	}
 	if !strings.Contains(err.Error(), "looking at "+vendoring.VendorDir) {
 		t.Fatalf("the unreadable name was not named: %v", err)
@@ -870,5 +870,16 @@ func linkDir(t *testing.T, target, link string) {
 	}
 	if out, jerr := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); jerr != nil {
 		t.Skipf("neither a symlink (%v) nor a junction (%v: %s) can be made here", err, jerr, out)
+	}
+}
+
+// A file is not a runtime. It still blocks the clone -- git would refuse it
+// and C1 is about what happens next -- but the hooks cannot run through it, so
+// the note that says so must not fall silent.
+func TestAFileWhereTheRuntimeBelongsIsNotARuntime(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".ultraloom/vendor/ultraloom", "not a clone")
+	if report := mustRun(t, answered(root)); !strings.Contains(report, "no runtime is vendored") {
+		t.Fatalf("a file was taken for a vendored runtime:\n%s", report)
 	}
 }

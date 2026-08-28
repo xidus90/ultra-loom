@@ -148,13 +148,13 @@ func run(opts Options) (int, string) {
 	// commit it pinned, so the clone is the one write that goes first -- and it
 	// goes into a directory of ours, never over somebody's file.
 	ref, commit := opts.VendorRef, ""
-	present, err := vendorPresent(opts.Root)
+	occupied, usable, err := vendorPresent(opts.Root)
 	if err != nil {
 		return exitOwn, err.Error()
 	}
 	if opts.VendorURL != "" {
 		switch {
-		case present:
+		case occupied:
 			// Not an error: a project that already carries a runtime is the
 			// normal second run, and the same rule holds here as for every
 			// other file -- what is already there belongs to the project.
@@ -178,7 +178,7 @@ func run(opts Options) (int, string) {
 			}
 		}
 	}
-	if opts.VendorURL == "" && !present {
+	if opts.VendorURL == "" && !usable {
 		// Every generated hook points at the vendored runtime, and there is no
 		// second road: a project without one has a settings.json whose
 		// PreToolUse hook fails on every Write, Edit and Bash. Reported rather
@@ -490,11 +490,11 @@ func coverageNote(filled answers.Answers, enforced bool) []string {
 	}
 	if !has(filled.Project.Stacks, "python") {
 		return []string{fmt.Sprintf(
-			"the coverage lane was kept but not verified: nothing here reads "+
-				"this stack's coverage configuration, so whether the threshold "+
-				"of %d%% is enforced at all is unknown -- check that your test "+
-				"runner fails below it, or the lane reports a number it can "+
-				"never fail on",
+			"the coverage lane was kept but not verified: nothing outside "+
+				"Python's own pyproject.toml and .coveragerc is read here, so "+
+				"whether the threshold of %d%% is enforced at all is unknown -- "+
+				"check that your test runner fails below it, or the lane "+
+				"reports a number it can never fail on",
 			filled.Gates.CoverageThreshold)}
 	}
 	return []string{fmt.Sprintf(
@@ -720,20 +720,29 @@ func discardClone(root string, cause error) string {
 	return cause.Error()
 }
 
-// vendorPresent answers whether the project already carries a runtime.
+// vendorPresent answers two different questions about the same name, because
+// two different decisions need two different answers.
+//
+// occupied is "may this run clone here?" and is true of anything at all -- a
+// file, a directory, a link pointing nowhere. That is the C1 rule: git refuses
+// an occupied destination, and whatever stands there is not ours to clear.
+//
+// usable is "can a hook run through this?" and wants a directory. A file under
+// that name is not a vendored runtime, and reading it as one silenced the very
+// note that would have told somebody why their hooks fail.
 //
 // Lstat rather than Stat, for internal/write's reason: a symlink pointing
 // nowhere is still somebody's property, and following it would report a free
 // name over a link that has been there all along.
-func vendorPresent(root string) (bool, error) {
+func vendorPresent(root string) (occupied, usable bool, err error) {
 	full := filepath.Join(root, filepath.FromSlash(vendoring.VendorDir))
-	switch _, err := os.Lstat(full); {
+	switch info, err := os.Lstat(full); {
 	case err == nil:
-		return true, nil
+		return true, info.IsDir(), nil
 	case os.IsNotExist(err):
-		return false, nil
+		return false, false, nil
 	default:
-		return false, fmt.Errorf("looking at %s: %w", vendoring.VendorDir, err)
+		return false, false, fmt.Errorf("looking at %s: %w", vendoring.VendorDir, err)
 	}
 }
 

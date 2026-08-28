@@ -197,7 +197,7 @@ func mkdir(t *testing.T, name string) {
 
 // A file is not a terminal, and neither is a file that is already closed --
 // the two ways stdin can fail to be a person to ask.
-func TestOnlyACharacterDeviceCountsAsATerminal(t *testing.T) {
+func TestNeitherAFileNorAClosedOneIsATerminal(t *testing.T) {
 	name := filepath.Join(t.TempDir(), "stdin")
 	writeFile(t, name, "")
 	file, err := os.Open(name)
