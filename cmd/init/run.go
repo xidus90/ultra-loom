@@ -230,12 +230,20 @@ func seed(facts detect.Facts) answers.Answers {
 // A bad flag is the caller's error, and it is caught before anything is
 // written: exit 1, the flag named, and the accepted values with it.
 func applyFlags(current answers.Answers, opts Options) (answers.Answers, error) {
-	// A url with no ref is not a pin. vendoring.Clone refuses the empty ref
-	// anyway, but only once the run has reached it -- and a dry run never
-	// does, so it promised a clone that could not have happened.
+	// Vendoring takes both flags or neither, and each half alone is refused
+	// rather than read as an intention. A url with no ref is not a pin --
+	// vendoring.Clone refuses the empty ref, but only once a run reaches it,
+	// and a dry run never does, so it promised a clone that could not have
+	// happened. A ref with no url is the same mistake from the other side: it
+	// names a version of something nobody asked to fetch, and quietly ignoring
+	// it leaves the caller believing their project is pinned.
 	if opts.VendorURL != "" && opts.VendorRef == "" {
 		return current, fmt.Errorf(
 			"--vendor-url without --vendor-ref: name the branch, tag or commit to pin")
+	}
+	if opts.VendorRef != "" && opts.VendorURL == "" {
+		return current, fmt.Errorf(
+			"--vendor-ref without --vendor-url: name the repository to clone")
 	}
 	if opts.CommitLanguage != "" {
 		current.Project.CommitLanguage = opts.CommitLanguage
@@ -290,13 +298,20 @@ const pipInstall = "pip install"
 // A fourth thing is not a state. Anything but yes, no and nothing is refused
 // rather than dropped: dropping it would run the whole install under an answer
 // the caller believes they gave.
+//
+// The short forms are here because interview.applyChoice takes them. Two roads
+// to one answer file, so the same word has to mean the same thing on both --
+// a `y` that the prompt accepts and the flag rejects makes the flag a
+// different question wearing the same name. The interview is the reference:
+// narrowing it instead would take a spelling away from people who already
+// type it.
 func choice(flag, given string, current []string, entry string) ([]string, error) {
 	switch strings.ToLower(given) {
 	case "":
 		return current, nil
-	case "yes":
+	case "yes", "y":
 		return []string{entry}, nil
-	case "no":
+	case "no", "n":
 		return []string{}, nil
 	}
 	return current, fmt.Errorf("%s %q: answer yes or no", flag, given)
@@ -328,6 +343,14 @@ func ask(opts Options, current answers.Answers) (answers.Answers, error) {
 // removing its check on a guess would open the same silent gap in the other
 // direction. Unknown therefore keeps the lane, which is the rule the whole
 // relevance mapping follows.
+//
+// The residual, so nobody has to work it out from the return line: a Node
+// project gets a coverage lane whose enforcement was never established, and
+// no note either, because coverageNote is Python-only for the same reason
+// this is. Its vitest thresholds live in the vitest configuration, which
+// nothing here reads. That is unverified, not verified-absent -- the
+// fail-safe of the two -- and closing it means teaching this to read a second
+// language's configuration, not narrowing what it drops.
 func coverageLane(filled answers.Answers, enforced bool) bool {
 	return enforced || !has(filled.Project.Stacks, "python")
 }

@@ -621,3 +621,38 @@ func TestAVendorUrlWithoutARefIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// The mirror of the url-without-ref case: a ref names a version of something
+// nobody asked to fetch. Silently ignoring it leaves the caller believing
+// their project is pinned.
+func TestAVendorRefWithoutAUrlIsRefused(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.VendorRef = "v1"
+	code, report := run(o)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+	if !strings.Contains(report, "--vendor-url") {
+		t.Fatalf("the report does not name the missing flag:\n%s", report)
+	}
+}
+
+// The same answer must mean the same thing typed at the prompt and passed as
+// a flag. interview.applyChoice takes y and n; the flag path did not.
+func TestTheShortYesAndNoAreTheSameAnswerAsTheLongOnes(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "pyproject.toml", "[project]\n")
+	makeFile(t, root, "manage.py", "django")
+	makeFile(t, root, "requirements.txt", "Django==5.0\n")
+	mustRun(t, Options{Root: root, Interactive: false,
+		CommitLanguage: "en", DocsLanguage: "de", WikiMode: "none",
+		CoverageThreshold: 100, ProtectMigrations: "y", ForbidPipInstall: "n"})
+	answersFile := read(t, root, ".ultraloom/answers.toml")
+	if !strings.Contains(answersFile, "protected_paths") {
+		t.Fatalf("y was not read as yes:\n%s", answersFile)
+	}
+	if !strings.Contains(answersFile, "forbidden_commands = []") {
+		t.Fatalf("n was not read as no:\n%s", answersFile)
+	}
+}
