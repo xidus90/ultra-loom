@@ -68,6 +68,9 @@ func Render(a answers.Answers) (map[string]string, error) {
 	out := make(map[string]string, len(targets))
 	for name, target := range targets {
 		body, err := one(name, data)
+		// Unreachable while the embedded templates parse and execute -- which a
+		// build settles, not a run. Kept because an edit to templates/ could
+		// change that, and a swallowed template error would ship broken files.
 		if err != nil {
 			return nil, fmt.Errorf("rendering %s: %w", name, err)
 		}
@@ -158,6 +161,9 @@ func tomlList(all []string) string {
 
 func one(name string, data view) (string, error) {
 	parsed, err := template.New(name).Funcs(helpers).ParseFS(templates, "templates/"+name)
+	// Both returns are unreachable for the templates this binary carries: the
+	// names come from targets, the files are embedded, and the helpers cannot
+	// fail. Only a broken template would reach them, and then it must be loud.
 	if err != nil {
 		return "", err
 	}

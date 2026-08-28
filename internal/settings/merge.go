@@ -80,6 +80,9 @@ func Merge(existing []byte, wanted []Entry) (Result, error) {
 		root["hooks"] = hooks
 	}
 	out, err := json.MarshalIndent(root, "", "  ")
+	// Unreachable, and kept for the day that stops being true: root holds only
+	// what json.Unmarshal produced and what blockFor built, and neither can put
+	// a value in there that the encoder refuses. No test can force this branch.
 	if err != nil {
 		return Result{}, err
 	}

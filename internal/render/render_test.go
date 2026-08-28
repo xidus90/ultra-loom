@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -261,7 +262,10 @@ func TestAPatternCarryingAnApostropheLeavesTheLiteralForm(t *testing.T) {
 	if _, err := toml.Decode(policy, &parsed); err != nil {
 		t.Fatalf("policy.toml is not valid TOML: %v\n%s", err, policy)
 	}
-	if !strings.Contains(policy, `\s+`) {
-		t.Fatalf("policy.toml = %q, want the basic string with its doubled backslashes", policy)
+	// The built-in git-push rule carries `\s+` verbatim in its literal string,
+	// so only this rule's own escaped form tells the two branches apart.
+	escaped := strconv.Quote(commandPattern("rm dont's"))
+	if !strings.Contains(policy, escaped) {
+		t.Fatalf("policy.toml = %q, want the rule as %s", policy, escaped)
 	}
 }
