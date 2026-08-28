@@ -518,3 +518,70 @@ func TestAFailedCloneLeavesNoHalfClone(t *testing.T) {
 		t.Fatal("the half-written clone was left behind")
 	}
 }
+
+// A flag that goes straight to a field skips the validator the interview owns
+// for the same answer. Each of these wrote or discarded silently before.
+func TestABadFlagIsRefusedBeforeAnythingIsWritten(t *testing.T) {
+	for _, bad := range []struct {
+		name  string
+		set   func(*Options)
+		names string
+	}{
+		{"wiki mode", func(o *Options) { o.WikiMode = "nonsense" }, "--wiki-mode"},
+		{"threshold above a hundred", func(o *Options) { o.CoverageThreshold = 150 }, "--coverage-threshold"},
+		{"negative threshold", func(o *Options) { o.CoverageThreshold = -5 }, "--coverage-threshold"},
+		{"neither yes nor no", func(o *Options) { o.ProtectMigrations = "maybe" }, "--protect-migrations"},
+		{"pip answer that is neither", func(o *Options) { o.ForbidPipInstall = "perhaps" }, "--forbid-pip-install"},
+	} {
+		t.Run(bad.name, func(t *testing.T) {
+			root := t.TempDir()
+			o := answered(root)
+			bad.set(&o)
+			code, report := run(o)
+			if code != 1 {
+				t.Fatalf("code = %d, want 1 (%s)", code, report)
+			}
+			if !strings.Contains(report, bad.names) {
+				t.Fatalf("the report does not name %s:\n%s", bad.names, report)
+			}
+			if _, err := osStat(root, ".ultraloom/answers.toml"); err == nil {
+				t.Fatal("a refused flag still wrote a file")
+			}
+		})
+	}
+}
+
+// The bug this closes end to end: a run that succeeded and left an answer file
+// its own next run could not read.
+func TestNoRunLeavesAnAnswerFileItCannotReadAgain(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.WikiMode = "nonsense"
+	if code, _ := run(o); code == 0 {
+		t.Fatal("a bad wiki mode was installed")
+	}
+	if code, report := run(answered(root)); code != 0 {
+		t.Fatalf("the second run cannot read what the first left: %d %s", code, report)
+	}
+}
+
+// A url without a ref is not a pin, and a dry run promised the clone anyway --
+// "would clone <url> at  into ..." -- for a clone vendoring would have refused.
+func TestAVendorUrlWithoutARefIsRefused(t *testing.T) {
+	for _, dry := range []bool{true, false} {
+		root := t.TempDir()
+		o := answered(root)
+		o.DryRun, o.VendorURL = dry, "https://example.invalid/x.git"
+		o.Exec = func(dir string, argv ...string) (string, error) {
+			t.Fatalf("an unpinned run started %v", argv)
+			return "", nil
+		}
+		code, report := run(o)
+		if code != 1 {
+			t.Fatalf("dry = %v: code = %d, want 1 (%s)", dry, code, report)
+		}
+		if !strings.Contains(report, "--vendor-ref") {
+			t.Fatalf("the report does not name the missing flag:\n%s", report)
+		}
+	}
+}

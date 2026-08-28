@@ -97,7 +97,11 @@ func run(opts Options) (int, string) {
 	if err != nil {
 		return exitOwn, err.Error()
 	}
-	filled, err := ask(opts, applyFlags(current, opts))
+	chosen, err := applyFlags(current, opts)
+	if err != nil {
+		return exitOwn, err.Error()
+	}
+	filled, err := ask(opts, chosen)
 	if errors.Is(err, interview.ErrNoTTY) {
 		return exitRefused, err.Error()
 	}
@@ -210,11 +214,25 @@ func seed(facts detect.Facts) answers.Answers {
 	return a
 }
 
-// applyFlags is where a flag becomes an answer. interview.Question keeps its
-// setter unexported, so the mapping lives here rather than being driven from
-// the question list -- and a flag that is set is simply an answer already
-// given, which is what makes an unattended run possible at all.
-func applyFlags(current answers.Answers, opts Options) answers.Answers {
+// applyFlags is where a flag becomes an answer, and where it is judged.
+//
+// interview.Question keeps its setter unexported, so the mapping lives here
+// rather than being driven from the question list. That costs the validation
+// the interview would have done: a flag that is set answers the question, and
+// the question -- with its check -- is then never asked. So the check stands
+// here instead. Without it `--wiki-mode nonsense` was a run that reported
+// success and left an answers.toml that its own next run could not read.
+//
+// A bad flag is the caller's error, and it is caught before anything is
+// written: exit 1, the flag named, and the accepted values with it.
+func applyFlags(current answers.Answers, opts Options) (answers.Answers, error) {
+	// A url with no ref is not a pin. vendoring.Clone refuses the empty ref
+	// anyway, but only once the run has reached it -- and a dry run never
+	// does, so it promised a clone that could not have happened.
+	if opts.VendorURL != "" && opts.VendorRef == "" {
+		return current, fmt.Errorf(
+			"--vendor-url without --vendor-ref: name the branch, tag or commit to pin")
+	}
 	if opts.CommitLanguage != "" {
 		current.Project.CommitLanguage = opts.CommitLanguage
 	}
@@ -222,16 +240,36 @@ func applyFlags(current answers.Answers, opts Options) answers.Answers {
 		current.Project.DocsLanguage = opts.DocsLanguage
 	}
 	if opts.WikiMode != "" {
+		if !has(answers.WikiModes, opts.WikiMode) {
+			return current, fmt.Errorf("--wiki-mode %q: it must be one of %v",
+				opts.WikiMode, answers.WikiModes)
+		}
 		current.Gates.Wiki.Mode = opts.WikiMode
 	}
 	if opts.CoverageThreshold != 0 {
+		// Zero is the unset flag rather than a threshold of nothing: a project
+		// that really wants no floor says so by leaving the coverage tool
+		// unconfigured, which is what coverageNote then reports.
+		if opts.CoverageThreshold < 0 || opts.CoverageThreshold > 100 {
+			return current, fmt.Errorf(
+				"--coverage-threshold %d: it must be between 0 and 100",
+				opts.CoverageThreshold)
+		}
 		current.Gates.CoverageThreshold = opts.CoverageThreshold
 	}
-	current.Policy.ProtectedPaths = choice(opts.ProtectMigrations,
+	protected, err := choice("--protect-migrations", opts.ProtectMigrations,
 		current.Policy.ProtectedPaths, migrationGlob)
-	current.Policy.ForbiddenCommands = choice(opts.ForbidPipInstall,
+	if err != nil {
+		return current, err
+	}
+	current.Policy.ProtectedPaths = protected
+	forbidden, err := choice("--forbid-pip-install", opts.ForbidPipInstall,
 		current.Policy.ForbiddenCommands, pipInstall)
-	return current
+	if err != nil {
+		return current, err
+	}
+	current.Policy.ForbiddenCommands = forbidden
+	return current, nil
 }
 
 // migrationGlob repeats internal/interview's own constant rather than
@@ -244,14 +282,20 @@ const pipInstall = "pip install"
 // choice turns a three-state flag into the list shape the renderer reads: the
 // list holding the entry for yes, an empty one for no -- which is an answer of
 // its own -- and whatever stood there for a flag nobody passed.
-func choice(given string, current []string, entry string) []string {
+//
+// A fourth thing is not a state. Anything but yes, no and nothing is refused
+// rather than dropped: dropping it would run the whole install under an answer
+// the caller believes they gave.
+func choice(flag, given string, current []string, entry string) ([]string, error) {
 	switch strings.ToLower(given) {
+	case "":
+		return current, nil
 	case "yes":
-		return []string{entry}
+		return []string{entry}, nil
 	case "no":
-		return []string{}
+		return []string{}, nil
 	}
-	return current
+	return current, fmt.Errorf("%s %q: answer yes or no", flag, given)
 }
 
 // ask runs the interview, and reads --yes as an interview nobody types into:
