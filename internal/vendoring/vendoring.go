@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode/utf8"
 )
 
 // Runner is git, injected so the tests need no network and no repository.
@@ -20,8 +19,11 @@ import (
 // the word "git" itself is not part of argv -- in the directory dir, and
 // returns git's standard output alone. Standard error belongs in the returned
 // error, not in the string: the caller parses that string as a commit id, and
-// a progress line mixed into it would be recorded as the pin. A non-nil error
-// means git did not run or exited non-zero; the string is then ignored.
+// a progress line mixed into it would be recorded as the pin. The output is
+// returned raw -- trimming is the caller's business, and it does trim. A
+// non-nil error means git did not run or exited non-zero; the string is then
+// ignored. dir must already exist; creating it is not the runner's job, and a
+// missing one is an error like any other.
 type Runner func(dir string, argv ...string) (string, error)
 
 // VendorDir is where the runtime lands, relative to the project root.
@@ -45,15 +47,22 @@ func Clone(run Runner, root, url, ref string) (string, error) {
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return "", fmt.Errorf("refusing the ref %q: it must not be empty or start with a dash", ref)
 	}
-	target := filepath.Join(root, filepath.FromSlash(VendorDir))
+	// The destination stays relative, so git resolves it against the same
+	// directory it is run in. An absolute one would be read against root here
+	// and against the process cwd two lines down -- with a relative root those
+	// are two different places, and the second one does not exist.
+	dest := filepath.FromSlash(VendorDir)
+	target := filepath.Join(root, dest)
+	// `--` because a url is argv too: without it a `--upload-pack=...` posing
+	// as a repository is a command git runs.
 	if isCommitID(ref) {
-		if _, err := run(root, "clone", url, target); err != nil {
+		if _, err := run(root, "clone", "--", url, dest); err != nil {
 			return "", fmt.Errorf("cloning %s: %w", url, err)
 		}
 		if _, err := run(target, "checkout", "--detach", ref); err != nil {
 			return "", fmt.Errorf("checking out %s: %w", ref, err)
 		}
-	} else if _, err := run(root, "clone", "--depth", "1", "--branch", ref, url, target); err != nil {
+	} else if _, err := run(root, "clone", "--depth", "1", "--branch", ref, "--", url, dest); err != nil {
 		return "", fmt.Errorf("cloning %s at %s: %w", url, ref, err)
 	}
 	// The full id, not `--short`: an abbreviation is a prefix that grows
@@ -128,8 +137,9 @@ func sorted(created []string) []string {
 // knows \b \t \n \f \r \" \ and the \u escapes and nothing else, while %q
 // reaches for \v and \x for the same characters -- one of those in a path or a
 // branch name is an invalid escape that takes the whole file down, and the
-// value still looks right in the source. Invalid UTF-8 becomes the replacement
-// character, so there is no input this refuses.
+// value still looks right in the source. Ranging over a string already turns
+// invalid UTF-8 into the replacement character, which the default branch writes
+// out like any other rune -- so there is no input this refuses.
 func quote(value string) string {
 	var out strings.Builder
 	out.WriteByte('"')
@@ -149,8 +159,6 @@ func quote(value string) string {
 			out.WriteString(`\f`)
 		case '\r':
 			out.WriteString(`\r`)
-		case utf8.RuneError:
-			out.WriteRune(utf8.RuneError)
 		default:
 			// U+007F is a control character too, and TOML bars it from a basic
 			// string just as it bars the C0 range.

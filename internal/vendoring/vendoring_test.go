@@ -2,6 +2,7 @@ package vendoring
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -197,5 +198,63 @@ func TestTheRenderedFileParsesAsToml(t *testing.T) {
 	}
 	if got.Vendor.Ref != "v0.4.1" || got.Created.Files[0] != "C:\\p\\wiki\\policy.toml" {
 		t.Fatalf("values did not survive quoting: %+v", got)
+	}
+}
+
+// The destination and the directory the next command runs in have to name the
+// same place. A fake that ignores dir cannot see when they drift apart, which
+// is why this one records it.
+func TestTheCloneDestinationAndTheLaterCwdAgree(t *testing.T) {
+	type call struct {
+		dir  string
+		argv []string
+	}
+	var calls []call
+	run := func(dir string, argv ...string) (string, error) {
+		calls = append(calls, call{dir, argv})
+		return "c0ffee\n", nil
+	}
+	// A relative root is where the two resolutions can differ: git reads the
+	// destination against its own cwd, the runner reads the next dir against
+	// the process cwd.
+	if _, err := Clone(run, "proj", "https://example/x.git", "main"); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if calls[0].dir != "proj" {
+		t.Fatalf("the clone did not run in the root: %q", calls[0].dir)
+	}
+	dest := calls[0].argv[len(calls[0].argv)-1]
+	if dest != filepath.FromSlash(VendorDir) {
+		t.Fatalf("the destination is not relative to the root: %q", dest)
+	}
+	want := filepath.Join("proj", filepath.FromSlash(VendorDir))
+	if calls[1].dir != want {
+		t.Fatalf("rev-parse ran in %q, the clone landed in %q", calls[1].dir, want)
+	}
+}
+
+// A url is as much argv as a ref is, and `--` is the only thing that stops git
+// reading one as an option.
+func TestTheUrlCannotBeReadAsAnOption(t *testing.T) {
+	var argvs [][]string
+	run := func(dir string, argv ...string) (string, error) {
+		argvs = append(argvs, argv)
+		return "c0ffee\n", nil
+	}
+	for _, ref := range []string{"main", strings.Repeat("c", 40)} {
+		argvs = nil
+		if _, err := Clone(run, "/p", "--upload-pack=touch /tmp/x", ref); err != nil {
+			t.Fatalf("Clone: %v", err)
+		}
+		clone := argvs[0]
+		sep := -1
+		for i, arg := range clone {
+			if arg == "--" {
+				sep = i
+			}
+		}
+		if sep == -1 || sep != len(clone)-3 {
+			t.Fatalf("no `--` before url and destination: %v", clone)
+		}
 	}
 }
