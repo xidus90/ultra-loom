@@ -13,6 +13,10 @@ type signal struct {
 	// contains, when set, must appear in the file for the signal to count.
 	// That is what separates a Godot project with C# from one without.
 	contains string
+	// besides, when set, must exist beside the match in the same area. The
+	// spec's TypeScript row is a conjunction, not two rows: a tsconfig.json
+	// without a package.json is a configuration file, not a project.
+	besides string
 }
 
 var signals = []signal{
@@ -24,8 +28,42 @@ var signals = []signal{
 	{path: "project.godot", stacks: []string{"csharp"}, contains: "[dotnet]"},
 	{glob: "*.csproj", stacks: []string{"csharp"}},
 	{glob: "*.sln", stacks: []string{"csharp"}},
-	{path: "tsconfig.json", stacks: []string{"typescript"}},
-	{path: "package.json", stacks: []string{"node"}},
+	// Two rows for one conclusion, because either NuGet reference is enough
+	// and `contains` holds a single string. What it buys downstream is
+	// `dotnet test` and a coverlet LCOV that joins the merge.
+	{glob: "*.csproj", stacks: []string{"gdunit4"}, contains: "gdUnit4.api"},
+	{glob: "*.csproj", stacks: []string{"gdunit4"}, contains: "gdUnit4.test.adapter"},
+	{path: "tsconfig.json", besides: "package.json", stacks: []string{"typescript"}},
 	{path: "Cargo.toml", stacks: []string{"rust"}},
 	{path: "go.mod", stacks: []string{"go"}},
 }
+
+// An ambiguity is a finding that must not be decided here.
+//
+// The rule it serves is the spec's: what means the same everywhere is built
+// in, what is project-dependent is asked. A false alarm costs more than a
+// missing rule, so these leave the table as a question for the interview
+// rather than as a stack.
+type ambiguity struct {
+	path string
+	// unless names the file that resolves the question. A package.json is
+	// only in doubt while no tsconfig.json stands beside it.
+	unless string
+	note   string
+}
+
+var ambiguities = []ambiguity{
+	{
+		path: "manage.py",
+		note: "django: migrations may be generated or hand-written -- protect `migrations/[0-9][0-9][0-9][0-9]_*.py`?",
+	},
+	{
+		path:   "package.json",
+		unless: "tsconfig.json",
+		note:   "package.json without tsconfig.json: a JavaScript project, or tooling for another language?",
+	},
+}
+
+// The wiki question, kept beside the others although its shape differs: a
+// directory rather than a file, and answered by a marker inside it.
+const wikiNote = "wiki/ without an OKF marker in index.md: a brain bundle, or a plain docs folder?"

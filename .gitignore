@@ -25,3 +25,7 @@ htmlcov/
 # The init binary is built, not written.
 /ultraloom-init
 /ultraloom-init.exe
+# `go build ./cmd/init` names its output after the directory, so the binary
+# lands here under this name too unless someone passes -o.
+/init
+/init.exe
