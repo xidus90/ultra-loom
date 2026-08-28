@@ -14,9 +14,13 @@ import (
 
 type Project struct {
 	Stacks         []string `toml:"stacks"`
+	Agents         []string `toml:"agents"`
 	DocsLanguage   string   `toml:"docs_language"`
 	CommitLanguage string   `toml:"commit_language"`
 }
+
+// KnownAgents names the agent platforms ultraloom can configure.
+var KnownAgents = []string{"claude", "gemini"}
 
 type Wiki struct {
 	Mode   string `toml:"mode"`
@@ -58,6 +62,7 @@ func Defaults(facts detect.Facts) Answers {
 	return Answers{
 		Project: Project{
 			Stacks:         facts.Stacks,
+			Agents:         []string{"claude", "gemini"},
 			DocsLanguage:   "de",
 			CommitLanguage: "en",
 		},

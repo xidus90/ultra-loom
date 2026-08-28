@@ -236,3 +236,81 @@ func commandOf(t *testing.T, block map[string]any) string {
 	text, _ := command["command"].(string)
 	return text
 }
+
+func TestMultipleOurOwnEntriesUnderSameEventAndMatcherAreAddedAndReplaced(t *testing.T) {
+	wanted := []Entry{
+		{Event: "PostToolUse", Matcher: "Write|Edit", Command: "uv run ruff check .", Timeout: 15},
+		{Event: "PostToolUse", Matcher: "Write|Edit", Command: "uv run dmypy run", Timeout: 30},
+	}
+	got, err := Merge([]byte(`{}`), wanted)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(got.Merged, &root); err != nil {
+		t.Fatal(err)
+	}
+	list := root["hooks"].(map[string]any)["PostToolUse"].([]any)
+	if len(list) != 2 {
+		t.Fatalf("want 2 entries in list, got %d: %s", len(list), got.Merged)
+	}
+
+	// Re-merge with updated command for ruff
+	updated := []Entry{
+		{Event: "PostToolUse", Matcher: "Write|Edit", Command: "uv run ruff check --fix .", Timeout: 15},
+		{Event: "PostToolUse", Matcher: "Write|Edit", Command: "uv run dmypy run", Timeout: 30},
+	}
+	got2, err := Merge(got.Merged, updated)
+	if err != nil {
+		t.Fatalf("Merge updated: %v", err)
+	}
+	var root2 map[string]any
+	if err := json.Unmarshal(got2.Merged, &root2); err != nil {
+		t.Fatal(err)
+	}
+	list2 := root2["hooks"].(map[string]any)["PostToolUse"].([]any)
+	if len(list2) != 2 {
+		t.Fatalf("want 2 entries in list after update, got %d: %s", len(list2), got2.Merged)
+	}
+	if !strings.Contains(string(got2.Merged), "ruff check --fix .") {
+		t.Fatalf("updated command missing: %s", got2.Merged)
+	}
+}
+
+func TestToolKeyExtraction(t *testing.T) {
+	cases := map[string]string{
+		"uv run ruff check .":               "ruff",
+		"uv run dmypy run -- --no-pretty":   "dmypy",
+		"uvx gdlint .":                      "gdlint",
+		"dotnet format --verify-no-changes": "dotnet_format",
+		"dotnet build":                      "dotnet_build",
+		"cargo clippy -- -D warnings":       "cargo_clippy",
+		"cargo fmt --check":                 "cargo_fmt",
+		"npx eslint .":                      "eslint",
+		"npx tsc --noEmit":                  "tsc",
+		`uv run --project "vendor/ultraloom" ultraloom hook post-edit`: "hook_post-edit",
+		`ultraloom policy hook`: "policy_hook",
+		`ultraloom sync`:        "sync",
+		"":                      "",
+	}
+	for cmd, want := range cases {
+		if got := toolKey(cmd); got != want {
+			t.Errorf("toolKey(%q) = %q, want %q", cmd, got, want)
+		}
+	}
+}
+
+func TestFirstCommandEdgeCases(t *testing.T) {
+	if firstCommand(nil) != "" {
+		t.Fatal("want empty string for nil")
+	}
+	if firstCommand(map[string]any{"hooks": "not a list"}) != "" {
+		t.Fatal("want empty string for invalid hooks")
+	}
+	if firstCommand(map[string]any{"hooks": []any{}}) != "" {
+		t.Fatal("want empty string for empty hooks")
+	}
+	if firstCommand(map[string]any{"hooks": []any{"not a map"}}) != "" {
+		t.Fatal("want empty string for non-map hook")
+	}
+}

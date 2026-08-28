@@ -56,6 +56,15 @@ func Missing(current answers.Answers) []Question {
 			},
 		})
 	}
+	if current.Project.Agents == nil {
+		open = append(open, Question{
+			Key: "agents", Prompt: fmt.Sprintf("Agent platforms to configure %v", answers.KnownAgents),
+			Default: "claude, gemini", Flag: "--agents",
+			apply: func(a *answers.Answers, v string) error {
+				return applyAgents(v, &a.Project.Agents)
+			},
+		})
+	}
 	if current.Gates.CoverageThreshold == 0 {
 		open = append(open, Question{
 			Key: "coverage_threshold", Prompt: "Coverage threshold in percent",
@@ -181,6 +190,36 @@ func applyChoice(given string, list *[]string, entry string) error {
 	default:
 		return fmt.Errorf("answer yes or no, not %q", given)
 	}
+	return nil
+}
+
+func applyAgents(given string, target *[]string) error {
+	trimmed := strings.TrimSpace(given)
+	if strings.EqualFold(trimmed, "all") {
+		*target = []string{"claude", "gemini"}
+		return nil
+	}
+	if strings.EqualFold(trimmed, "none") {
+		*target = []string{}
+		return nil
+	}
+	parts := strings.Split(trimmed, ",")
+	var result []string
+	seen := map[string]bool{}
+	for _, p := range parts {
+		name := strings.ToLower(strings.TrimSpace(p))
+		if name == "" {
+			continue
+		}
+		if name != "claude" && name != "gemini" {
+			return fmt.Errorf("agent %q: it must be one of [claude, gemini, all, none]", name)
+		}
+		if !seen[name] {
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	*target = result
 	return nil
 }
 

@@ -2,6 +2,7 @@
 # Everything else under .ultraloom/ is generated from this file.
 [project]
 stacks          = ["python", "uv"]
+agents          = ["claude", "gemini"]
 docs_language   = "de"
 commit_language = "en"
 

@@ -22,6 +22,7 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // OwnerKey marks an entry as written by this tool. Its absence means the
@@ -47,9 +48,6 @@ func Merge(existing []byte, wanted []Entry) (Result, error) {
 			return Result{}, fmt.Errorf("settings.json is not valid JSON: %w", err)
 		}
 	}
-	// A JSON null is valid and decodes to a nil map -- not to an empty one.
-	// Every write below would panic on it, and a file holding `null` is the
-	// same starting point as no file at all.
 	if root == nil {
 		root = map[string]any{}
 	}
@@ -62,13 +60,18 @@ func Merge(existing []byte, wanted []Entry) (Result, error) {
 		hooks = map[string]any{}
 	}
 	var skipped []string
+	claimed := map[string]map[int]bool{}
+
 	for _, entry := range wanted {
 		rawList, listed := hooks[entry.Event]
 		list, ok := rawList.([]any)
 		if listed && !ok {
 			return Result{}, fmt.Errorf("settings.json: [hooks].%s is not a list", entry.Event)
 		}
-		index, foreign := find(list, entry.Matcher)
+		if claimed[entry.Event] == nil {
+			claimed[entry.Event] = map[int]bool{}
+		}
+		index, foreign := find(list, entry.Matcher, entry.Command, claimed[entry.Event])
 		if foreign {
 			skipped = append(skipped, fmt.Sprintf(
 				"%s/%s: a hook of this project is already there", entry.Event, entry.Matcher))
@@ -77,54 +80,104 @@ func Merge(existing []byte, wanted []Entry) (Result, error) {
 		block := blockFor(entry)
 		if index >= 0 {
 			list[index] = block
+			claimed[entry.Event][index] = true
 		} else {
 			list = append(list, block)
+			claimed[entry.Event][len(list)-1] = true
 		}
 		hooks[entry.Event] = list
 	}
-	// Only when there is something to say: a file that had no hooks and got
-	// none must not come back carrying an empty table this tool put there.
 	if present || len(hooks) > 0 {
 		root["hooks"] = hooks
 	}
 	out, err := json.MarshalIndent(root, "", "  ")
-	// Unreachable, and kept for the day that stops being true: root holds only
-	// what json.Unmarshal produced and what blockFor built, and neither can put
-	// a value in there that the encoder refuses. No test can force this branch.
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{Merged: append(out, '\n'), Skipped: skipped}, nil
 }
 
-// find returns the index of our own entry for this matcher, or -1; the
-// second value says a foreign entry holds the slot.
-//
-// The first entry on the slot decides, ours or not. Where a project has both
-// -- its own hook and one of ours under the same matcher -- replacing ours
-// would leave two hooks firing, which is what the package comment is about.
-// Reporting the slot as taken is the safer of the two.
-func find(list []any, matcher string) (int, bool) {
+func find(list []any, matcher, cmd string, claimed map[int]bool) (int, bool) {
+	targetTool := toolKey(cmd)
+	firstOwnedIndex := -1
+
 	for index, raw := range list {
 		item, ok := raw.(map[string]any)
-		if !ok {
-			// Not an entry at all. Left where it is, and read as nothing:
-			// guessing at its matcher would be repairing someone else's file.
+		if !ok || matcherOf(item) != matcher {
 			continue
 		}
-		if matcherOf(item) != matcher {
-			continue
+		owned, _ := item[OwnerKey].(bool)
+		if owned {
+			if !claimed[index] {
+				if toolKey(firstCommand(item)) == targetTool {
+					return index, false
+				}
+				if firstOwnedIndex == -1 {
+					firstOwnedIndex = index
+				}
+			}
+		} else {
+			if firstOwnedIndex == -1 {
+				// Foreign entry appeared before any of our own entries
+				return -1, true
+			}
 		}
-		if owned, _ := item[OwnerKey].(bool); owned {
-			return index, false
-		}
-		return -1, true
 	}
+
+	if firstOwnedIndex >= 0 {
+		return firstOwnedIndex, false
+	}
+
 	return -1, false
 }
 
-// matcherOf reads a missing matcher as an empty one: Stop and SessionStart
-// carry none, and the two spellings are the same slot.
+func firstCommand(item map[string]any) string {
+	hooks, ok := item["hooks"].([]any)
+	if !ok || len(hooks) == 0 {
+		return ""
+	}
+	first, ok := hooks[0].(map[string]any)
+	if !ok {
+		return ""
+	}
+	cmd, _ := first["command"].(string)
+	return cmd
+}
+
+func toolKey(cmd string) string {
+	words := strings.Fields(cmd)
+	for i := 0; i < len(words); i++ {
+		w := words[i]
+		clean := strings.ToLower(strings.Trim(w, `"'`))
+		clean = strings.TrimSuffix(clean, ".exe")
+		if clean == "--project" || clean == "--script" {
+			i++
+			continue
+		}
+		if clean == "uv" || clean == "uvx" || clean == "npx" || clean == "bash" || clean == "sh" ||
+			clean == "run" {
+			continue
+		}
+		if clean == "ultraloom" && i+1 < len(words) {
+			sub := strings.ToLower(strings.Trim(words[i+1], `"'`))
+			if (sub == "hook" || sub == "policy") && i+2 < len(words) {
+				return sub + "_" + strings.ToLower(strings.Trim(words[i+2], `"'`))
+			}
+			return sub
+		}
+		if clean == "dotnet" && i+1 < len(words) {
+			sub := strings.ToLower(strings.Trim(words[i+1], `"'`))
+			return "dotnet_" + sub
+		}
+		if clean == "cargo" && i+1 < len(words) {
+			sub := strings.ToLower(strings.Trim(words[i+1], `"'`))
+			return "cargo_" + sub
+		}
+		return clean
+	}
+	return cmd
+}
+
 func matcherOf(item map[string]any) string {
 	matcher, _ := item["matcher"].(string)
 	return matcher

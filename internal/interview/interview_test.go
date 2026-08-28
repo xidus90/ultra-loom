@@ -46,6 +46,7 @@ func TestNothingIsAskedWhenEverythingIsAnswered(t *testing.T) {
 	complete := answers.Answers{}
 	complete.Project.CommitLanguage = "en"
 	complete.Project.DocsLanguage = "de"
+	complete.Project.Agents = []string{"claude", "gemini"}
 	complete.Gates.CoverageThreshold = 100
 	complete.Gates.Wiki.Mode = "none"
 	if got := Missing(complete); len(got) != 0 {
@@ -59,6 +60,7 @@ func answered() answers.Answers {
 	var complete answers.Answers
 	complete.Project.CommitLanguage = "en"
 	complete.Project.DocsLanguage = "de"
+	complete.Project.Agents = []string{"claude", "gemini"}
 	complete.Gates.CoverageThreshold = 100
 	complete.Gates.Wiki.Mode = "none"
 	return complete
@@ -73,7 +75,7 @@ func keys(open []Question) []string {
 }
 
 func TestTheQuestionsComeInTheOrderOfTheAnswerFile(t *testing.T) {
-	want := "commit_language docs_language coverage_threshold wiki_mode"
+	want := "commit_language docs_language agents coverage_threshold wiki_mode"
 	if got := strings.Join(keys(Missing(answers.Answers{})), " "); got != want {
 		t.Fatalf("questions = %q, want %q", got, want)
 	}
@@ -82,7 +84,7 @@ func TestTheQuestionsComeInTheOrderOfTheAnswerFile(t *testing.T) {
 func TestTheStackQuestionsComeAfterTheOnesEveryProjectGets(t *testing.T) {
 	start := answers.Answers{}
 	start.Project.Stacks = []string{"django", "python", "uv"}
-	want := "commit_language docs_language coverage_threshold wiki_mode protect_migrations forbid_pip_install"
+	want := "commit_language docs_language agents coverage_threshold wiki_mode protect_migrations forbid_pip_install"
 	if got := strings.Join(keys(Missing(start)), " "); got != want {
 		t.Fatalf("questions = %q, want %q", got, want)
 	}
@@ -103,13 +105,16 @@ func TestRunReturnsWhatItWasGivenWhenNothingIsOpen(t *testing.T) {
 }
 
 func TestEveryAnswerGivenIsKept(t *testing.T) {
-	given := "de\nen\n90\nbrain\n"
+	given := "de\nen\nclaude\n90\nbrain\n"
 	got, err := Run(strings.NewReader(given), &bytes.Buffer{}, true, answers.Answers{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got.Project.CommitLanguage != "de" || got.Project.DocsLanguage != "en" {
 		t.Fatalf("languages = %q/%q, want de/en", got.Project.CommitLanguage, got.Project.DocsLanguage)
+	}
+	if len(got.Project.Agents) != 1 || got.Project.Agents[0] != "claude" {
+		t.Fatalf("agents = %v, want [claude]", got.Project.Agents)
 	}
 	if got.Gates.CoverageThreshold != 90 {
 		t.Fatalf("coverage = %d, want 90", got.Gates.CoverageThreshold)
@@ -313,5 +318,40 @@ func TestAProjectWithoutPythonIsNotAskedAboutPip(t *testing.T) {
 	start.Project.Stacks = []string{"go", "rust"}
 	if got := Missing(start); len(got) != 0 {
 		t.Fatalf("missing = %v, want none", keys(got))
+	}
+}
+
+func TestApplyAgents(t *testing.T) {
+	var target []string
+	if err := applyAgents("claude, gemini", &target); err != nil {
+		t.Fatal(err)
+	}
+	if len(target) != 2 || target[0] != "claude" || target[1] != "gemini" {
+		t.Fatalf("target = %v, want [claude gemini]", target)
+	}
+
+	if err := applyAgents("all", &target); err != nil {
+		t.Fatal(err)
+	}
+	if len(target) != 2 || target[0] != "claude" || target[1] != "gemini" {
+		t.Fatalf("target = %v, want [claude gemini]", target)
+	}
+
+	if err := applyAgents("none", &target); err != nil {
+		t.Fatal(err)
+	}
+	if len(target) != 0 {
+		t.Fatalf("target = %v, want empty", target)
+	}
+
+	if err := applyAgents("claude", &target); err != nil {
+		t.Fatal(err)
+	}
+	if len(target) != 1 || target[0] != "claude" {
+		t.Fatalf("target = %v, want [claude]", target)
+	}
+
+	if err := applyAgents("unknown", &target); err == nil {
+		t.Fatal("want error for unknown agent")
 	}
 }
