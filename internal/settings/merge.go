@@ -22,6 +22,7 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -88,13 +89,68 @@ func Merge(existing []byte, wanted []Entry) (Result, error) {
 		hooks[entry.Event] = list
 	}
 	if present || len(hooks) > 0 {
-		root["hooks"] = hooks
+		ordered, err := orderHooks(hooks)
+		if err != nil {
+			return Result{}, err
+		}
+		root["hooks"] = ordered
 	}
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{Merged: append(out, '\n'), Skipped: skipped}, nil
+}
+
+var lifecycleOrder = []string{
+	"SessionStart",
+	"PreToolUse",
+	"PostToolUse",
+	"SubagentStart",
+	"SubagentStop",
+	"Stop",
+}
+
+func orderHooks(hooks map[string]any) (json.RawMessage, error) {
+	if len(hooks) == 0 {
+		return json.RawMessage("{}"), nil
+	}
+	var keys []string
+	seen := map[string]bool{}
+	for _, event := range lifecycleOrder {
+		if _, ok := hooks[event]; ok {
+			keys = append(keys, event)
+			seen[event] = true
+		}
+	}
+	var rest []string
+	for k := range hooks {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	keys = append(keys, rest...)
+
+	var buf strings.Builder
+	buf.WriteString("{\n")
+	for i, key := range keys {
+		valJSON, err := json.MarshalIndent(hooks[key], "    ", "  ")
+		if err != nil {
+			return nil, err
+		}
+		keyJSON, _ := json.Marshal(key)
+		buf.WriteString("    ")
+		buf.WriteString(string(keyJSON))
+		buf.WriteString(": ")
+		buf.WriteString(string(valJSON))
+		if i < len(keys)-1 {
+			buf.WriteString(",")
+		}
+		buf.WriteString("\n")
+	}
+	buf.WriteString("  }")
+	return json.RawMessage(buf.String()), nil
 }
 
 func find(list []any, matcher, cmd string, claimed map[int]bool) (int, bool) {

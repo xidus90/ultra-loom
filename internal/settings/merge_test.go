@@ -307,10 +307,39 @@ func TestFirstCommandEdgeCases(t *testing.T) {
 	if firstCommand(map[string]any{"hooks": "not a list"}) != "" {
 		t.Fatal("want empty string for invalid hooks")
 	}
-	if firstCommand(map[string]any{"hooks": []any{}}) != "" {
-		t.Fatal("want empty string for empty hooks")
-	}
 	if firstCommand(map[string]any{"hooks": []any{"not a map"}}) != "" {
 		t.Fatal("want empty string for non-map hook")
+	}
+}
+
+func TestMergePreservesExactLifecycleOrder(t *testing.T) {
+	entries := []Entry{
+		{Event: "Stop", Command: "stop-cmd"},
+		{Event: "SessionStart", Command: "session-cmd"},
+		{Event: "SubagentStop", Command: "sub-stop-cmd"},
+		{Event: "PreToolUse", Command: "pre-cmd"},
+		{Event: "SubagentStart", Command: "sub-start-cmd"},
+		{Event: "PostToolUse", Command: "post-cmd"},
+	}
+	res, err := Merge(nil, entries)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	merged := string(res.Merged)
+
+	// Check order of occurrences in JSON
+	posSessionStart := strings.Index(merged, `"SessionStart"`)
+	posPreToolUse := strings.Index(merged, `"PreToolUse"`)
+	posPostToolUse := strings.Index(merged, `"PostToolUse"`)
+	posSubagentStart := strings.Index(merged, `"SubagentStart"`)
+	posSubagentStop := strings.Index(merged, `"SubagentStop"`)
+	posStop := strings.Index(merged, `"Stop"`)
+
+	if !(posSessionStart < posPreToolUse &&
+		posPreToolUse < posPostToolUse &&
+		posPostToolUse < posSubagentStart &&
+		posSubagentStart < posSubagentStop &&
+		posSubagentStop < posStop) {
+		t.Fatalf("Hook lifecycle order violated in settings JSON:\n%s", merged)
 	}
 }

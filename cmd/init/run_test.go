@@ -983,6 +983,26 @@ func TestLifecycleHookOrder(t *testing.T) {
 			t.Errorf("[%d] got %q, want %q", i, events[i], ev)
 		}
 	}
+
+	root := t.TempDir()
+	o := answered(root)
+	o.Agents = "claude,gemini"
+	mustRun(t, o)
+
+	settingsContent := read(t, root, ".claude/settings.json")
+	keys := []string{"SessionStart", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop"}
+	var positions []int
+	for _, k := range keys {
+		pos := strings.Index(settingsContent, `"`+k+`"`)
+		if pos >= 0 {
+			positions = append(positions, pos)
+		}
+	}
+	for i := 1; i < len(positions); i++ {
+		if positions[i] <= positions[i-1] {
+			t.Fatalf("settings.json keys not in lifecycle order:\n%s", settingsContent)
+		}
+	}
 }
 
 func TestAgentsWithoutClaudeSkipsClaudeSettings(t *testing.T) {
