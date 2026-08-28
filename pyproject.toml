@@ -59,7 +59,11 @@ addopts = "-m 'not contract'"
 
 [tool.coverage.run]
 branch = true
-source = ["src/ultraloom"]
+# `hooks/` beside the package: the gate wrappers there carry branches that
+# decide green from red, and a decision nobody measures is a decision nobody
+# tests. They are scripts, not modules -- `tests/hooks/test_gofmt_check.py`
+# loads them by path, which is enough for coverage to see them.
+source = ["src/ultraloom", "hooks"]
 
 [tool.coverage.report]
 fail_under = 100

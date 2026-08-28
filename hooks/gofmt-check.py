@@ -42,5 +42,5 @@ def main(paths: list[str]) -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover  # the process edge; `main` is what the tests drive
     sys.exit(main(sys.argv[1:]))
