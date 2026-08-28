@@ -1,0 +1,6 @@
+# The Go tree is compared byte for byte: gofmt normalises to LF, and the
+# render tests match embedded templates against golden files. A CRLF checkout
+# breaks both, so pin these paths to LF on every platform.
+*.go                             text eol=lf
+internal/render/templates/*.tmpl  text eol=lf
+internal/render/testdata/golden/* text eol=lf
