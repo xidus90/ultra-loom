@@ -7,10 +7,10 @@
 //
 // It does not make the write a transaction. A failure on the third file
 // leaves the first two on disk, and this package offers no undo. What it
-// does guarantee is that init only ever adds: a file that already existed is
-// skipped, and Commit refuses -- rather than overwrites -- a file that
-// appeared after Prepare looked. Whatever a failed run leaves behind, none of
-// it is somebody else's content.
+// does guarantee is that init only ever adds: anything already standing under
+// a name -- file, directory, symlink, even one pointing nowhere -- is skipped,
+// and Commit refuses rather than overwrites whatever is there when it arrives.
+// Whatever a failed run leaves behind, none of it is somebody else's content.
 package write
 
 import (
@@ -56,7 +56,12 @@ func Prepare(root string, files map[string]string) (Plan, error) {
 			return Plan{}, err
 		}
 		full := filepath.Join(root, filepath.FromSlash(name))
-		switch _, err := os.Stat(full); {
+		// Lstat, not Stat: a symlink pointing nowhere is still somebody's
+		// property. Stat would follow it, report "not found" and put the name
+		// up for creation, and the exclusive create would then fail on a link
+		// that had been there all along. Anything present under the name is
+		// something this run did not put there.
+		switch _, err := os.Lstat(full); {
 		case err == nil:
 			plan.Skip = append(plan.Skip, name)
 		case os.IsNotExist(err):
@@ -109,10 +114,13 @@ func Commit(root string, plan Plan) error {
 
 // commitFailure tells the two ways a planned file can fail to appear apart.
 // A refusal is the package working as designed and reads as such; anything
-// else is the disk saying no.
+// else is the disk saying no. Callers are owed that distinction by name --
+// one is a project to leave alone, the other is a run to retry.
 func commitFailure(name string, err error) error {
 	if errors.Is(err, fs.ErrExist) {
-		return fmt.Errorf("refusing to overwrite %s: it appeared after the plan was made: %w", name, err)
+		// Worded so it cannot be wrong: the plan listed the name as new, and
+		// the disk disagrees. Who put it there and when is not knowable here.
+		return fmt.Errorf("refusing to overwrite %s: the plan had it as new, but it exists: %w", name, err)
 	}
 	return fmt.Errorf("writing %s: %w", name, err)
 }

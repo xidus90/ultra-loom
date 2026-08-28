@@ -149,7 +149,7 @@ func TestTheRaceIsExplainedNotJustReported(t *testing.T) {
 	if err == nil {
 		t.Fatal("Commit did not report the race")
 	}
-	if !strings.Contains(err.Error(), "appeared after the plan was made") {
+	if !strings.Contains(err.Error(), "the plan had it as new, but it exists") {
 		t.Fatalf("error does not explain itself: %v", err)
 	}
 }
@@ -163,10 +163,35 @@ func TestNamesGivesCallersTheCommitOrder(t *testing.T) {
 }
 
 func TestAFailureThatIsNotARaceReadsAsAFailure(t *testing.T) {
-	// No portable way exists to make an exclusive create fail with anything but
-	// "exists" once its directory is there, so the classifier is asked directly.
+	// The distinction is what the package owes its callers, so it is a named
+	// function and gets asked on its own rather than through a staged disk.
 	err := commitFailure("a.txt", errors.New("disk on fire"))
-	if !strings.Contains(err.Error(), "writing a.txt") || strings.Contains(err.Error(), "appeared after") {
+	if !strings.Contains(err.Error(), "writing a.txt") || strings.Contains(err.Error(), "the plan had it as new") {
 		t.Fatalf("wrong wording: %v", err)
+	}
+}
+
+func TestADanglingSymlinkIsSkippedNotWritten(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "dangling.txt")
+	if err := os.Symlink(filepath.Join(root, "nowhere.txt"), link); err != nil {
+		// Creating a link is a privilege on Windows, not a given.
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	plan, err := Prepare(root, map[string]string{"dangling.txt": "theirs"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if len(plan.Create) != 0 || !slices.Equal(plan.Skip, []string{"dangling.txt"}) {
+		t.Fatalf("plan = %+v, want the link skipped", plan)
+	}
+	if err := Commit(root, plan); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("the link is gone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "nowhere.txt")); !os.IsNotExist(err) {
+		t.Fatalf("Commit wrote through the link: %v", err)
 	}
 }
