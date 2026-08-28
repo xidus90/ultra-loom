@@ -1,0 +1,10 @@
+# generated from .ultraloom/answers.toml -- edit that and re-run init
+{{ range .Paths }}[[policy.paths.rules]]
+match  = {{ quote .Match }}
+reason = {{ quote .Reason }}
+
+{{ end }}{{ range .Commands }}[[policy.commands.rules]]
+regex  = {{ regex .Regex }}
+reason = {{ quote .Reason }}
+
+{{ end }}

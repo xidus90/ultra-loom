@@ -1,0 +1,19 @@
+# generated from .ultraloom/answers.toml -- edit that and re-run init
+[project]
+commit_language = "en"
+
+# Reported, not enforced: the threshold that bites is `fail_under` in the
+# project's own coverage configuration, and init does not write there.
+[verify.coverage]
+threshold = 100
+
+[verify.profiles]
+edit      = ["lint", "types"]
+precommit = ["lint", "types", "test", "coverage"]
+
+# Which checks a changed path is worth. An extension that does not appear here
+# draws the full chain: a gate that skips checks unnoticed is worse than none.
+[relevance]
+"*.md" = []
+"*.py" = ["lint", "types"]
+

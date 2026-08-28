@@ -1,0 +1,25 @@
+# .ultraloom/answers.toml -- written by `ultraloom init`, safe to edit by hand.
+# Everything else under .ultraloom/ is generated from this file.
+[project]
+stacks          = {{ list .Answers.Project.Stacks }}
+docs_language   = {{ quote .Answers.Project.DocsLanguage }}
+commit_language = {{ quote .Answers.Project.CommitLanguage }}
+
+[gates]
+coverage_threshold = {{ .Answers.Gates.CoverageThreshold }}   # reported only; enforced by the tool's own fail_under
+tests_in_stop      = {{ .Answers.Gates.TestsInStop }}
+types_in_stop      = {{ .Answers.Gates.TypesInStop }}
+
+[gates.wiki]
+mode   = {{ quote .Answers.Gates.Wiki.Mode }}
+bundle = {{ quote .Answers.Gates.Wiki.Bundle }}
+
+# An empty list is an answer -- the interview asked and was told no. A missing
+# key is a question it still owes, and the next run asks it again.
+[policy]
+{{ if asked .Answers.Policy.ProtectedPaths }}protected_paths    = {{ list .Answers.Policy.ProtectedPaths }}
+{{ end }}{{ if asked .Answers.Policy.ForbiddenCommands }}forbidden_commands = {{ list .Answers.Policy.ForbiddenCommands }}
+{{ end }}
+[relevance]
+{{ range $pattern := keys .Answers.Relevance }}{{ quote $pattern }} = {{ list (index $.Answers.Relevance $pattern) }}
+{{ end }}
