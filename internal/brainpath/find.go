@@ -32,10 +32,22 @@ const (
 
 // Find answers what a generated project should call to reach brain.
 //
-// env is os.Getenv: an empty string means unset or empty, and the two are not
-// told apart. A `uv tool` shim is itself an entry on PATH, so one lookup
-// answers for both -- and it answers first, because a machine that has brain
-// installed properly should not be overridden by a stale variable.
+// Both look and env are required; a nil one panics rather than being read as
+// "nothing found", because a caller that forgot to wire up a source would
+// otherwise silently skip that source.
+//
+// look is asked for the bare name "brain". Resolving that to brain.exe through
+// PATHEXT on Windows belongs to exec.LookPath, not here -- the name that goes
+// into .mcp.json is the one a client will resolve the same way.
+//
+// env carries the os.Getenv contract, kept in prose because the mandated
+// signature names its type inline where Lookup gets a named one: it is asked
+// for a variable name and returns its value, an empty string meaning unset or
+// empty, the two not told apart. A value of only whitespace counts as unset.
+//
+// A `uv tool` shim is itself an entry on PATH, so one lookup answers for both
+// -- and it answers first, because a machine that has brain installed properly
+// should not be overridden by a stale variable.
 func Find(look Lookup, env func(string) string) (string, bool) {
 	// The bare name, not the resolved path: .mcp.json is versioned, and an
 	// absolute path in it is a claim about one machine.
@@ -60,6 +72,9 @@ func MCPEntry(command string) string {
 	exe, args := command, []string{"mcp"}
 	if strings.HasPrefix(command, dirPrefix) && strings.HasSuffix(command, dirSuffix) {
 		dir := strings.TrimSuffix(strings.TrimPrefix(command, dirPrefix), dirSuffix)
+		// Encoding replaces invalid UTF-8 with U+FFFD, so a directory that is not
+		// valid UTF-8 would be written differently than it was configured, without
+		// an error. Windows os.Getenv converts from UTF-16 and cannot produce one.
 		exe, args = "uv", []string{"run", "--directory", dir, "brain", "mcp"}
 	}
 	type server struct {
