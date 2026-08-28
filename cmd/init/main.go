@@ -22,20 +22,36 @@ import (
 const version = "0.1.0"
 
 // Uncovered on purpose, and the one place that may be: it is the process
-// edge -- os.Exit ends the test binary along with everything else. `run` below
+// edge -- os.Exit ends the test binary along with everything else. `cli` below
 // is the same program without that, and it is covered.
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(cli(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
-// run is main without the process, so the tests can drive it.
-func run(args []string, stdout, stderr io.Writer) int {
+// cli is main without the process, so the tests can drive it.
+func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ultraloom-init", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	showVersion := flags.Bool("version", false, "print the version and exit")
 	detectOnly := flags.Bool("detect-only", false, "print the detected facts as JSON and exit")
 	root := flags.String("root", ".", "the project directory to read")
+	dryRun := flags.Bool("dry-run", false, "decide everything and write nothing")
+	yes := flags.Bool("yes", false, "take the default for every open question")
+	commitLanguage := flags.String("commit-language", "", "language for commit messages")
+	docsLanguage := flags.String("docs-language", "", "language for prose and documentation")
+	wikiMode := flags.String("wiki-mode", "", "brain, neighbour_repo or none")
+	threshold := flags.Int("coverage-threshold", 0, "coverage threshold in percent")
+	protect := flags.String("protect-migrations", "", "yes or no: protect Django migrations")
+	forbidPip := flags.String("forbid-pip-install", "", "yes or no: forbid pip install")
+	vendorURL := flags.String("vendor-url", "", "clone the runtime from this git url")
+	vendorRef := flags.String("vendor-ref", "", "the branch, tag or commit to pin the runtime to")
 	if err := flags.Parse(args); err != nil {
+		// Asking for help is not a failure. flag.ContinueOnError hands the
+		// request back as an error like any other, and an exit code of 1 for
+		// `--help` makes every wrapper script think the tool broke.
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 	if *showVersion {
@@ -43,12 +59,52 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if *detectOnly {
-		// Detection writes nothing, so this path is the whole of --dry-run
-		// for the part of init that has been built.
+		// Detection writes nothing, so this stays a report of its own beside
+		// --dry-run: it answers what init read, not what init would do.
 		return report(*root, git, stdout, stderr)
 	}
-	fmt.Fprintln(stderr, "not implemented yet")
-	return 1
+	code, out := run(Options{
+		Root: *root, DryRun: *dryRun, Yes: *yes,
+		Interactive:       terminal(stdin),
+		CommitLanguage:    *commitLanguage,
+		DocsLanguage:      *docsLanguage,
+		WikiMode:          *wikiMode,
+		CoverageThreshold: *threshold,
+		ProtectMigrations: *protect,
+		ForbidPipInstall:  *forbidPip,
+		VendorURL:         *vendorURL,
+		VendorRef:         *vendorRef,
+		In:                stdin,
+		Out:               stdout,
+		Exec:              git,
+		Look:              exec.LookPath,
+		Getenv:            os.Getenv,
+	})
+	fmt.Fprint(stdout, out)
+	if !strings.HasSuffix(out, "\n") {
+		fmt.Fprintln(stdout)
+	}
+	return code
+}
+
+// terminal answers whether there is someone to ask.
+//
+// A pipe, a closed stdin and a test buffer all say no, and then an unanswered
+// question ends the run instead of waiting for input that never comes -- the
+// same lesson as space's invisible uv failure, which read as "nothing to
+// report" for a whole session. Only a character device is a person.
+func terminal(stdin io.Reader) bool {
+	file, ok := stdin.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	// An unstattable stdin is not a terminal to ask on either, so the two
+	// answers are the same one.
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 // report takes the runner rather than reaching for git itself, so a failing

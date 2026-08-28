@@ -1,0 +1,482 @@
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// osStat asks about a file by the same slash-separated name the report uses.
+func osStat(root, name string) (os.FileInfo, error) {
+	return os.Stat(filepath.Join(root, filepath.FromSlash(name)))
+}
+
+func TestDryRunWritesNothingAndSaysWhatItWould(t *testing.T) {
+	root := t.TempDir()
+	code, report := run(Options{Root: root, DryRun: true, Yes: true,
+		CommitLanguage: "en", DocsLanguage: "de", WikiMode: "none"})
+	if code != 0 {
+		t.Fatalf("code = %d, report = %s", code, report)
+	}
+	if !strings.Contains(report, ".ultraloom/policy.toml") {
+		t.Fatalf("report does not name what it would write:\n%s", report)
+	}
+	if _, err := osStat(root, ".ultraloom/policy.toml"); err == nil {
+		t.Fatal("dry run wrote a file")
+	}
+}
+
+func TestAMissingAnswerWithoutATtyExitsTwo(t *testing.T) {
+	code, report := run(Options{Root: t.TempDir(), Interactive: false})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2", code)
+	}
+	if !strings.Contains(report, "--commit-language") {
+		t.Fatalf("report does not name the flag:\n%s", report)
+	}
+}
+
+func TestASecondRunSkipsWhatIsAlreadyThere(t *testing.T) {
+	root := t.TempDir()
+	opts := Options{Root: root, Yes: true, CommitLanguage: "en", DocsLanguage: "de", WikiMode: "none"}
+	if code, report := run(opts); code != 0 {
+		t.Fatalf("first run: %d %s", code, report)
+	}
+	code, report := run(opts)
+	if code != 0 {
+		t.Fatalf("second run: %d %s", code, report)
+	}
+	if !strings.Contains(report, "skipped") {
+		t.Fatalf("second run does not report skipping:\n%s", report)
+	}
+}
+
+// The stubbed edges. Nothing below reads the real PATH, the real environment,
+// the network, or any repository other than its own temporary directory.
+
+func noGit(dir string, argv ...string) (string, error) {
+	return "", fmt.Errorf("git is not here")
+}
+
+func quietGit(dir string, argv ...string) (string, error) { return "", nil }
+
+func notOnPath(name string) (string, error) { return "", fmt.Errorf("not found") }
+
+func onPathAt(name string) (string, error) { return "C:/tools/brain.exe", nil }
+
+func noEnv(string) string { return "" }
+
+func brainDir(name string) string {
+	if name == "ULTRA_BRAIN_DIR" {
+		return "C:/Program Files/brain"
+	}
+	return ""
+}
+
+// answered is a run with every question already settled, so a test that is
+// about something else does not have to arrange an interview.
+func answered(root string) Options {
+	return Options{Root: root, Yes: true, CommitLanguage: "en",
+		DocsLanguage: "de", WikiMode: "none"}
+}
+
+func mustRun(t *testing.T, opts Options) string {
+	t.Helper()
+	code, report := run(opts)
+	if code != 0 {
+		t.Fatalf("code = %d, report = %s", code, report)
+	}
+	return report
+}
+
+func makeFile(t *testing.T, root, name, body string) {
+	t.Helper()
+	full := filepath.Join(root, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func read(t *testing.T, root, name string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// The three rendered files plus the two this package adds are what a run
+// installs, and installed.toml must name all of them, itself included.
+func TestAFullRunWritesTheWholeSetAndSaysSo(t *testing.T) {
+	root := t.TempDir()
+	report := mustRun(t, answered(root))
+	for _, name := range []string{".ultraloom/answers.toml", ".ultraloom/policy.toml",
+		".ultraloom/config.toml", ".ultraloom/installed.toml", ".claude/settings.json"} {
+		if _, err := osStat(root, name); err != nil {
+			t.Fatalf("%s was not written: %v (report: %s)", name, err, report)
+		}
+		if !strings.Contains(report, name) {
+			t.Fatalf("the report does not name %s:\n%s", name, report)
+		}
+	}
+	installed := read(t, root, ".ultraloom/installed.toml")
+	if !strings.Contains(installed, "\".ultraloom/installed.toml\"") {
+		t.Fatalf("installed.toml does not name itself:\n%s", installed)
+	}
+	if !strings.Contains(installed, "commit = \"\"") {
+		t.Fatalf("an unvendored run must pin no commit:\n%s", installed)
+	}
+}
+
+// The hook commands land in a file the project commits, so none of them may
+// carry a path that exists only on this machine.
+func TestTheHookCommandsCarryNoMachinePath(t *testing.T) {
+	root := t.TempDir()
+	mustRun(t, answered(root))
+	body := read(t, root, ".claude/settings.json")
+	if !strings.Contains(body, ".ultraloom/vendor/ultraloom") {
+		t.Fatalf("the hooks do not point at the vendored runtime:\n%s", body)
+	}
+	if strings.Contains(body, root) || strings.Contains(body, filepath.ToSlash(root)) {
+		t.Fatalf("a machine path reached settings.json:\n%s", body)
+	}
+}
+
+// Without a repository the hooks that read history are left out rather than
+// installed broken -- and the report says so.
+func TestWithoutGitTheHistoryHooksStayOut(t *testing.T) {
+	root := t.TempDir()
+	report := mustRun(t, answered(root))
+	body := read(t, root, ".claude/settings.json")
+	if strings.Contains(body, "hook stop") || strings.Contains(body, "subagent-start") {
+		t.Fatalf("a history hook was installed without git:\n%s", body)
+	}
+	if !strings.Contains(report, "no git repository here") {
+		t.Fatalf("the report does not say the hooks were left out:\n%s", report)
+	}
+}
+
+func TestWithGitTheHistoryHooksAreInstalled(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o := answered(root)
+	o.Exec = quietGit
+	mustRun(t, o)
+	body := read(t, root, ".claude/settings.json")
+	for _, want := range []string{"hook stop", "subagent-start", "subagent-stop"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s is missing from settings.json:\n%s", want, body)
+		}
+	}
+}
+
+// A failing git is this program's own error: nothing has been decided yet, and
+// nothing is written.
+func TestAFailingGitEndsTheRunBeforeAnythingIsWritten(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o := answered(root)
+	o.Exec = noGit
+	code, report := run(o)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+	if _, err := osStat(root, ".ultraloom/answers.toml"); err == nil {
+		t.Fatal("a failed run wrote something")
+	}
+}
+
+func TestAnUnreadableAnswerFileIsOurOwnError(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".ultraloom/answers.toml", "[gates.wiki]\nmode = \"nonsense\"\n")
+	code, report := run(answered(root))
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(report, "nonsense") {
+		t.Fatalf("the report does not name the bad value:\n%s", report)
+	}
+}
+
+// A second run reads the answers of the first, so nothing is asked again --
+// even where no flag carries the answer any more.
+func TestTheAnswerFileIsWhatASecondRunReads(t *testing.T) {
+	root := t.TempDir()
+	mustRun(t, answered(root))
+	if err := os.Remove(filepath.Join(root, ".ultraloom", "policy.toml")); err != nil {
+		t.Fatal(err)
+	}
+	report := mustRun(t, Options{Root: root, Interactive: false})
+	if !strings.Contains(report, "policy.toml") {
+		t.Fatalf("the missing file was not written again:\n%s", report)
+	}
+}
+
+func TestFlagsAnswerEveryQuestionAStackRaises(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "pyproject.toml", "[project]\n")
+	makeFile(t, root, "uv.lock", "")
+	makeFile(t, root, "manage.py", "django")
+	makeFile(t, root, "requirements.txt", "Django==5.0\n")
+	report := mustRun(t, Options{Root: root, Interactive: false,
+		CommitLanguage: "en", DocsLanguage: "de", WikiMode: "none",
+		CoverageThreshold: 90, ProtectMigrations: "yes", ForbidPipInstall: "no"})
+	answersFile := read(t, root, ".ultraloom/answers.toml")
+	if !strings.Contains(answersFile, "coverage_threshold = 90") {
+		t.Fatalf("the threshold flag did not reach the file:\n%s", answersFile)
+	}
+	if !strings.Contains(answersFile, "protected_paths") {
+		t.Fatalf("yes did not become a rule:\n%s", answersFile)
+	}
+	if !strings.Contains(answersFile, "forbidden_commands = []") {
+		t.Fatalf("no did not become an empty list:\n%s", answersFile)
+	}
+	if !strings.Contains(report, "nothing enforces the coverage threshold of 90%") {
+		t.Fatalf("the unenforced threshold was not reported:\n%s", report)
+	}
+}
+
+// A project whose own configuration enforces the threshold hears nothing: the
+// note is about a promise nobody keeps, not about the number.
+func TestAnEnforcedThresholdIsNotReported(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "pyproject.toml", "[tool.coverage.report]\nfail_under = 100\n")
+	report := mustRun(t, answered(root))
+	if strings.Contains(report, "nothing enforces") {
+		t.Fatalf("an enforced threshold was reported as missing:\n%s", report)
+	}
+}
+
+func TestBrainOnPathIsWrittenIntoTheProject(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.WikiMode, o.Look, o.Getenv = "brain", onPathAt, noEnv
+	mustRun(t, o)
+	mcp := read(t, root, ".mcp.json")
+	if !strings.Contains(mcp, "\"command\": \"brain\"") {
+		t.Fatalf(".mcp.json does not call brain by its bare name:\n%s", mcp)
+	}
+	if strings.Contains(mcp, "C:/tools") {
+		t.Fatalf("the resolved path reached the committed file:\n%s", mcp)
+	}
+	if !strings.Contains(read(t, root, ".claude/settings.json"), "brain lint") {
+		t.Fatal("the wiki hook was not installed although brain was found")
+	}
+}
+
+// The whole point of the middle branch: a directory out of ULTRA_BRAIN_DIR is
+// a claim about one machine, and both files it would land in are committed.
+func TestBrainFoundOnlyByTheVariableIsReportedAndNotWritten(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.WikiMode, o.Look, o.Getenv = "brain", notOnPath, brainDir
+	report := mustRun(t, o)
+	if _, err := osStat(root, ".mcp.json"); err == nil {
+		t.Fatal("a machine path was written into a versioned file")
+	}
+	if !strings.Contains(report, "ULTRA_BRAIN_DIR") ||
+		!strings.Contains(report, "C:/Program Files/brain") {
+		t.Fatalf("the entry was not offered for the user to add:\n%s", report)
+	}
+	if strings.Contains(read(t, root, ".claude/settings.json"), "brain lint") {
+		t.Fatal("the wiki hook carried the machine path into settings.json")
+	}
+}
+
+func TestBrainNotFoundInstallsNoGateAtAll(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.WikiMode, o.Look, o.Getenv = "brain", notOnPath, noEnv
+	report := mustRun(t, o)
+	if _, err := osStat(root, ".mcp.json"); err == nil {
+		t.Fatal("an entry was written for a brain nobody can call")
+	}
+	if strings.Contains(read(t, root, ".claude/settings.json"), "brain lint") {
+		t.Fatal("a gate was installed that cannot run")
+	}
+	if !strings.Contains(report, "worse than none") {
+		t.Fatalf("the report does not say why nothing was installed:\n%s", report)
+	}
+}
+
+// The third merge case, and the expensive one: a hook of the project keeps its
+// slot, and no second one is put beside it.
+func TestAForeignHookKeepsItsSlotAndIsReported(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".claude/settings.json",
+		"{\"hooks\":{\"PostToolUse\":[{\"matcher\":\"Write|Edit|NotebookEdit\","+
+			"\"hooks\":[{\"type\":\"command\",\"command\":\"theirs\"}]}]}}")
+	report := mustRun(t, answered(root))
+	body := read(t, root, ".claude/settings.json")
+	if !strings.Contains(body, "theirs") {
+		t.Fatalf("the project's own hook was not left alone:\n%s", body)
+	}
+	if strings.Contains(body, "hook post-edit") {
+		t.Fatalf("a second hook was put beside the project's own:\n%s", body)
+	}
+	if !strings.Contains(report, "left to the project") {
+		t.Fatalf("the skip was not reported:\n%s", report)
+	}
+}
+
+// Broken JSON is the project saying no. Not repaired, not overwritten.
+func TestABrokenSettingsFileEndsTheRunWithTwo(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".claude/settings.json", "{not json")
+	code, report := run(answered(root))
+	if code != 2 {
+		t.Fatalf("code = %d, want 2 (%s)", code, report)
+	}
+	if read(t, root, ".claude/settings.json") != "{not json" {
+		t.Fatal("the broken file was rewritten")
+	}
+	if _, err := osStat(root, ".ultraloom/answers.toml"); err == nil {
+		t.Fatal("a refused run wrote something")
+	}
+}
+
+// A settings file that already holds exactly these entries comes back
+// unchanged, and then it is not something this run created.
+func TestSettingsAlreadyInPlaceAreNotClaimedAsCreated(t *testing.T) {
+	root := t.TempDir()
+	mustRun(t, answered(root))
+	before := read(t, root, ".claude/settings.json")
+	report := mustRun(t, answered(root))
+	if read(t, root, ".claude/settings.json") != before {
+		t.Fatal("a second run rewrote settings.json")
+	}
+	if strings.Contains(report, ".claude/settings.json") {
+		t.Fatalf("an unchanged file was named as created:\n%s", report)
+	}
+}
+
+func TestAFileWhereTheConfigDirectoryBelongsEndsTheRunWithOne(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".ultraloom", "not a directory")
+	code, report := run(answered(root))
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+}
+
+func TestSettingsThatCannotBeWrittenEndTheRunWithOne(t *testing.T) {
+	root := t.TempDir()
+	// A directory under the file's name: the merge reads nothing, decides to
+	// write, and the disk says no at the last moment.
+	if err := os.MkdirAll(filepath.Join(root, ".claude", "settings.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, report := run(answered(root))
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+	if !strings.Contains(report, settingsPath) {
+		t.Fatalf("the report does not name the file that could not be written:\n%s", report)
+	}
+}
+
+func TestSettingsWhoseDirectoryCannotBeMadeEndTheRunWithOne(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".claude", "a file where a directory belongs")
+	code, report := run(answered(root))
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+}
+
+// The dry run of a vendored install clones nothing: the clone is a write like
+// any other, and --dry-run is the run without the writing.
+func TestADryRunClonesNothing(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.DryRun, o.VendorURL, o.VendorRef = true, "https://example.invalid/x.git", "v1"
+	o.Exec = func(dir string, argv ...string) (string, error) {
+		t.Fatalf("a dry run started %v", argv)
+		return "", nil
+	}
+	mustRun(t, o)
+}
+
+func TestVendoringPinsTheCommitItGot(t *testing.T) {
+	root := t.TempDir()
+	var calls [][]string
+	o := answered(root)
+	o.VendorURL, o.VendorRef = "https://example.invalid/x.git", "v1"
+	o.Exec = func(dir string, argv ...string) (string, error) {
+		calls = append(calls, argv)
+		return "cafebabecafebabecafebabecafebabecafebabe\n", nil
+	}
+	mustRun(t, o)
+	if len(calls) == 0 || calls[0][0] != "git" || calls[0][1] != "clone" {
+		t.Fatalf("git was not called as git clone: %v", calls)
+	}
+	installed := read(t, root, ".ultraloom/installed.toml")
+	if !strings.Contains(installed, "cafebabecafebabecafebabecafebabecafebabe") {
+		t.Fatalf("the commit was not pinned:\n%s", installed)
+	}
+}
+
+func TestAFailingCloneEndsTheRunWithOne(t *testing.T) {
+	root := t.TempDir()
+	o := answered(root)
+	o.VendorURL, o.VendorRef = "https://example.invalid/x.git", "v1"
+	o.Exec = noGit
+	code, report := run(o)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+	if _, err := osStat(root, ".ultraloom/answers.toml"); err == nil {
+		t.Fatal("a failed clone left a configured project behind")
+	}
+}
+
+// The interview is the other road to the same file: what a person types stands
+// in answers.toml exactly where a flag would have put it.
+func TestATypedAnswerLandsInTheFile(t *testing.T) {
+	root := t.TempDir()
+	out := &bytes.Buffer{}
+	report := mustRun(t, Options{Root: root, Interactive: true,
+		In: strings.NewReader("fr\nde\n100\nnone\n"), Out: out})
+	if !strings.Contains(read(t, root, ".ultraloom/answers.toml"), "commit_language = \"fr\"") {
+		t.Fatalf("the typed answer did not land in the file (report: %s)", report)
+	}
+	if !strings.Contains(out.String(), "Language for commit messages") {
+		t.Fatalf("nothing was asked:\n%s", out)
+	}
+}
+
+// An answer the interview refuses, with nothing behind it, ends the run -- and
+// that is this program's own error, not the project saying no.
+func TestAnUnusableTypedAnswerEndsTheRunWithOne(t *testing.T) {
+	root := t.TempDir()
+	code, report := run(Options{Root: root, Interactive: true,
+		In: strings.NewReader("en\nde\nnot a number\n")})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (%s)", code, report)
+	}
+}
+
+// A brain bundle inside the project answers the wiki question by itself, so
+// the interview never asks it -- and the mode reaches the answer file.
+func TestAWikiInTheProjectAnswersTheWikiQuestion(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "wiki/index.md", "---\nokf_version: 1\n---\n")
+	o := Options{Root: root, Yes: true, CommitLanguage: "en", DocsLanguage: "de",
+		Look: notOnPath, Getenv: noEnv}
+	mustRun(t, o)
+	answersFile := read(t, root, ".ultraloom/answers.toml")
+	if !strings.Contains(answersFile, "mode   = \"brain\"") {
+		t.Fatalf("the detected wiki did not reach the answers:\n%s", answersFile)
+	}
+}

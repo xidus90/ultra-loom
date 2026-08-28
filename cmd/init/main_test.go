@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,7 +24,7 @@ func TestVersionIsNotEmpty(t *testing.T) {
 
 func TestVersionIsPrintedAndNothingElseHappens(t *testing.T) {
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := run([]string{"--version"}, stdout, stderr); code != 0 {
+	if code := cli([]string{"--version"}, nothing(), stdout, stderr); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 	if strings.TrimSpace(stdout.String()) != version {
@@ -33,11 +34,11 @@ func TestVersionIsPrintedAndNothingElseHappens(t *testing.T) {
 
 func TestDetectOnlyPrintsTheFactsAsJSON(t *testing.T) {
 	root := t.TempDir()
-	write(t, filepath.Join(root, "pyproject.toml"), "[project]\n")
-	write(t, filepath.Join(root, "uv.lock"), "")
+	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\n")
+	writeFile(t, filepath.Join(root, "uv.lock"), "")
 
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := run([]string{"--detect-only", "--root", root}, stdout, stderr); code != 0 {
+	if code := cli([]string{"--detect-only", "--root", root}, nothing(), stdout, stderr); code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	var facts detect.Facts
@@ -58,7 +59,7 @@ func TestDetectOnlyFindsTheNeighbourWiki(t *testing.T) {
 	mkdir(t, filepath.Join(parent, "iam_backend_wiki", ".git"))
 
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := run([]string{"--detect-only", "--root", root}, stdout, stderr); code != 0 {
+	if code := cli([]string{"--detect-only", "--root", root}, nothing(), stdout, stderr); code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	var facts detect.Facts
@@ -78,7 +79,7 @@ func TestDetectOnlyAsksGitAboutItsHooksPath(t *testing.T) {
 	run3(t, root, "git", "config", "core.hooksPath", ".githooks")
 
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := run([]string{"--detect-only", "--root", root}, stdout, stderr); code != 0 {
+	if code := cli([]string{"--detect-only", "--root", root}, nothing(), stdout, stderr); code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	var facts detect.Facts
@@ -128,20 +129,41 @@ func TestAFailingGitStopsTheReport(t *testing.T) {
 
 func TestAnUnknownFlagFails(t *testing.T) {
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := run([]string{"--nonsense"}, stdout, stderr); code != 1 {
+	if code := cli([]string{"--nonsense"}, nothing(), stdout, stderr); code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 }
 
-func TestWithoutAFlagNothingIsInstalledYet(t *testing.T) {
+// A buffer is not a terminal, so this is the agent case: unanswered questions
+// and nothing to ask on. It must refuse rather than install silently.
+func TestWithoutAnswersAndWithoutATerminalNothingIsInstalled(t *testing.T) {
+	root := t.TempDir()
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := run(nil, stdout, stderr); code != 1 {
-		t.Fatalf("exit = %d, want 1", code)
+	if code := cli([]string{"--root", root}, nothing(), stdout, stderr); code != 2 {
+		t.Fatalf("exit = %d, want 2 (%s)", code, stdout)
 	}
-	if !strings.Contains(stderr.String(), "not implemented") {
-		t.Fatalf("stderr = %q, want the not-implemented note", stderr)
+	if !strings.Contains(stdout.String(), "--commit-language") {
+		t.Fatalf("stdout = %q, want the missing flags named", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".ultraloom")); err == nil {
+		t.Fatal("a refused run wrote something")
 	}
 }
+
+// Asking for help is not a failure. flag.ContinueOnError makes it an error,
+// and a wrapper script reads a non-zero exit as the tool being broken.
+func TestHelpExitsZero(t *testing.T) {
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := cli([]string{"--help"}, nothing(), stdout, stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "-dry-run") {
+		t.Fatalf("stderr = %q, want the flag list", stderr)
+	}
+}
+
+// nothing is a stdin that is not a terminal and holds no input.
+func nothing() io.Reader { return &bytes.Buffer{} }
 
 func requireGit(t *testing.T) {
 	t.Helper()
@@ -159,7 +181,7 @@ func run3(t *testing.T, dir string, argv ...string) {
 	}
 }
 
-func write(t *testing.T, name, body string) {
+func writeFile(t *testing.T, name, body string) {
 	t.Helper()
 	if err := os.WriteFile(name, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -170,5 +192,25 @@ func mkdir(t *testing.T, name string) {
 	t.Helper()
 	if err := os.MkdirAll(name, 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A file is not a terminal, and neither is a file that is already closed --
+// the two ways stdin can fail to be a person to ask.
+func TestOnlyACharacterDeviceCountsAsATerminal(t *testing.T) {
+	name := filepath.Join(t.TempDir(), "stdin")
+	writeFile(t, name, "")
+	file, err := os.Open(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal(file) {
+		t.Fatal("a regular file was taken for a terminal")
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if terminal(file) {
+		t.Fatal("a closed file was taken for a terminal")
 	}
 }
