@@ -28,7 +28,7 @@ import (
 
 // OwnerKey marks an entry as written by this tool. Its absence means the
 // entry belongs to the project, and then it is never touched.
-const OwnerKey = "ultraloomOwned"
+const OwnerKey = "ultraLoomOwned"
 
 type Entry struct {
 	Event   string

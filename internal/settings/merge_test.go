@@ -17,7 +17,7 @@ func TestAMissingEventIsAdded(t *testing.T) {
 }
 
 func TestOurOwnEntryIsReplacedNotDuplicated(t *testing.T) {
-	before := `{"hooks":{"PreToolUse":[{"matcher":"Write","ultraloomOwned":true,
+	before := `{"hooks":{"PreToolUse":[{"matcher":"Write","ultraLoomOwned":true,
 	  "hooks":[{"type":"command","command":"old"}]}]}}`
 	got, err := Merge([]byte(before), []Entry{{Event: "PreToolUse", Matcher: "Write", Command: "new"}})
 	if err != nil {
@@ -90,7 +90,7 @@ func TestAMatcherlessEntryDoesNotClaimEveryEntry(t *testing.T) {
 // TestOurOwnMatcherlessEntryIsStillReplaced is the same lookup from the other
 // side: a missing matcher and an empty one are the same slot.
 func TestOurOwnMatcherlessEntryIsStillReplaced(t *testing.T) {
-	before := `{"hooks":{"Stop":[{"ultraloomOwned":true,"hooks":[{"type":"command","command":"old"}]}]}}`
+	before := `{"hooks":{"Stop":[{"ultraLoomOwned":true,"hooks":[{"type":"command","command":"old"}]}]}}`
 	got, err := Merge([]byte(before), []Entry{{Event: "Stop", Command: "new"}})
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -195,7 +195,7 @@ func TestAnEntryThatIsNotAnObjectIsIgnoredForTheLookup(t *testing.T) {
 // slot is reported as taken.
 func TestOursFirstOnASharedSlotKeepsTheSlot(t *testing.T) {
 	existing := []byte(`{"hooks":{"PreToolUse":[
-		{"matcher":"Bash","ultraloomOwned":true,"hooks":[{"type":"command","command":"old"}]},
+		{"matcher":"Bash","ultraLoomOwned":true,"hooks":[{"type":"command","command":"old"}]},
 		{"matcher":"Bash","hooks":[{"type":"command","command":"theirs"}]}
 	]}}`)
 	result, err := Merge(existing, []Entry{{Event: "PreToolUse", Matcher: "Bash", Command: "new"}})
@@ -382,4 +382,3 @@ func TestFormatBlockAndCommandFallbacks(t *testing.T) {
 		t.Fatalf("fallback failed:\n%s", res.Merged)
 	}
 }
-
