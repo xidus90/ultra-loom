@@ -1036,23 +1036,15 @@ func TestDocumentTemplatesCreatedAndProtected(t *testing.T) {
 		t.Fatalf("AGENTS.md was modified:\n%s", got)
 	}
 
-	// 2. CLAUDE.md, GEMINI.md, and skills were created
-	if !strings.Contains(report, "CLAUDE.md") || !strings.Contains(report, "GEMINI.md") {
-		t.Fatalf("report does not list CLAUDE.md or GEMINI.md under created:\n%s", report)
+	// 2. Skills and git hooks were created, CLAUDE.md / GEMINI.md not created by default
+	if strings.Contains(report, "CLAUDE.md") || strings.Contains(report, "GEMINI.md") {
+		t.Fatalf("report should not scaffold CLAUDE.md or GEMINI.md by default:\n%s", report)
 	}
 	if !strings.Contains(report, ".claude/skills/verify-until-green/SKILL.md") {
 		t.Fatalf("report does not list claude skill under created:\n%s", report)
 	}
 	if !strings.Contains(report, ".agents/skills/verify-until-green/SKILL.md") {
 		t.Fatalf("report does not list agents skill under created:\n%s", report)
-	}
-	claudeContent := read(t, root, "CLAUDE.md")
-	if !strings.Contains(claudeContent, "@AGENTS.md") {
-		t.Fatalf("CLAUDE.md does not reference @AGENTS.md:\n%s", claudeContent)
-	}
-	geminiContent := read(t, root, "GEMINI.md")
-	if !strings.Contains(geminiContent, "Antigravity") {
-		t.Fatalf("GEMINI.md missing Antigravity text:\n%s", geminiContent)
 	}
 	skillContent := read(t, root, ".claude/skills/verify-until-green/SKILL.md")
 	if !strings.Contains(skillContent, "verify-until-green") {

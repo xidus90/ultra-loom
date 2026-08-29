@@ -1,0 +1,10 @@
+# generated from .ultraloom/answers.toml -- edit that and re-run init
+[[policy.commands.rules]]
+regex  = '(^|[\n;&|(`])\s*git\s+push(?![\w-])'
+reason = "Whether commits reach the remote is a human's decision."
+
+[[policy.commands.rules]]
+regex  = '(^|[\n;&|(`])\s*pip\s+install(?![\w-])'
+reason = "forbidden by this project's answers.toml"
+
+

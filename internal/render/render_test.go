@@ -206,8 +206,6 @@ func TestRenderNamesEveryFileItWrites(t *testing.T) {
 		".ultraloom/config.toml",
 		".ultraloom/policy.toml",
 		"AGENTS.md",
-		"CLAUDE.md",
-		"GEMINI.md",
 	}
 	var got []string
 	for name := range files {
@@ -422,12 +420,6 @@ func TestRenderDocumentTemplatesAccordingToAgents(t *testing.T) {
 	if _, ok := files["AGENTS.md"]; !ok {
 		t.Fatal("want AGENTS.md rendered")
 	}
-	if _, ok := files["CLAUDE.md"]; !ok {
-		t.Fatal("want CLAUDE.md rendered")
-	}
-	if _, ok := files["GEMINI.md"]; !ok {
-		t.Fatal("want GEMINI.md rendered")
-	}
 	if _, ok := files[".claude/skills/verify-until-green/SKILL.md"]; !ok {
 		t.Fatal("want .claude verify-until-green skill")
 	}
@@ -452,14 +444,8 @@ func TestRenderDocumentTemplatesAccordingToAgents(t *testing.T) {
 	if _, ok := filesGemini["AGENTS.md"]; !ok {
 		t.Fatal("want AGENTS.md rendered")
 	}
-	if _, ok := filesGemini["CLAUDE.md"]; ok {
-		t.Fatal("CLAUDE.md should not be rendered when claude is not in agents")
-	}
 	if _, ok := filesGemini[".claude/skills/verify-until-green/SKILL.md"]; ok {
 		t.Fatal(".claude skills should not be rendered when claude is not in agents")
-	}
-	if _, ok := filesGemini["GEMINI.md"]; !ok {
-		t.Fatal("want GEMINI.md rendered")
 	}
 	if _, ok := filesGemini[".agents/skills/verify-until-green/SKILL.md"]; !ok {
 		t.Fatal("want .agents verify-until-green skill")
@@ -472,14 +458,8 @@ func TestRenderDocumentTemplatesAccordingToAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if _, ok := filesClaude["GEMINI.md"]; ok {
-		t.Fatal("GEMINI.md should not be rendered when gemini is not in agents")
-	}
 	if _, ok := filesClaude[".agents/skills/verify-until-green/SKILL.md"]; ok {
 		t.Fatal(".agents skills should not be rendered when gemini is not in agents")
-	}
-	if _, ok := filesClaude["CLAUDE.md"]; !ok {
-		t.Fatal("want CLAUDE.md rendered")
 	}
 	if _, ok := filesClaude[".claude/skills/verify-until-green/SKILL.md"]; !ok {
 		t.Fatal("want .claude verify-until-green skill")

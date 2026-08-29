@@ -33,3 +33,14 @@ htmlcov/
 /ulinit.exe
 /ulguard
 /ulguard.exe
+
+# Temporary files and test profiles
+*.out
+*.cov
+*cov*
+$*
+cover*
+
+# Local brain & wiki hook cache
+.ultra-brain/
+

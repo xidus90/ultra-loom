@@ -1,0 +1,26 @@
+# .ultraloom/answers.toml -- written by `ultraloom init`, safe to edit by hand.
+# Everything else under .ultraloom/ is generated from this file.
+[project]
+stacks          = ["go", "python", "uv"]
+agents          = ["claude", "gemini"]
+docs_language   = "de"
+commit_language = "en"
+
+[gates]
+coverage_threshold = 100   # reported only; enforced by the tool's own fail_under
+tests_in_stop      = true
+types_in_stop      = true
+
+[gates.wiki]
+mode   = "neighbour_repo"
+bundle = "iam_wiki/"
+
+# An empty list is an answer -- the interview asked and was told no. A missing
+# key is a question it still owes, and the next run asks it again.
+[policy]
+forbidden_commands = ["pip install"]
+
+[relevance]
+"*.md" = []
+"wiki/**" = ["brain reindex"]
+

@@ -91,7 +91,6 @@ func Render(a answers.Answers, coverageLane bool) (map[string]string, error) {
 
 	if has(a.Project.Agents, "claude") {
 		targetsList = append(targetsList,
-			fileTarget{"CLAUDE.md.tmpl", "CLAUDE.md"},
 			fileTarget{"skills/verify-until-green.SKILL.md.tmpl", ".claude/skills/verify-until-green/SKILL.md"},
 			fileTarget{"skills/session-handover.SKILL.md.tmpl", ".claude/skills/session-handover/SKILL.md"},
 		)
@@ -99,7 +98,6 @@ func Render(a answers.Answers, coverageLane bool) (map[string]string, error) {
 
 	if has(a.Project.Agents, "gemini") {
 		targetsList = append(targetsList,
-			fileTarget{"GEMINI.md.tmpl", "GEMINI.md"},
 			fileTarget{"skills/verify-until-green.SKILL.md.tmpl", ".agents/skills/verify-until-green/SKILL.md"},
 			fileTarget{"skills/session-handover.SKILL.md.tmpl", ".agents/skills/session-handover/SKILL.md"},
 		)
