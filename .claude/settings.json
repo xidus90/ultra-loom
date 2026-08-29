@@ -1,29 +1,5 @@
 {
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit|NotebookEdit|Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom policy hook --root \"${CLAUDE_PROJECT_DIR}\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook post-edit --root \"${CLAUDE_PROJECT_DIR}\"",
-            "timeout": 60
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
@@ -32,7 +8,60 @@
             "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook session-start --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 20
           }
-        ]
+        ],
+        "ultraLoomOwned": true
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|Bash",
+        "command": "uv run --directory C:/Users/micro/Documents/#GIT/ultra-brain python .ultra-brain/hooks/wiki_guard.py"
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ulguard --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 10
+          }
+        ],
+        "ultraLoomOwned": true
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruff check --output-format=concise .",
+            "timeout": 15
+          }
+        ],
+        "ultraLoomOwned": true
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dmypy run -- --no-error-summary --no-pretty",
+            "timeout": 30
+          }
+        ],
+        "ultraLoomOwned": true
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go vet ./...",
+            "timeout": 20
+          }
+        ],
+        "ultraLoomOwned": true
       }
     ],
     "SubagentStart": [
@@ -43,7 +72,8 @@
             "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook subagent-start --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 30
           }
-        ]
+        ],
+        "ultraLoomOwned": true
       }
     ],
     "SubagentStop": [
@@ -54,7 +84,8 @@
             "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook subagent-stop --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 30
           }
-        ]
+        ],
+        "ultraLoomOwned": true
       }
     ],
     "Stop": [
@@ -65,7 +96,8 @@
             "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook stop --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 300
           }
-        ]
+        ],
+        "ultraLoomOwned": true
       }
     ]
   }

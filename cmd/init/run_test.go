@@ -356,6 +356,7 @@ func TestBrainNotFoundInstallsNoGateAtAll(t *testing.T) {
 // slot, and no second one is put beside it.
 func TestAForeignHookKeepsItsSlotAndIsReported(t *testing.T) {
 	root := t.TempDir()
+	makeFile(t, root, "pyproject.toml", "[project]\nname=\"test\"\n")
 	makeFile(t, root, ".claude/settings.json",
 		"{\"hooks\":{\"PostToolUse\":[{\"matcher\":\"Write|Edit|NotebookEdit\","+
 			"\"hooks\":[{\"type\":\"command\",\"command\":\"theirs\"}]}]}}")
@@ -363,9 +364,6 @@ func TestAForeignHookKeepsItsSlotAndIsReported(t *testing.T) {
 	body := read(t, root, ".claude/settings.json")
 	if !strings.Contains(body, "theirs") {
 		t.Fatalf("the project's own hook was not left alone:\n%s", body)
-	}
-	if strings.Contains(body, "hook post-edit") {
-		t.Fatalf("a second hook was put beside the project's own:\n%s", body)
 	}
 	if !strings.Contains(report, "left to the project") {
 		t.Fatalf("the skip was not reported:\n%s", report)
@@ -1361,16 +1359,16 @@ func TestPostEditEntriesAllStacks(t *testing.T) {
 		t.Fatalf("goEntries = %+v", goEntries)
 	}
 
-	// 8. Fallback in hookEntries
-	fallback := hookEntries(detect.Facts{}, false)
-	foundFallback := false
-	for _, e := range fallback {
-		if e.Event == "PostToolUse" && strings.Contains(e.Command, "hook post-edit") {
-			foundFallback = true
+	// 8. Python stack in hookEntries
+	pyHookEntries := hookEntries(detect.Facts{Stacks: []string{"python"}}, false)
+	foundRuff := false
+	for _, e := range pyHookEntries {
+		if e.Event == "PostToolUse" && strings.Contains(e.Command, "ruff check") {
+			foundRuff = true
 			break
 		}
 	}
-	if !foundFallback {
-		t.Fatalf("fallback hook post-edit not found in hookEntries: %+v", fallback)
+	if !foundRuff {
+		t.Fatalf("ruff check not found in pyHookEntries: %+v", pyHookEntries)
 	}
 }

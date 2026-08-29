@@ -707,17 +707,12 @@ func hookEntries(facts detect.Facts, wikiHooks bool) []settings.Entry {
 	entries := []settings.Entry{
 		{Event: "SessionStart", Command: hookCommand("hook session-start"), Timeout: 20},
 		{Event: "PreToolUse", Matcher: "Write|Edit|NotebookEdit|Bash|PowerShell",
-			Command: hookCommand("policy hook"), Timeout: 10},
+			Command: `ulguard --root "${CLAUDE_PROJECT_DIR}"`, Timeout: 10},
 	}
 
 	postEdit := postEditEntries(facts.Stacks)
 	if len(postEdit) > 0 {
 		entries = append(entries, postEdit...)
-	} else {
-		entries = append(entries, settings.Entry{
-			Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-			Command: hookCommand("hook post-edit"), Timeout: 60,
-		})
 	}
 
 	if facts.HasGit {
