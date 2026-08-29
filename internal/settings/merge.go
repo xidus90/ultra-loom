@@ -20,6 +20,7 @@
 package settings
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -91,11 +92,115 @@ func Merge(existing []byte, wanted []Entry) (Result, error) {
 	if present || len(hooks) > 0 {
 		root["hooks"] = orderHooks(hooks)
 	}
-	out, err := json.MarshalIndent(root, "", "  ")
+
+	existingEntries := extractTopEntries(existing)
+	out, err := formatRoot(existingEntries, root)
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Merged: append(out, '\n'), Skipped: skipped}, nil
+	return Result{Merged: out, Skipped: skipped}, nil
+}
+
+type topEntry struct {
+	key string
+	raw json.RawMessage
+}
+
+func extractTopEntries(data []byte) []topEntry {
+	if len(data) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil || tok != json.Delim('{') {
+		return nil
+	}
+	var entries []topEntry
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			break
+		}
+		if key, ok := t.(string); ok {
+			var raw json.RawMessage
+			if err := dec.Decode(&raw); err == nil {
+				entries = append(entries, topEntry{key: key, raw: raw})
+			}
+		}
+	}
+	return entries
+}
+
+func formatRoot(existingEntries []topEntry, root map[string]any) ([]byte, error) {
+	if len(existingEntries) == 0 && len(root) == 0 {
+		return []byte("{}\n"), nil
+	}
+	seen := map[string]bool{}
+	var buf bytes.Buffer
+	buf.WriteString("{\n")
+	first := true
+
+	writeField := func(key string, rawVal json.RawMessage) {
+		if !first {
+			buf.WriteString(",\n")
+		}
+		first = false
+		keyJSON, _ := json.Marshal(key)
+		buf.WriteString("  " + string(keyJSON) + ": ")
+		var indented bytes.Buffer
+		if err := json.Indent(&indented, rawVal, "  ", "  "); err != nil {
+			buf.Write(rawVal)
+		} else {
+			buf.Write(indented.Bytes())
+		}
+	}
+
+	for _, entry := range existingEntries {
+		seen[entry.key] = true
+		if entry.key == "hooks" {
+			val, ok := root["hooks"]
+			if ok {
+				if raw, ok := val.(json.RawMessage); ok {
+					if !first {
+						buf.WriteString(",\n")
+					}
+					first = false
+					buf.WriteString("  \"hooks\": ")
+					buf.Write(raw)
+				}
+			}
+		} else {
+			writeField(entry.key, entry.raw)
+		}
+	}
+
+	if !seen["hooks"] {
+		if val, ok := root["hooks"]; ok {
+			if raw, ok := val.(json.RawMessage); ok {
+				if !first {
+					buf.WriteString(",\n")
+				}
+				first = false
+				buf.WriteString("  \"hooks\": ")
+				buf.Write(raw)
+			}
+		}
+	}
+
+	var otherKeys []string
+	for k := range root {
+		if !seen[k] && k != "hooks" {
+			otherKeys = append(otherKeys, k)
+		}
+	}
+	sort.Strings(otherKeys)
+	for _, k := range otherKeys {
+		valJSON, _ := json.Marshal(root[k])
+		writeField(k, valJSON)
+	}
+
+	buf.WriteString("\n}\n")
+	return buf.Bytes(), nil
 }
 
 var lifecycleOrder = []string{

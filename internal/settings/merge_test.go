@@ -393,3 +393,46 @@ func TestEmptyHooksObject(t *testing.T) {
 		t.Fatalf("want empty hooks object, got:\n%s", res.Merged)
 	}
 }
+
+func TestTopLevelKeyOrderPreserved(t *testing.T) {
+	before := `{"enabledPlugins":{"test":true},"permissions":{"allow":["bash"]},"hooks":{}}`
+	res, err := Merge([]byte(before), []Entry{{Event: "SessionStart", Command: "session_start"}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	merged := string(res.Merged)
+	posPlugins := strings.Index(merged, `"enabledPlugins"`)
+	posPerms := strings.Index(merged, `"permissions"`)
+	posHooks := strings.Index(merged, `"hooks"`)
+
+	if !(posPlugins >= 0 && posPerms >= 0 && posHooks >= 0 &&
+		posPlugins < posPerms && posPerms < posHooks) {
+		t.Fatalf("top-level key order was changed:\n%s", merged)
+	}
+}
+
+func TestExtractTopEntriesAndFormatRootEdgeCases(t *testing.T) {
+	// 1. Empty and non-object inputs
+	if entries := extractTopEntries(nil); entries != nil {
+		t.Fatalf("want nil for nil input, got %v", entries)
+	}
+	if entries := extractTopEntries([]byte("[1,2,3]")); entries != nil {
+		t.Fatalf("want nil for array input, got %v", entries)
+	}
+	if entries := extractTopEntries([]byte("{broken")); len(entries) != 0 {
+		t.Fatalf("want 0 entries for broken json, got %v", entries)
+	}
+
+	// 2. formatRoot with completely empty inputs
+	out, err := formatRoot(nil, nil)
+	if err != nil || string(out) != "{}\n" {
+		t.Fatalf("formatRoot empty: out=%q, err=%v", string(out), err)
+	}
+
+	// 3. formatRoot with unindented / raw unformattable text
+	entries := []topEntry{{key: "raw", raw: json.RawMessage(`"simple"`)}}
+	out2, err := formatRoot(entries, map[string]any{"other": 123})
+	if err != nil || !strings.Contains(string(out2), `"raw": "simple"`) || !strings.Contains(string(out2), `"other": 123`) {
+		t.Fatalf("formatRoot raw text failed: out=%q, err=%v", string(out2), err)
+	}
+}
