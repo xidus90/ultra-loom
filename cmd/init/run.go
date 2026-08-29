@@ -778,9 +778,9 @@ func postEditEntries(stacks []string) []settings.Entry {
 		if hasStack("uv") {
 			entries = append(entries,
 				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-					Command: "uv run ruff check --output-format=concise .", Timeout: 15},
+					Command: "ruff check --output-format=concise .", Timeout: 15},
 				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-					Command: "uv run dmypy run -- --no-error-summary --no-pretty", Timeout: 30},
+					Command: "dmypy run -- --no-error-summary --no-pretty", Timeout: 30},
 			)
 		} else {
 			entries = append(entries,
@@ -794,7 +794,7 @@ func postEditEntries(stacks []string) []settings.Entry {
 	if hasStack("gdscript") {
 		entries = append(entries, settings.Entry{
 			Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-			Command: "uvx gdlint .", Timeout: 15,
+			Command: "gdlint .", Timeout: 15,
 		})
 	}
 	if hasStack("csharp") {

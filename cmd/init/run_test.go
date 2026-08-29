@@ -895,7 +895,7 @@ func TestPostEditEntriesPerStack(t *testing.T) {
 		{
 			name:     "python with uv",
 			stacks:   []string{"python", "uv"},
-			commands: []string{"uv run ruff check --output-format=concise .", "uv run dmypy run -- --no-error-summary --no-pretty"},
+			commands: []string{"ruff check --output-format=concise .", "dmypy run -- --no-error-summary --no-pretty"},
 		},
 		{
 			name:     "python plain",
@@ -905,7 +905,7 @@ func TestPostEditEntriesPerStack(t *testing.T) {
 		{
 			name:     "gdscript",
 			stacks:   []string{"gdscript", "godot"},
-			commands: []string{"uvx gdlint ."},
+			commands: []string{"gdlint ."},
 		},
 		{
 			name:     "csharp",
@@ -930,7 +930,7 @@ func TestPostEditEntriesPerStack(t *testing.T) {
 		{
 			name:     "multi-stack csharp and godot",
 			stacks:   []string{"csharp", "gdscript", "godot"},
-			commands: []string{"uvx gdlint .", "dotnet format --verify-no-changes", "dotnet build --no-restore"},
+			commands: []string{"gdlint .", "dotnet format --verify-no-changes", "dotnet build --no-restore"},
 		},
 		{
 			name:     "unknown stack fallback",
@@ -1321,7 +1321,7 @@ func TestGatherWithExistingWiki(t *testing.T) {
 func TestPostEditEntriesAllStacks(t *testing.T) {
 	// 1. Python with uv
 	pyUV := postEditEntries([]string{"python", "uv"})
-	if len(pyUV) != 2 || !strings.Contains(pyUV[0].Command, "uv run ruff") || !strings.Contains(pyUV[1].Command, "uv run dmypy") {
+	if len(pyUV) != 2 || !strings.Contains(pyUV[0].Command, "ruff check") || !strings.Contains(pyUV[1].Command, "dmypy run") {
 		t.Fatalf("pyUV = %+v", pyUV)
 	}
 
@@ -1333,7 +1333,7 @@ func TestPostEditEntriesAllStacks(t *testing.T) {
 
 	// 3. GDScript
 	gd := postEditEntries([]string{"gdscript"})
-	if len(gd) != 1 || !strings.Contains(gd[0].Command, "uvx gdlint") {
+	if len(gd) != 1 || !strings.Contains(gd[0].Command, "gdlint .") {
 		t.Fatalf("gd = %+v", gd)
 	}
 
