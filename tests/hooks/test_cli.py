@@ -30,18 +30,6 @@ def test_hook_without_a_name_says_what_to_type(
     assert "which hook" in capsys.readouterr().err
 
 
-def test_post_edit_reads_the_payload_from_stdin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Without a path in the payload there is nothing to format or check."""
-    payload = json.dumps(
-        {"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Write"}
-    )
-    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
-
-    assert main(["hook", "post-edit", "--root", str(tmp_path)]) == 0
-    assert capsys.readouterr().err == ""
-
 
 def test_stop_reads_the_payload_from_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

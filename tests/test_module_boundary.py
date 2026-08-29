@@ -192,36 +192,6 @@ def test_the_probe_notices_a_harness_import_that_was_moved_to_the_top(tmp_path: 
     assert "ultraloom.graph" in leaked, output
 
 
-# The policy runs before every tool call, so what it loads is its price. The
-# empty stdin makes it exit 1; what is tested is what the call loaded, not how
-# it decided.
-RUN_POLICY = (
-    _PREAMBLE
-    + """
-import io
-
-sys.stdin = io.StringIO("")
-
-from ultraloom.cli import main
-
-code = main(sys.argv[1:])
-print("EXIT:", code)
-report()
-print("CHECKS:", "ultraloom.checks" in sys.modules)
-"""
-)
-
-
-def test_the_policy_pulls_in_neither_the_harness_nor_the_check_chain(tmp_path: Path) -> None:
-    code, leaked, output = _probe(RUN_POLICY, "policy", "hook", "--root", str(tmp_path))
-
-    assert leaked == [], output
-    # Not among _FORBIDDEN, because the check chain is not the harness -- but
-    # 25 ms the policy would pay on every single tool call all the same.
-    assert "CHECKS: False" in output, output
-    assert code == 1, output
-
-
 # The same probe again, for the hook that runs once per session. The empty
 # stdin makes it exit 1; what is tested is what the call loaded.
 RUN_SESSION_START = (

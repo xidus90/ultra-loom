@@ -9,7 +9,7 @@ from threading import Semaphore
 
 import pytest
 
-from ultraloom import checks, process, toolchain
+from ultraloom import checks, process
 from ultraloom.checks import (
     BLOCKED,
     KINDS,
@@ -55,14 +55,7 @@ def godot_project(root: Path) -> Path:
 
 
 def local_tool(root: Path, name: str) -> Path:
-    """Ein projektlokales Werkzeug, damit die Auflösung nicht an der Maschine
-    scheitert, auf der die Suite gerade läuft.
-
-    Die Datei ist leer und wird nie gestartet: wo sie gebraucht wird, geht es
-    darum, dass die Prüfung *vorher* aus einem anderen Grund abbricht.
-    """
-    tool = root / toolchain.LOCAL_DIR / name
-    tool.parent.mkdir(parents=True, exist_ok=True)
+    tool = root / name
     tool.write_text("", encoding="utf-8")
     return tool
 
@@ -1394,22 +1387,7 @@ def test_a_preset_tool_nobody_has_comes_back_unavailable(tmp_path: Path) -> None
 
     assert not result.ok
     assert result.source == checks.UNAVAILABLE
-    assert "lint: `eslint` not found" in result.output
-    assert "ULTRALOOM_TOOL_ESLINT" in result.output
-    assert toolchain.LOCAL_DIR in result.output
-    assert "PATH" in result.output
-
-
-def test_the_variable_names_a_preset_tool_for_this_machine(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    node_project(tmp_path)
-    mine = tmp_path / "elsewhere" / "eslint"
-    mine.parent.mkdir()
-    mine.write_text("", encoding="utf-8")
-    monkeypatch.setenv(toolchain.env_var("eslint"), str(mine))
-
-    assert resolve_check("lint", load_config(tmp_path)).argvs[0] == (str(mine), ".")
+    assert "lint: `eslint` not found on PATH" in result.output
 
 
 def test_the_exec_prefix_switches_the_resolution_off(tmp_path: Path) -> None:

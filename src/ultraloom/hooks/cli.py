@@ -13,13 +13,6 @@ def dispatch(args: argparse.Namespace, root: Path) -> int:
     """Run the named hook against the real streams."""
     if args.hook_name == "session-start":
         return session_start.run(sys.stdin, root, sys.stdout, sys.stderr)
-    if args.hook_name == "post-edit":
-        # Imported here and not at the top: post_edit pulls in the check chain,
-        # and session-start -- which only reads a directory -- must not pay for
-        # it. tests/test_module_boundary.py holds that.
-        from ultraloom.hooks import post_edit
-
-        return post_edit.run(sys.stdin, root, sys.stderr)
     if args.hook_name == "subagent-start":
         # Local for the same reason: these two reach git through `process`,
         # and session-start must not pay for an import it never uses. Note

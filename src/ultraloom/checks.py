@@ -14,14 +14,16 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import BoundedSemaphore, Semaphore
+from typing import Final, Literal
 
-from ultraloom import process, toolchain
+from ultraloom import process
 from ultraloom.config import Config, ConfigError
 
 KINDS = ("lint", "types", "test", "coverage")
@@ -284,24 +286,15 @@ def resolve_check(
 
 
 def _located(kind: str, argv: tuple[str, ...], root: Path) -> tuple[str, ...]:
-    """argv with its executable pinned to a file that exists here.
-
-    argv[0] alone: in `uvx ruff check .` the tool is uvx, and `ruff` is an
-    argument uvx resolves for itself -- on this machine it is no executable at
-    all, and looking it up would refuse a call that works.
-    """
-    found = toolchain.resolve(argv[0], root, os.environ)
-    if found is None:
-        # Named ahead of the message, because a report with four red lines
-        # otherwise does not say which of them is a missing installation.
-        raise CheckUnavailableError(
-            f"{kind}: `{argv[0]}` not found. Set {toolchain.env_var(argv[0])}, "
-            f"put it in {toolchain.LOCAL_DIR}/, or add it to PATH."
-        )
-    # A tool PATH already answers for keeps its bare name: the argv reaches the
-    # same file either way, and every check's command line stays readable in a
-    # report an agent has to act on.
-    return (str(found.path), *argv[1:]) if found.pinned else argv
+    """argv with its executable verified to exist on PATH or project-locally."""
+    cmd = argv[0]
+    direct = root / cmd
+    if direct.is_file():
+        return (str(direct), *argv[1:])
+    found = shutil.which(cmd)
+    if found is not None:
+        return argv
+    raise CheckUnavailableError(f"{kind}: `{cmd}` not found on PATH.")
 
 
 def _warning_for(kind: str, marker: str | None, config: Config, alongside: frozenset[str]) -> str:

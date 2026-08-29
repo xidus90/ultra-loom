@@ -56,20 +56,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         # project is broken -- which is often exactly why you are reading it.
         return _show(root, args.run_id)
 
-    if args.command == "policy":
-        # Before load_config, and imported here: the policy runs before every
-        # tool call, so what it loads is its price, and it reads [policy.*]
-        # itself. A mistake in [verify] is none of its business -- reading the
-        # whole config here would answer one with exit 1, which by this
-        # command's protocol means "do not block".
-        from ultraloom.policy import cli as policy_cli
-
-        return policy_cli.dispatch(args, root)
-
     if args.command == "hook":
-        # Imported here, like the policy, and before load_config for the same
-        # reason: a hook that only reads the journal must not pay for the check
-        # chain, and `check` must not pay for the hooks.
+        # Imported here, like the commit-msg, and before load_config: a hook
+        # that only reads the journal must not pay for the check chain, and
+        # `check` must not pay for the hooks.
         from ultraloom.hooks import cli as hooks_cli
 
         return hooks_cli.dispatch(args, root)
@@ -184,24 +174,9 @@ def _parser() -> argparse.ArgumentParser:
     check.add_argument("kind", choices=("lint", "types", "test", "coverage", "all"))
     check.add_argument("--threshold", type=int, default=None, help="coverage threshold in percent")
 
-    policy = subparsers.add_parser(
-        "policy", parents=[common], help="check a tool call against the project's policy"
-    )
-    policy_subs = policy.add_subparsers(dest="policy_command")
-    policy_subs.add_parser("hook", parents=[common], help="read a Claude Code payload from stdin")
-    manual = policy_subs.add_parser("check", parents=[common], help="check one value by hand")
-    # Spelled out rather than taken from policy.rules.KINDS: building the
-    # parser must not import the policy, or `--help` would pay for it.
-    manual.add_argument("kind", choices=("paths", "commands", "content"))
-    manual.add_argument("value")
-    manual.add_argument("--tool", default="Write", help="the tool name a rule may filter on")
-
     hook = subparsers.add_parser("hook", parents=[common], help="run one of the session hooks")
     hook_subs = hook.add_subparsers(dest="hook_name")
     hook_subs.add_parser("session-start", parents=[common], help="report runs waiting at a gate")
-    hook_subs.add_parser(
-        "post-edit", parents=[common], help="format and check the file that was just written"
-    )
     stop = hook_subs.add_parser(
         "stop", parents=[common], help="hold the turn until the chain is green"
     )
