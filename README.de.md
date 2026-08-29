@@ -32,14 +32,19 @@ ulinit --install-tools
 
 # Expliziten Pfad zu einem Tool angeben
 ulinit --tool-path ruff=/usr/local/bin/ruff
+
+# Schnelle native Checks für Git-Hooks & Pre-Commit-Gates
+ulinit check commit-msg .git/COMMIT_EDITMSG
+ulinit check gofmt [paths...]
+ulinit check coverage --go-floor 98.5 --summary "$(go tool cover -func=... | tail -n 1)"
 ```
 
 ### 2. Policy Guard (Go / `ulguard`)
 
-Blitzschneller `<1ms` `PreToolUse`-Policy-Guard, der Datei-Schreibvorgänge, Notebook-Operationen und Shell-Befehle gegen integrierte Sicherheitsregeln und `.ultraloom/policy.toml` prüft:
+Blitzschneller `<1ms` `PreToolUse`-Policy-Guard, der Datei-Schreibvorgänge (Write, Edit, MultiEdit), Notebook-Operationen und Shell-Befehle gegen integrierte Sicherheitsregeln und `.ultraloom/policy.toml` prüft:
 
 ```bash
-# Wird vom Claude Code PreToolUse-Hook aufgerufen (liest JSON-Payload auf stdin)
+# Wird vom Claude Code oder Gemini PreToolUse-Hook aufgerufen (liest JSON-Payload auf stdin)
 ulguard --root .
 ```
 
@@ -70,16 +75,16 @@ uv run ultraloom show 0001
 uv run ultraloom resume 0001 --answer "yes"
 ```
 
-### 5. Commit-Message Sprach-Gate (Python / `ultraloom commit-msg`)
+### 5. Commit-Message Sprach-Gate (Go / `ulinit` & Python / `ultraloom commit`)
 
-Prüft die Sprache von Commit-Nachrichten gegen die in `[commit].language` konfigurierte Richtlinie:
+Prüft die Sprache von Commit-Nachrichten gegen die in `[project].commit_language` konfigurierte Richtlinie (standardmäßig Englisch):
 
 ```bash
-# Commit-Nachrichtendatei prüfen (vom Git commit-msg Hook aufgerufen)
-uv run ultraloom commit-msg .git/COMMIT_EDITMSG
+# Schnelles natives Gate (<15ms, von .githooks/commit-msg aufgerufen)
+ulinit check commit-msg .git/COMMIT_EDITMSG
 
-# Sprach-Schwellenwerte gegen die Git-Historie kalibrieren
-uv run ultraloom commit-msg --calibrate 50 --language de
+# Sprach-Schwellenwerte gegen die Git-Historie kalibrieren (Python)
+uv run ultraloom commit calibrate --count 50 --language de
 ```
 
 ### 6. Agenten-Lifecycle-Hooks (Python / `ultraloom hook`)

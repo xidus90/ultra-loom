@@ -3,19 +3,18 @@
 [English](policy.md)
 
 Kein Ablauf des Harness, sondern der Weg einer einzelnen Entscheidung: Claude
-Code fragt vor einem Werkzeugaufruf, und `ultraloom policy hook` antwortet mit
+Code oder Gemini fragt vor einem Werkzeugaufruf, und `ulguard` antwortet mit
 einem Exit-Code. Die Verzweigung aus Art, Modus, Voreinstellungen und Treffern
 ist als Prosa unlesbar; darum steht sie hier als Bild.
 
 Aufruf:
 
 ```bash
-ultraloom policy hook                   # Payload von stdin
-ultraloom policy check <art> <wert>     # dieselbe Entscheidung von Hand
+ulguard --root .                        # Payload von stdin (PreToolUse-Hook)
 ```
 
 Die Regeln selbst, ihr Schema und die vollständige Liste der Voreinstellungen
-stehen in der [README](../../README.de.md#policy).
+stehen in `.ultraloom/policy.toml` und in der [README](../../README.de.md#policy).
 
 ## Der Weg einer Entscheidung
 
@@ -41,10 +40,9 @@ flowchart TD
 
 **`tool_name` zuerst.** Der Hook liest den Werkzeugnamen und endet mit 0, bevor
 er eine Konfigurationsdatei anfasst, wenn das Werkzeug keine Regelart berührt.
-Er läuft vor jedem `Write`, `Edit`, `NotebookEdit`, `Bash` und `PowerShell`;
+Er läuft vor jedem `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash` und `PowerShell`;
 sein Aufwand ist
-eine Anforderung und keine Nebensache. Aus demselben Grund liegt der Import der
-Prüfkette in `cli.py` in den Funktionen und nicht im Modulkopf.
+eine Anforderung und keine Nebensache.
 
 **Ein Aufruf, mehrere Subjects.** Jedes Dateiwerkzeug ergibt ein Pfad- und ein
 Inhalts-Subjekt, nur heißen die beiden Schlüssel je Werkzeug anders:

@@ -32,14 +32,19 @@ ulinit --install-tools
 
 # Explicitly specify a tool's executable path
 ulinit --tool-path ruff=/usr/local/bin/ruff
+
+# Fast native checks for Git hooks & pre-commit gates
+ulinit check commit-msg .git/COMMIT_EDITMSG
+ulinit check gofmt [paths...]
+ulinit check coverage --go-floor 98.5 --summary "$(go tool cover -func=... | tail -n 1)"
 ```
 
 ### 2. Policy Guard (Go / `ulguard`)
 
-Fast `<1ms` `PreToolUse` policy enforcer that validates file write targets, notebook operations, and shell commands against built-in rules and `.ultraloom/policy.toml`:
+Fast `<1ms` `PreToolUse` policy enforcer that validates file write targets (Write, Edit, MultiEdit), notebook operations, and shell commands against built-in rules and `.ultraloom/policy.toml`:
 
 ```bash
-# Invoked by Claude Code PreToolUse hook (reads JSON payload on stdin)
+# Invoked by Claude Code or Gemini PreToolUse hook (reads JSON payload on stdin)
 ulguard --root .
 ```
 
@@ -70,16 +75,16 @@ uv run ultraloom show 0001
 uv run ultraloom resume 0001 --answer "yes"
 ```
 
-### 5. Commit Message Language Gate (Python / `ultraloom commit-msg`)
+### 5. Commit Message Language Gate (Go / `ulinit` & Python / `ultraloom commit`)
 
-Validates commit message language against the configured policy in `[commit].language`:
+Validates commit message language against the configured policy in `[project].commit_language` (English standard by default):
 
 ```bash
-# Validate a commit message file (invoked by Git commit-msg hook)
-uv run ultraloom commit-msg .git/COMMIT_EDITMSG
+# Fast native gate (<15ms, invoked by .githooks/commit-msg)
+ulinit check commit-msg .git/COMMIT_EDITMSG
 
-# Calibrate language thresholds against git history
-uv run ultraloom commit-msg --calibrate 50 --language en
+# Calibrate language thresholds against git history (Python)
+uv run ultraloom commit calibrate --count 50 --language en
 ```
 
 ### 6. Agent Lifecycle Hooks (Python / `ultraloom hook`)

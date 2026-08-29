@@ -2,19 +2,18 @@
 
 [Deutsch](policy.de.md)
 
-Not a flow of the harness, but the path of a single decision: Claude Code asks
-before a tool call, and `ultraloom policy hook` answers with an exit code. The
+Not a flow of the harness, but the path of a single decision: Claude Code
+or Gemini asks before a tool call, and `ulguard` answers with an exit code. The
 branching out of kind, mode, defaults and matches is unreadable as prose; so it
 stands here as a picture.
 
 Invocation:
 
 ```bash
-ultraloom policy hook                    # payload from stdin
-ultraloom policy check <kind> <value>    # the same decision by hand
+ulguard --root .                         # payload from stdin (PreToolUse hook)
 ```
 
-The rules themselves, their schema and the full list of defaults are in the
+The rules themselves, their schema and the full list of defaults are in `.ultraloom/policy.toml` and the
 [README](../../README.md#policy).
 
 ## The path of a decision
@@ -41,9 +40,8 @@ flowchart TD
 
 **`tool_name` first.** The hook reads the tool name and ends with 0, before it
 touches a configuration file, when the tool touches no rule kind. It runs
-before every `Write`, `Edit`, `NotebookEdit`, `Bash` and `PowerShell`; its cost
-is a requirement, not an afterthought. For the same reason the import of the
-check chain sits inside the functions in `cli.py` and not in the module header.
+before every `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash` and `PowerShell`; its cost
+is a requirement, not an afterthought.
 
 **One call, several subjects.** Every file tool yields a path subject and a
 content subject, only the two keys are named differently per tool:
