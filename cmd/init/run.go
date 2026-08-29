@@ -49,7 +49,7 @@ const preCommitHook = `#!/usr/bin/env bash
 # ultraloom pre-commit quality gate
 set -euo pipefail
 
-uv run ultraloom check precommit
+uv run ultraloom check all
 `
 
 // onPath is what brainpath.Find returns when brain is an entry on PATH -- the

@@ -1064,7 +1064,7 @@ func TestDocumentTemplatesCreatedAndProtected(t *testing.T) {
 		t.Fatalf("report does not list .githooks/pre-commit under created:\n%s", report)
 	}
 	precommitContent := read(t, root, ".githooks/pre-commit")
-	if !strings.Contains(precommitContent, "ultraloom check precommit") {
+	if !strings.Contains(precommitContent, "ultraloom check all") {
 		t.Fatalf(".githooks/pre-commit missing command:\n%s", precommitContent)
 	}
 }

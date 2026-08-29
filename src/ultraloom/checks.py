@@ -12,16 +12,14 @@ tool-facing message — argv, exceptions, log lines — stays English.
 
 from __future__ import annotations
 
-import os
 import shlex
 import shutil
 import sys
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import BoundedSemaphore, Semaphore
-from typing import Final, Literal
 
 from ultraloom import process
 from ultraloom.config import Config, ConfigError
