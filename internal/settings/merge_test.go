@@ -424,15 +424,41 @@ func TestExtractTopEntriesAndFormatRootEdgeCases(t *testing.T) {
 	}
 
 	// 2. formatRoot with completely empty inputs
-	out, err := formatRoot(nil, nil)
-	if err != nil || string(out) != "{}\n" {
-		t.Fatalf("formatRoot empty: out=%q, err=%v", string(out), err)
+	out := formatRoot(nil, nil)
+	if string(out) != "{}\n" {
+		t.Fatalf("formatRoot empty: out=%q", string(out))
 	}
 
 	// 3. formatRoot with unindented / raw unformattable text
 	entries := []topEntry{{key: "raw", raw: json.RawMessage(`"simple"`)}}
-	out2, err := formatRoot(entries, map[string]any{"other": 123})
-	if err != nil || !strings.Contains(string(out2), `"raw": "simple"`) || !strings.Contains(string(out2), `"other": 123`) {
-		t.Fatalf("formatRoot raw text failed: out=%q, err=%v", string(out2), err)
+	out2 := formatRoot(entries, map[string]any{"other": 123})
+	if !strings.Contains(string(out2), `"raw": "simple"`) || !strings.Contains(string(out2), `"other": 123`) {
+		t.Fatalf("formatRoot raw text failed: out=%q", string(out2))
+	}
+}
+
+func TestOrderHooksAndFormatBlockEdgeCases(t *testing.T) {
+	// 1. Non-list event value in hooks
+	hooks := map[string]any{
+		"CustomEvent": "not-a-list",
+		"SessionStart": []any{
+			"string-block-item",
+			map[string]any{
+				"matcher":   "Write",
+				"hooks":     []any{map[string]any{"type": "command", "command": "echo 1", "timeout": 5, "extra": "custom"}},
+				"extraProp": true,
+			},
+		},
+	}
+	raw := orderHooks(hooks)
+	str := string(raw)
+	if !strings.Contains(str, `"CustomEvent": "not-a-list"`) || !strings.Contains(str, `"extra": "custom"`) || !strings.Contains(str, `"extraProp": true`) {
+		t.Fatalf("orderHooks output missing extra keys: %s", str)
+	}
+
+	// 2. Empty hooks
+	emptyRaw := orderHooks(nil)
+	if string(emptyRaw) != "{}" {
+		t.Fatalf("expected {}, got %s", string(emptyRaw))
 	}
 }

@@ -215,3 +215,13 @@ func TestGuardBlocksMultiEdit(t *testing.T) {
 		t.Fatalf("code = %d, want ExitDenied for MultiEdit on .env", code)
 	}
 }
+
+func TestLoadPolicyUnreadable(t *testing.T) {
+	root := t.TempDir()
+	policyDir := filepath.Join(root, ".ultraloom", "policy.toml")
+	_ = os.MkdirAll(policyDir, 0755) // directory instead of file causes read error
+	_, err := loadPolicy(root)
+	if err == nil {
+		t.Fatal("expected error for directory policy.toml, got nil")
+	}
+}

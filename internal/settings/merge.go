@@ -94,10 +94,7 @@ func Merge(existing []byte, wanted []Entry) (Result, error) {
 	}
 
 	existingEntries := extractTopEntries(existing)
-	out, err := formatRoot(existingEntries, root)
-	if err != nil {
-		return Result{}, err
-	}
+	out := formatRoot(existingEntries, root)
 	return Result{Merged: out, Skipped: skipped}, nil
 }
 
@@ -131,9 +128,9 @@ func extractTopEntries(data []byte) []topEntry {
 	return entries
 }
 
-func formatRoot(existingEntries []topEntry, root map[string]any) ([]byte, error) {
+func formatRoot(existingEntries []topEntry, root map[string]any) []byte {
 	if len(existingEntries) == 0 && len(root) == 0 {
-		return []byte("{}\n"), nil
+		return []byte("{}\n")
 	}
 	seen := map[string]bool{}
 	var buf bytes.Buffer
@@ -200,7 +197,7 @@ func formatRoot(existingEntries []topEntry, root map[string]any) ([]byte, error)
 	}
 
 	buf.WriteString("\n}\n")
-	return buf.Bytes(), nil
+	return buf.Bytes()
 }
 
 var lifecycleOrder = []string{

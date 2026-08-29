@@ -99,10 +99,10 @@ func loadPolicy(root string) (PolicyFile, error) {
 	policyPath := filepath.Join(root, ".ultraloom", "policy.toml")
 	var p PolicyFile
 	data, err := os.ReadFile(policyPath)
-	if os.IsNotExist(err) {
-		return p, nil
-	}
 	if err != nil {
+		if os.IsNotExist(err) {
+			return p, nil
+		}
 		return p, err
 	}
 	if err := toml.Unmarshal(data, &p); err != nil {
@@ -113,15 +113,10 @@ func loadPolicy(root string) (PolicyFile, error) {
 
 func relativePath(raw, root string) string {
 	raw = filepath.Clean(raw)
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
+	if !filepath.IsAbs(raw) {
 		return filepath.ToSlash(raw)
 	}
-	absPath, err := filepath.Abs(raw)
-	if err != nil {
-		return filepath.ToSlash(raw)
-	}
-	rel, err := filepath.Rel(absRoot, absPath)
+	rel, err := filepath.Rel(root, raw)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return filepath.ToSlash(raw)
 	}

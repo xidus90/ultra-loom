@@ -438,15 +438,15 @@ func TestAskToolsNoInstallCommandAndInvalidInput(t *testing.T) {
 	tools := []tooling.ToolSpec{
 		{Name: "no-install", Stack: "custom"},
 	}
-	// "yes" (rejected because no install cmd), "invalid", then default (empty = skip)
-	input := "yes\ninvalid\n\n"
+	// "yes" (rejected because no install cmd), "invalid", "path" followed by empty line, then path
+	input := "yes\ninvalid\npath\n\n/opt/bin/tool\n"
 	var out bytes.Buffer
 	res, err := AskTools(strings.NewReader(input), &out, true, tools)
 	if err != nil {
 		t.Fatalf("AskTools: %v", err)
 	}
-	if len(res) != 1 || res[0].Action != ToolSkip {
-		t.Fatalf("expected ToolSkip for default without install cmd, got %+v", res)
+	if len(res) != 1 || res[0].Action != ToolPath || res[0].CustomPath != "/opt/bin/tool" {
+		t.Fatalf("expected ToolPath, got %+v", res)
 	}
 }
 

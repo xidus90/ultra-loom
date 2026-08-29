@@ -1,11 +1,9 @@
-package verify_test
+package verify
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/xidus90/ultra-loom/internal/verify"
 )
 
 func TestCheckGoFormat(t *testing.T) {
@@ -40,7 +38,7 @@ func TestCheckGoFormat(t *testing.T) {
 		}
 	}
 
-	unformatted, err := verify.CheckGoFormat([]string{tmpDir})
+	unformatted, err := CheckGoFormat([]string{tmpDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +52,7 @@ func TestCheckGoFormat(t *testing.T) {
 	}
 
 	// Test non-existent path gracefully skipped
-	unformatted2, err := verify.CheckGoFormat([]string{filepath.Join(tmpDir, "nonexistent")})
+	unformatted2, err := CheckGoFormat([]string{filepath.Join(tmpDir, "nonexistent")})
 	if err != nil {
 		t.Fatalf("unexpected error on missing path: %v", err)
 	}
@@ -63,7 +61,7 @@ func TestCheckGoFormat(t *testing.T) {
 	}
 
 	// Test single clean file and other non-go files
-	cleanSingle, err := verify.CheckGoFormat([]string{cleanFile, otherFile})
+	cleanSingle, err := CheckGoFormat([]string{cleanFile, otherFile})
 	if err != nil {
 		t.Fatalf("unexpected error on clean single file: %v", err)
 	}
@@ -72,7 +70,7 @@ func TestCheckGoFormat(t *testing.T) {
 	}
 
 	// Test single dirty file input
-	unformattedSingle, err := verify.CheckGoFormat([]string{dirtyFile})
+	unformattedSingle, err := CheckGoFormat([]string{dirtyFile})
 	if err != nil {
 		t.Fatalf("unexpected error on single file: %v", err)
 	}
@@ -85,17 +83,22 @@ func TestCheckGoFormat(t *testing.T) {
 	if err := os.WriteFile(syntaxErrFile, []byte("package main\nfunc broken( {"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verify.CheckGoFormat([]string{syntaxErrFile}); err == nil {
+	if _, err := CheckGoFormat([]string{syntaxErrFile}); err == nil {
 		t.Fatal("expected parse error for single broken.go, got nil")
 	}
 
 	// Test broken file inside dir walk
-	if _, err := verify.CheckGoFormat([]string{tmpDir}); err == nil {
+	if _, err := CheckGoFormat([]string{tmpDir}); err == nil {
 		t.Fatal("expected walk error on broken.go in dir, got nil")
 	}
 
 	// Test invalid path with null byte
-	if _, err := verify.CheckGoFormat([]string{"invalid\x00path"}); err == nil {
+	if _, err := CheckGoFormat([]string{"invalid\x00path"}); err == nil {
 		t.Fatal("expected stat error for invalid path, got nil")
+	}
+
+	// Test isFileUnformatted on directory (read error)
+	if _, err := isFileUnformatted(tmpDir); err == nil {
+		t.Fatal("expected read error on directory, got nil")
 	}
 }

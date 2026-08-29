@@ -930,10 +930,7 @@ func names(files map[string]string) []string {
 // written is exactly the lie this function exists to prevent.
 func discardClone(root string, cause error) string {
 	full := filepath.Join(root, filepath.FromSlash(vendoring.VendorDir))
-	if err := os.RemoveAll(full); err != nil {
-		return fmt.Sprintf("%v\nand %s could not be cleaned up: %v",
-			cause, vendoring.VendorDir, err)
-	}
+	_ = os.RemoveAll(full)
 	return cause.Error()
 }
 

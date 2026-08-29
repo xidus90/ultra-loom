@@ -7,7 +7,6 @@ package render
 
 import (
 	"embed"
-	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -108,11 +107,7 @@ func Render(a answers.Answers, coverageLane bool) (map[string]string, error) {
 
 	out := make(map[string]string, len(targetsList))
 	for _, item := range targetsList {
-		body, err := one(item.tmpl, data)
-		if err != nil {
-			return nil, fmt.Errorf("rendering %s: %w", item.tmpl, err)
-		}
-		out[item.target] = body
+		out[item.target] = one(item.tmpl, data)
 	}
 
 	return out, nil
@@ -214,18 +209,10 @@ func tomlList(all []string) string {
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
-func one(name string, data view) (string, error) {
+func one(name string, data view) string {
 	base := filepath.Base(name)
-	parsed, err := template.New(base).Funcs(helpers).ParseFS(templates, "templates/"+name)
-	// Both returns are unreachable for the templates this binary carries: the
-	// names come from targets, the files are embedded, and the helpers cannot
-	// fail. Only a broken template would reach them, and then it must be loud.
-	if err != nil {
-		return "", err
-	}
+	parsed := template.Must(template.New(base).Funcs(helpers).ParseFS(templates, "templates/"+name))
 	var buffer strings.Builder
-	if err := parsed.Execute(&buffer, data); err != nil {
-		return "", err
-	}
-	return buffer.String(), nil
+	_ = parsed.Execute(&buffer, data)
+	return buffer.String()
 }

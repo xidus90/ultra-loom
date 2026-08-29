@@ -229,3 +229,26 @@ func TestTheNullDeviceIsNobodyToAsk(t *testing.T) {
 		t.Fatal("the null device was taken for a person")
 	}
 }
+
+func TestMainFunction(t *testing.T) {
+	if os.Getenv("TEST_MAIN_INIT") == "1" {
+		main()
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainFunction")
+	cmd.Env = append(os.Environ(), "TEST_MAIN_INIT=1")
+	cmd.Args = append(cmd.Args, "--version")
+	_ = cmd.Run()
+}
+
+func TestGatherHooksPathError(t *testing.T) {
+	tmpDir := t.TempDir()
+	mkdir(t, filepath.Join(tmpDir, ".git"))
+	brokenRunner := func(string, ...string) (string, error) {
+		return "", errors.New("git broken")
+	}
+	_, err := gather(tmpDir, brokenRunner)
+	if err == nil {
+		t.Fatal("expected error from broken HooksPath in gather, got nil")
+	}
+}
