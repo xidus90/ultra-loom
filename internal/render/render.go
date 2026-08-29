@@ -144,19 +144,9 @@ func newView(a answers.Answers, coverageLane bool) view {
 		data.Commands = append(data.Commands, commandRule{
 			Regex: commandPattern(command), Reason: answeredReason})
 	}
-	data.PrecommitKinds = []string{"lint"}
-	if a.Gates.TypesInStop {
-		data.PrecommitKinds = append(data.PrecommitKinds, "types")
-	}
-	if a.Gates.TestsInStop {
-		data.PrecommitKinds = append(data.PrecommitKinds, "test")
-		// Named only where the lane exists. Dropping the section alone would
-		// heal nothing: a missing [verify.coverage] falls back to a threshold
-		// of 100, and the check would go on running against a report that
-		// cannot fail.
-		if coverageLane {
-			data.PrecommitKinds = append(data.PrecommitKinds, "coverage")
-		}
+	data.PrecommitKinds = []string{"lint", "types", "test"}
+	if coverageLane {
+		data.PrecommitKinds = append(data.PrecommitKinds, "coverage")
 	}
 	return data
 }

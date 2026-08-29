@@ -1021,6 +1021,7 @@ func TestAgentsWithoutClaudeSkipsClaudeSettings(t *testing.T) {
 
 func TestDocumentTemplatesCreatedAndProtected(t *testing.T) {
 	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
 	// Pre-exist an existing custom AGENTS.md
 	existingAgents := "# My Custom Agents Doc\n"
 	makeFile(t, root, "AGENTS.md", existingAgents)
@@ -1059,6 +1060,13 @@ func TestDocumentTemplatesCreatedAndProtected(t *testing.T) {
 	if !strings.Contains(skillContent, "verify-until-green") {
 		t.Fatalf("skill file missing content:\n%s", skillContent)
 	}
+	if !strings.Contains(report, ".githooks/pre-commit") {
+		t.Fatalf("report does not list .githooks/pre-commit under created:\n%s", report)
+	}
+	precommitContent := read(t, root, ".githooks/pre-commit")
+	if !strings.Contains(precommitContent, "ultraloom check precommit") {
+		t.Fatalf(".githooks/pre-commit missing command:\n%s", precommitContent)
+	}
 }
 
 func TestApplyAgentsFlag(t *testing.T) {
@@ -1084,5 +1092,228 @@ func TestLandedWithWrittenFiles(t *testing.T) {
 	}
 	if got := landed("only error", nil); got != "only error" {
 		t.Fatalf("landed empty list got %q", got)
+	}
+}
+
+func TestRunToolPathsFlagResolvesMissingTools(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "main.py", "print('hello')\n")
+	makeFile(t, root, "uv.lock", "")
+
+	opts := Options{
+		Root:      root,
+		Yes:       true,
+		ToolPaths: "uv=/custom/bin/uv, ruff=/custom/bin/ruff, dmypy=/custom/bin/dmypy",
+		Look:      func(name string) (string, error) { return "", errors.New("not found") },
+	}
+	code, report := run(opts)
+	if code != exitDone {
+		t.Fatalf("run = %d, report:\n%s", code, report)
+	}
+	if strings.Contains(report, "missing tooling on PATH") {
+		t.Fatalf("report should not complain about missing tools when resolved via ToolPaths:\n%s", report)
+	}
+}
+
+func TestRunInstallToolsFlagInstallsMissingTools(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "main.py", "print('hello')\n")
+	makeFile(t, root, "uv.lock", "")
+
+	var installed []string
+	execRunner := func(dir string, argv ...string) (string, error) {
+		installed = append(installed, strings.Join(argv, " "))
+		return "ok", nil
+	}
+
+	opts := Options{
+		Root:         root,
+		Yes:          true,
+		InstallTools: true,
+		Look:         func(name string) (string, error) { return "", errors.New("not found") },
+		Exec:         execRunner,
+	}
+	code, report := run(opts)
+	if code != exitDone {
+		t.Fatalf("run = %d, report:\n%s", code, report)
+	}
+	if !strings.Contains(report, "installed ruff via") || !strings.Contains(report, "installed dmypy via") {
+		t.Fatalf("report missing installation notes:\n%s", report)
+	}
+	if len(installed) < 2 {
+		t.Fatalf("expected at least 2 install commands, got: %v", installed)
+	}
+}
+
+func TestRunInstallToolsFailureReportsError(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "main.py", "print('hello')\n")
+	makeFile(t, root, "uv.lock", "")
+
+	failRunner := func(dir string, argv ...string) (string, error) {
+		return "", errors.New("network down")
+	}
+
+	opts := Options{
+		Root:         root,
+		Yes:          true,
+		InstallTools: true,
+		Look:         func(name string) (string, error) { return "", errors.New("not found") },
+		Exec:         failRunner,
+	}
+	code, report := run(opts)
+	if code != exitDone {
+		t.Fatalf("run = %d, report:\n%s", code, report)
+	}
+	if !strings.Contains(report, "failed to install ruff") {
+		t.Fatalf("report missing failure note:\n%s", report)
+	}
+}
+
+func TestRunInteractiveToolResolution(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "main.py", "print('hello')\n")
+	makeFile(t, root, "uv.lock", "")
+
+	// Answer: default (install), skip ("no"), path ("/usr/bin/dmypy")
+	var stdout bytes.Buffer
+	stdin := strings.NewReader("\nno\n/usr/bin/dmypy\n")
+
+	var installed []string
+	execRunner := func(dir string, argv ...string) (string, error) {
+		installed = append(installed, strings.Join(argv, " "))
+		return "ok", nil
+	}
+
+	opts := Options{
+		Root:              root,
+		Interactive:       true,
+		CommitLanguage:    "en",
+		DocsLanguage:      "de",
+		Agents:            "all",
+		CoverageThreshold: 100,
+		WikiMode:          "none",
+		In:                stdin,
+		Out:               &stdout,
+		Look:              func(name string) (string, error) { return "", errors.New("not found") },
+		Exec:              execRunner,
+	}
+	code, report := run(opts)
+	if code != exitDone {
+		t.Fatalf("run = %d, report:\n%s", code, report)
+	}
+	if !strings.Contains(report, "installed uv via") {
+		t.Fatalf("report missing installed note:\n%s", report)
+	}
+}
+
+func TestCliFlagsForTooling(t *testing.T) {
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := cli([]string{"--root", root, "--install-tools", "--tool-path", "uv=/bin/uv", "--yes"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitDone {
+		t.Fatalf("cli exit = %d, stderr: %s", code, stderr.String())
+	}
+}
+
+func TestCliVersionAndDetectOnly(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := cli([]string{"--version"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("version code = %d", code)
+	}
+	if !strings.Contains(stdout.String(), version) {
+		t.Fatalf("version output = %q", stdout.String())
+	}
+
+	stdout.Reset()
+	if code := cli([]string{"--help"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("help code = %d", code)
+	}
+
+	stdout.Reset()
+	root := t.TempDir()
+	if code := cli([]string{"--detect-only", "--root", root}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("detect-only code = %d", code)
+	}
+	if !strings.Contains(stdout.String(), `"Stacks"`) {
+		t.Fatalf("detect-only output = %q", stdout.String())
+	}
+}
+
+func TestRunInteractiveToolInstallFailure(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "main.py", "print('hello')\n")
+	makeFile(t, root, "uv.lock", "")
+
+	var stdout bytes.Buffer
+	stdin := strings.NewReader("yes\n")
+
+	failRunner := func(dir string, argv ...string) (string, error) {
+		return "", errors.New("network error")
+	}
+
+	opts := Options{
+		Root:              root,
+		Interactive:       true,
+		CommitLanguage:    "en",
+		DocsLanguage:      "de",
+		Agents:            "all",
+		CoverageThreshold: 100,
+		WikiMode:          "none",
+		In:                stdin,
+		Out:               &stdout,
+		Look:              func(name string) (string, error) { return "", errors.New("not found") },
+		Exec:              failRunner,
+	}
+	code, report := run(opts)
+	if code != exitDone {
+		t.Fatalf("run = %d, report:\n%s", code, report)
+	}
+	if !strings.Contains(report, "failed to install uv") {
+		t.Fatalf("report missing failure note:\n%s", report)
+	}
+}
+
+func TestRunInteractiveInstallNoExec(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "main.py", "print('hello')\n")
+	makeFile(t, root, "uv.lock", "")
+
+	var stdout bytes.Buffer
+	stdin := strings.NewReader("yes\n")
+
+	opts := Options{
+		Root:              root,
+		Interactive:       true,
+		CommitLanguage:    "en",
+		DocsLanguage:      "de",
+		Agents:            "all",
+		CoverageThreshold: 100,
+		WikiMode:          "none",
+		In:                stdin,
+		Out:               &stdout,
+		Look:              func(name string) (string, error) { return "", errors.New("not found") },
+		Exec:              nil, // No exec runner
+	}
+	code, report := run(opts)
+	if code != exitDone {
+		t.Fatalf("run = %d, report:\n%s", code, report)
+	}
+	if !strings.Contains(report, "missing tooling on PATH") {
+		t.Fatalf("report should list missing tools when Exec is nil:\n%s", report)
+	}
+}
+
+func TestGatherWithExistingWiki(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "wiki"), 0o755)
+	makeFile(t, root, "wiki/index.md", "---\nokf_version: 1\n---\n# Wiki\n")
+
+	facts, err := gather(root, nil)
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	if facts.WikiMode != "brain" {
+		t.Fatalf("WikiMode = %q, want 'brain'", facts.WikiMode)
 	}
 }

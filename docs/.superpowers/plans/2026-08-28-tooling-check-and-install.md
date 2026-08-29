@@ -33,10 +33,10 @@
 - Modify: `cmd/init/run.go`
 - Modify: `cmd/init/run_test.go`
 
-- [ ] **Step 1: Add interactive questions for missing tools in `internal/interview`**
-- [ ] **Step 2: Add `--tool-path` / `--install-tools` flags in `cmd/init`**
-- [ ] **Step 3: Run `go test ./...` and verify coverage**
-- [ ] **Step 4: Commit**
+- [x] **Step 1: Add interactive questions for missing tools in `internal/interview`**
+- [x] **Step 2: Add `--tool-path` / `--install-tools` flags in `cmd/init`**
+- [x] **Step 3: Run `go test ./...` and verify coverage**
+- [x] **Step 4: Commit**
 
 ---
 
@@ -48,8 +48,8 @@
 - Modify: `cmd/init/run.go`
 - Modify: `cmd/init/run_test.go`
 
-- [ ] **Step 1: Update `render.go` to ensure `precommit = ["lint", "types", "test", "coverage"]` (full suite)**
-- [ ] **Step 2: Update `cmd/init/run.go` to write `.githooks/pre-commit` and run `git config core.hooksPath .githooks`**
-- [ ] **Step 3: Test on `space` worktree**
-- [ ] **Step 4: Run full gate `uv run ultraloom check all`**
-- [ ] **Step 5: Commit**
+- [x] **Step 1: Update `render.go` to ensure `precommit = ["lint", "types", "test", "coverage"]` (full suite)**
+- [x] **Step 2: Update `cmd/init/run.go` to write `.githooks/pre-commit` and run `git config core.hooksPath .githooks`**
+- [x] **Step 3: Test on `space` worktree**
+- [x] **Step 4: Run full gate `uv run ultraloom check all`**
+- [x] **Step 5: Commit**

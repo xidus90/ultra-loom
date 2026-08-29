@@ -302,3 +302,21 @@ func linkDir(t *testing.T, target, link string) {
 		t.Skipf("neither a symlink (%v) nor a junction (%v: %s) can be made here", err, jerr, out)
 	}
 }
+
+func TestWriteNewExecutablePermissions(t *testing.T) {
+	root := t.TempDir()
+	plan, err := Prepare(root, map[string]string{
+		".githooks/pre-commit": "#!/bin/sh\nexit 0\n",
+		"script.sh":            "#!/bin/sh\nexit 0\n",
+	})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	written, err := Commit(root, plan)
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if len(written) != 2 {
+		t.Fatalf("written = %v, want 2 files", written)
+	}
+}

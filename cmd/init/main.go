@@ -48,6 +48,8 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	forbidPip := flags.String("forbid-pip-install", "", "yes or no: forbid pip install")
 	vendorURL := flags.String("vendor-url", "", "clone the runtime from this git url")
 	vendorRef := flags.String("vendor-ref", "", "the branch, tag or commit to pin the runtime to")
+	installTools := flags.Bool("install-tools", false, "automatically install missing stack tools")
+	toolPath := flags.String("tool-path", "", "comma-separated tool=path mappings for stack tools")
 	if err := flags.Parse(args); err != nil {
 		// Asking for help is not a failure. flag.ContinueOnError hands the
 		// request back as an error like any other, and an exit code of 1 for
@@ -76,6 +78,8 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		CoverageThreshold: *threshold,
 		ProtectMigrations: *protect,
 		ForbidPipInstall:  *forbidPip,
+		InstallTools:      *installTools,
+		ToolPaths:         *toolPath,
 		VendorURL:         *vendorURL,
 		VendorRef:         *vendorRef,
 		In:                stdin,
@@ -131,7 +135,7 @@ func report(root string, run detect.Runner, stdout, stderr io.Writer) int {
 // inside it.
 func gather(root string, run detect.Runner) (detect.Facts, error) {
 	facts := detect.Detect(os.DirFS(root))
-	if facts.HasGit {
+	if facts.HasGit && run != nil {
 		hooks, err := detect.HooksPath(run, root)
 		if err != nil {
 			return facts, err

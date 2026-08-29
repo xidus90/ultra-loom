@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/xidus90/ultra-loom/internal/answers"
+	"github.com/xidus90/ultra-loom/internal/tooling"
 )
 
 var ErrNoTTY = errors.New("no terminal to ask on")
@@ -230,4 +231,83 @@ func has(all []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+type ToolAction int
+
+const (
+	ToolSkip ToolAction = iota
+	ToolInstall
+	ToolPath
+)
+
+type ToolResolution struct {
+	Spec       tooling.ToolSpec
+	Action     ToolAction
+	CustomPath string
+}
+
+// AskTools prompts the user for missing tools when interactive is true.
+func AskTools(in io.Reader, out io.Writer, interactive bool, missing []tooling.ToolSpec) ([]ToolResolution, error) {
+	if len(missing) == 0 || !interactive {
+		return nil, nil
+	}
+	reader := bufio.NewReader(in)
+	var resolutions []ToolResolution
+	for _, tool := range missing {
+		res, err := askOneTool(reader, out, tool)
+		if err != nil {
+			return nil, err
+		}
+		resolutions = append(resolutions, res)
+	}
+	return resolutions, nil
+}
+
+func askOneTool(reader *bufio.Reader, out io.Writer, tool tooling.ToolSpec) (ToolResolution, error) {
+	prompt := fmt.Sprintf("Tool %q (%s) not found on PATH. Install via %q? [Y/n/path]", tool.Name, tool.Stack, tool.InstallCmd)
+	if tool.InstallCmd == "" {
+		prompt = fmt.Sprintf("Tool %q (%s) not found on PATH. Provide path? [path/skip]", tool.Name, tool.Stack)
+	}
+	for {
+		fmt.Fprintf(out, "%s: ", prompt)
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return ToolResolution{}, fmt.Errorf("reading response for tool %s: %w", tool.Name, err)
+		}
+		given := strings.TrimSpace(line)
+		if given == "" {
+			if tool.InstallCmd != "" {
+				return ToolResolution{Spec: tool, Action: ToolInstall}, nil
+			}
+			return ToolResolution{Spec: tool, Action: ToolSkip}, nil
+		}
+		switch strings.ToLower(given) {
+		case "y", "yes":
+			if tool.InstallCmd != "" {
+				return ToolResolution{Spec: tool, Action: ToolInstall}, nil
+			}
+			fmt.Fprintln(out, "No auto-install command available for this tool; please provide path or skip.")
+			continue
+		case "n", "no", "skip":
+			return ToolResolution{Spec: tool, Action: ToolSkip}, nil
+		case "path":
+			fmt.Fprintf(out, "Enter path to %s: ", tool.Name)
+			pathLine, err := reader.ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				return ToolResolution{}, fmt.Errorf("reading path for tool %s: %w", tool.Name, err)
+			}
+			customPath := strings.TrimSpace(pathLine)
+			if customPath == "" {
+				fmt.Fprintln(out, "Path cannot be empty.")
+				continue
+			}
+			return ToolResolution{Spec: tool, Action: ToolPath, CustomPath: customPath}, nil
+		default:
+			if strings.ContainsAny(given, `/\.`) {
+				return ToolResolution{Spec: tool, Action: ToolPath, CustomPath: given}, nil
+			}
+			fmt.Fprintln(out, "Please answer 'yes', 'no', 'path', or enter a valid file path.")
+		}
+	}
 }

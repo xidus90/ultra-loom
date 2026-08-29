@@ -190,7 +190,11 @@ func CheckParents(root, name string) error {
 // decision enforced at the last moment: between Prepare and here somebody may
 // have created the file, and this run has no claim on what they wrote.
 func writeNew(full, body string) error {
-	f, err := os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	perm := fs.FileMode(0o644)
+	if strings.Contains(full, ".githooks") || strings.HasSuffix(full, ".sh") {
+		perm = 0o755
+	}
+	f, err := os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 	if err != nil {
 		return err
 	}

@@ -193,3 +193,15 @@ func TestCli(t *testing.T) {
 		t.Fatalf("code = %d, want ExitInternal for invalid flag", code)
 	}
 }
+
+func TestRelativePathHelper(t *testing.T) {
+	root := t.TempDir()
+	rel := relativePath(filepath.Join(root, "a", "b.txt"), root)
+	if rel != "a/b.txt" {
+		t.Fatalf("rel = %q, want a/b.txt", rel)
+	}
+	outside := relativePath("../outside.txt", root)
+	if !strings.Contains(outside, "outside.txt") {
+		t.Fatalf("outside = %q", outside)
+	}
+}

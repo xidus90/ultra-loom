@@ -180,17 +180,15 @@ func TestTheGitPushAnswerDoesNotDuplicateTheBuiltInRule(t *testing.T) {
 	}
 }
 
-func TestTheStopProfileFollowsTheGates(t *testing.T) {
+func TestPrecommitProfileRunsFullSuite(t *testing.T) {
 	lean := fixture()
-	lean.Gates.TestsInStop = false
-	lean.Gates.TypesInStop = false
 	files, err := Render(lean, true)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	config := files[".ultraloom/config.toml"]
-	if !strings.Contains(config, `precommit = ["lint"]`) {
-		t.Fatalf("config.toml = %q, want precommit down to lint", config)
+	if !strings.Contains(config, `precommit = ["lint", "types", "test", "coverage"]`) {
+		t.Fatalf("config.toml = %q, want full precommit suite", config)
 	}
 }
 

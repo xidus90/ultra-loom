@@ -3,11 +3,13 @@ package interview
 import (
 	"bytes"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/xidus90/ultra-loom/internal/answers"
+	"github.com/xidus90/ultra-loom/internal/tooling"
 )
 
 func TestWithoutATtyItRefusesInsteadOfPrompting(t *testing.T) {
@@ -351,7 +353,121 @@ func TestApplyAgents(t *testing.T) {
 		t.Fatalf("target = %v, want [claude]", target)
 	}
 
+	if err := applyAgents("claude, , gemini", &target); err != nil || len(target) != 2 {
+		t.Fatalf("target = %v, want [claude gemini]", target)
+	}
+
 	if err := applyAgents("unknown", &target); err == nil {
 		t.Fatal("want error for unknown agent")
+	}
+}
+
+func TestAskToolsNonInteractiveOrEmpty(t *testing.T) {
+	tools := []tooling.ToolSpec{{Name: "ruff", Stack: "python", InstallCmd: "uv tool install ruff"}}
+	res, err := AskTools(strings.NewReader(""), &bytes.Buffer{}, false, tools)
+	if err != nil || len(res) != 0 {
+		t.Fatalf("res = %v, err = %v, want nil/empty when non-interactive", res, err)
+	}
+
+	res, err = AskTools(strings.NewReader(""), &bytes.Buffer{}, true, nil)
+	if err != nil || len(res) != 0 {
+		t.Fatalf("res = %v, err = %v, want nil/empty when missing is empty", res, err)
+	}
+}
+
+func TestAskToolsInstallDefaultAndExplicitYes(t *testing.T) {
+	tools := []tooling.ToolSpec{
+		{Name: "ruff", Stack: "python", InstallCmd: "uv tool install ruff"},
+		{Name: "dmypy", Stack: "python", InstallCmd: "uv tool install mypy"},
+	}
+	// First tool default (empty line/enter), second tool explicit "yes"
+	input := "\nyes\n"
+	var out bytes.Buffer
+	res, err := AskTools(strings.NewReader(input), &out, true, tools)
+	if err != nil {
+		t.Fatalf("AskTools: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("res count = %d, want 2", len(res))
+	}
+	if res[0].Action != ToolInstall || res[1].Action != ToolInstall {
+		t.Fatalf("expected both ToolInstall, got %+v", res)
+	}
+}
+
+func TestAskToolsSkip(t *testing.T) {
+	tools := []tooling.ToolSpec{
+		{Name: "ruff", Stack: "python", InstallCmd: "uv tool install ruff"},
+	}
+	input := "no\n"
+	var out bytes.Buffer
+	res, err := AskTools(strings.NewReader(input), &out, true, tools)
+	if err != nil {
+		t.Fatalf("AskTools: %v", err)
+	}
+	if len(res) != 1 || res[0].Action != ToolSkip {
+		t.Fatalf("expected ToolSkip, got %+v", res)
+	}
+}
+
+func TestAskToolsProvidePath(t *testing.T) {
+	tools := []tooling.ToolSpec{
+		{Name: "custom", Stack: "csharp", InstallCmd: ""},
+		{Name: "ruff", Stack: "python", InstallCmd: "uv tool install ruff"},
+	}
+	// First tool: enter "path", then empty path (retry), then "/opt/bin/custom"
+	// Second tool: direct path entry "/usr/local/bin/ruff"
+	input := "path\n\n/opt/bin/custom\n/usr/local/bin/ruff\n"
+	var out bytes.Buffer
+	res, err := AskTools(strings.NewReader(input), &out, true, tools)
+	if err != nil {
+		t.Fatalf("AskTools: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("res count = %d, want 2", len(res))
+	}
+	if res[0].Action != ToolPath || res[0].CustomPath != "/opt/bin/custom" {
+		t.Fatalf("expected ToolPath with /opt/bin/custom, got %+v", res[0])
+	}
+	if res[1].Action != ToolPath || res[1].CustomPath != "/usr/local/bin/ruff" {
+		t.Fatalf("expected ToolPath with /usr/local/bin/ruff, got %+v", res[1])
+	}
+}
+
+func TestAskToolsNoInstallCommandAndInvalidInput(t *testing.T) {
+	tools := []tooling.ToolSpec{
+		{Name: "no-install", Stack: "custom"},
+	}
+	// "yes" (rejected because no install cmd), "invalid", then default (empty = skip)
+	input := "yes\ninvalid\n\n"
+	var out bytes.Buffer
+	res, err := AskTools(strings.NewReader(input), &out, true, tools)
+	if err != nil {
+		t.Fatalf("AskTools: %v", err)
+	}
+	if len(res) != 1 || res[0].Action != ToolSkip {
+		t.Fatalf("expected ToolSkip for default without install cmd, got %+v", res)
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("read error")
+}
+
+func TestAskToolsReaderError(t *testing.T) {
+	tools := []tooling.ToolSpec{{Name: "ruff", Stack: "python", InstallCmd: "uv tool install ruff"}}
+	var out bytes.Buffer
+	_, err := AskTools(errReader{}, &out, true, tools)
+	if err == nil {
+		t.Fatal("expected error on broken reader")
+	}
+
+	// Broken path reader
+	pathErrReader := io.MultiReader(strings.NewReader("path\n"), errReader{})
+	_, err = AskTools(pathErrReader, &out, true, tools)
+	if err == nil {
+		t.Fatal("expected error on broken path reader")
 	}
 }

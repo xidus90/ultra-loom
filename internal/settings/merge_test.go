@@ -382,3 +382,13 @@ func TestFormatBlockAndCommandFallbacks(t *testing.T) {
 		t.Fatalf("fallback failed:\n%s", res.Merged)
 	}
 }
+
+func TestEmptyHooksObject(t *testing.T) {
+	res, err := Merge([]byte(`{"hooks":{}}`), nil)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if !strings.Contains(string(res.Merged), `"hooks": {}`) {
+		t.Fatalf("want empty hooks object, got:\n%s", res.Merged)
+	}
+}

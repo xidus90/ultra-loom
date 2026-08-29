@@ -19,6 +19,7 @@ import (
 	"github.com/xidus90/ultra-loom/internal/interview"
 	"github.com/xidus90/ultra-loom/internal/render"
 	"github.com/xidus90/ultra-loom/internal/settings"
+	"github.com/xidus90/ultra-loom/internal/tooling"
 	"github.com/xidus90/ultra-loom/internal/vendoring"
 	"github.com/xidus90/ultra-loom/internal/write"
 )
@@ -43,6 +44,13 @@ const installedPath = ".ultraloom/installed.toml"
 // answers "did somebody edit the output instead of the source?", and the
 // source is this file.
 const answersPath = ".ultraloom/answers.toml"
+
+const preCommitHook = `#!/usr/bin/env bash
+# ultraloom pre-commit quality gate
+set -euo pipefail
+
+uv run ultraloom check precommit
+`
 
 // onPath is what brainpath.Find returns when brain is an entry on PATH -- the
 // bare name, the only form that may go into a committed file. Anything else it
@@ -69,6 +77,9 @@ type Options struct {
 	// interview. A bool flag would answer "no" for a question nobody asked.
 	ProtectMigrations string
 	ForbidPipInstall  string
+
+	InstallTools bool
+	ToolPaths    string
 
 	VendorURL string
 	VendorRef string
@@ -134,6 +145,79 @@ func run(opts Options) (int, string) {
 	if !facts.HasGit {
 		notes = append(notes, "no git repository here: the hooks that need one "+
 			"(stop gate, subagent reports) were left out")
+	} else {
+		files[".githooks/pre-commit"] = preCommitHook
+	}
+
+	look := tooling.LookPathFunc(opts.Look)
+	_, missing := tooling.CheckTools(facts.Stacks, look)
+	if opts.ToolPaths != "" {
+		explicitPaths := make(map[string]string)
+		for _, part := range strings.Split(opts.ToolPaths, ",") {
+			part = strings.TrimSpace(part)
+			if kv := strings.SplitN(part, "=", 2); len(kv) == 2 {
+				explicitPaths[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+			}
+		}
+		var remaining []tooling.ToolSpec
+		for _, m := range missing {
+			if explicitPaths[m.Name] == "" {
+				remaining = append(remaining, m)
+			}
+		}
+		missing = remaining
+	}
+
+	if opts.InstallTools && opts.Exec != nil {
+		var stillMissing []tooling.ToolSpec
+		for _, m := range missing {
+			if m.InstallCmd != "" {
+				err := tooling.InstallTool(m, tooling.Runner(opts.Exec), opts.Root)
+				if err != nil {
+					notes = append(notes, fmt.Sprintf("failed to install %s: %v", m.Name, err))
+					stillMissing = append(stillMissing, m)
+				} else {
+					notes = append(notes, fmt.Sprintf("installed %s via %s", m.Name, m.InstallCmd))
+				}
+			} else {
+				stillMissing = append(stillMissing, m)
+			}
+		}
+		missing = stillMissing
+	} else if opts.Interactive && !opts.Yes && len(missing) > 0 {
+		resolutions, err := interview.AskTools(opts.In, opts.Out, true, missing)
+		if err == nil {
+			var stillMissing []tooling.ToolSpec
+			for _, res := range resolutions {
+				switch res.Action {
+				case interview.ToolInstall:
+					if opts.Exec != nil && res.Spec.InstallCmd != "" {
+						err := tooling.InstallTool(res.Spec, tooling.Runner(opts.Exec), opts.Root)
+						if err != nil {
+							notes = append(notes, fmt.Sprintf("failed to install %s: %v", res.Spec.Name, err))
+							stillMissing = append(stillMissing, res.Spec)
+						} else {
+							notes = append(notes, fmt.Sprintf("installed %s via %s", res.Spec.Name, res.Spec.InstallCmd))
+						}
+					} else {
+						stillMissing = append(stillMissing, res.Spec)
+					}
+				case interview.ToolPath:
+					// Custom path provided by user
+				case interview.ToolSkip:
+					stillMissing = append(stillMissing, res.Spec)
+				}
+			}
+			missing = stillMissing
+		}
+	}
+
+	if len(missing) > 0 {
+		var missingList []string
+		for _, m := range missing {
+			missingList = append(missingList, fmt.Sprintf("%s (%s)", m.Name, m.InstallCmd))
+		}
+		notes = append(notes, "missing tooling on PATH: "+strings.Join(missingList, ", "))
 	}
 
 	// Decided before the clone, although it is applied last: the merge is the
@@ -218,6 +302,9 @@ func run(opts Options) (int, string) {
 		// Everything write.Commit had to do is done by now, so the whole plan
 		// is what this run left standing.
 		return exitOwn, landed(err.Error(), written)
+	}
+	if facts.HasGit && facts.HooksPath == "" && opts.Exec != nil {
+		_, _ = opts.Exec(opts.Root, "git", "config", "core.hooksPath", ".githooks")
 	}
 	return exitDone, describe(plan, merged.what, notes, false)
 }
