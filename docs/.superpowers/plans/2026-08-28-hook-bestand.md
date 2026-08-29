@@ -22,11 +22,11 @@
 - Consumes: `settings.Entry`
 - Produces: `settings.Merge(existing []byte, wanted []Entry) (Result, error)` supporting multiple entries per event with distinct commands.
 
-- [ ] **Step 1: Write test for merging multiple owned entries under same event**
-- [ ] **Step 2: Run test to verify failure**
-- [ ] **Step 3: Update `merge.go` to match entries by command/matcher/owner**
-- [ ] **Step 4: Run tests to verify they pass**
-- [ ] **Step 5: Commit**
+- [x] **Step 1: Write test for merging multiple owned entries under same event**
+- [x] **Step 2: Run test to verify failure**
+- [x] **Step 3: Update `merge.go` to match entries by command/matcher/owner**
+- [x] **Step 4: Run tests to verify they pass**
+- [x] **Step 5: Commit**
 
 ---
 
@@ -40,11 +40,11 @@
 - Consumes: `detect.Facts.Stacks`, `settings.Entry`
 - Produces: `hookEntries(facts detect.Facts, wikiHooks bool) []settings.Entry` generating direct tool entries for Python (`ruff`, `dmypy`), Godot (`gdlint`), C# (`dotnet format`, `dotnet build`), TS (`eslint`, `tsc`), Rust (`clippy`, `fmt`), Go (`go vet`).
 
-- [ ] **Step 1: Write unit tests for `hookEntries` covering each stack**
-- [ ] **Step 2: Run tests to verify failure**
-- [ ] **Step 3: Implement stack-specific hook generation in `cmd/init/run.go`**
-- [ ] **Step 4: Run tests to verify they pass**
-- [ ] **Step 5: Commit**
+- [x] **Step 1: Write unit tests for `hookEntries` covering each stack**
+- [x] **Step 2: Run tests to verify failure**
+- [x] **Step 3: Implement stack-specific hook generation in `cmd/init/run.go`**
+- [x] **Step 4: Run tests to verify they pass**
+- [x] **Step 5: Commit**
 
 ---
 
@@ -54,7 +54,7 @@
 - Test: `uv run ultraloom check all`
 - Test: Run `ulinit.exe` against `.worktrees/test-installer` in `space` repo and inspect generated `.claude/settings.json`.
 
-- [ ] **Step 1: Run full gate `uv run ultraloom check all`**
-- [ ] **Step 2: Build `ulinit.exe` and test against `space` worktree**
-- [ ] **Step 3: Verify `.claude/settings.json` contains parallel direct tool entries**
-- [ ] **Step 4: Commit and finalize**
+- [x] **Step 1: Run full gate `uv run ultraloom check all`**
+- [x] **Step 2: Build `ulinit.exe` and test against `space` worktree**
+- [x] **Step 3: Verify `.claude/settings.json` contains parallel direct tool entries**
+- [x] **Step 4: Commit and finalize**

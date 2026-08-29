@@ -288,6 +288,7 @@ func TestToolKeyExtraction(t *testing.T) {
 		"cargo fmt --check":                 "cargo_fmt",
 		"npx eslint .":                      "eslint",
 		"npx tsc --noEmit":                  "tsc",
+		"go vet ./...":                      "go_vet",
 		`uv run --project "vendor/ultraloom" ultraloom hook post-edit`: "hook_post-edit",
 		`ultraloom policy hook`: "policy_hook",
 		`ultraloom sync`:        "sync",

@@ -331,6 +331,10 @@ func toolKey(cmd string) string {
 			sub := strings.ToLower(strings.Trim(words[i+1], `"'`))
 			return "cargo_" + sub
 		}
+		if clean == "go" && i+1 < len(words) {
+			sub := strings.ToLower(strings.Trim(words[i+1], `"'`))
+			return "go_" + sub
+		}
 		return clean
 	}
 	return cmd

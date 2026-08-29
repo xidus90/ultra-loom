@@ -1317,3 +1317,60 @@ func TestGatherWithExistingWiki(t *testing.T) {
 		t.Fatalf("WikiMode = %q, want 'brain'", facts.WikiMode)
 	}
 }
+
+func TestPostEditEntriesAllStacks(t *testing.T) {
+	// 1. Python with uv
+	pyUV := postEditEntries([]string{"python", "uv"})
+	if len(pyUV) != 2 || !strings.Contains(pyUV[0].Command, "uv run ruff") || !strings.Contains(pyUV[1].Command, "uv run dmypy") {
+		t.Fatalf("pyUV = %+v", pyUV)
+	}
+
+	// 2. Python without uv
+	pyPlain := postEditEntries([]string{"python"})
+	if len(pyPlain) != 2 || !strings.Contains(pyPlain[0].Command, "ruff check") || !strings.Contains(pyPlain[1].Command, "mypy") {
+		t.Fatalf("pyPlain = %+v", pyPlain)
+	}
+
+	// 3. GDScript
+	gd := postEditEntries([]string{"gdscript"})
+	if len(gd) != 1 || !strings.Contains(gd[0].Command, "uvx gdlint") {
+		t.Fatalf("gd = %+v", gd)
+	}
+
+	// 4. C#
+	cs := postEditEntries([]string{"csharp"})
+	if len(cs) != 2 || !strings.Contains(cs[0].Command, "dotnet format") || !strings.Contains(cs[1].Command, "dotnet build") {
+		t.Fatalf("cs = %+v", cs)
+	}
+
+	// 5. TypeScript
+	ts := postEditEntries([]string{"typescript"})
+	if len(ts) != 2 || !strings.Contains(ts[0].Command, "npx eslint") || !strings.Contains(ts[1].Command, "npx tsc") {
+		t.Fatalf("ts = %+v", ts)
+	}
+
+	// 6. Rust
+	rs := postEditEntries([]string{"rust"})
+	if len(rs) != 2 || !strings.Contains(rs[0].Command, "cargo clippy") || !strings.Contains(rs[1].Command, "cargo fmt") {
+		t.Fatalf("rs = %+v", rs)
+	}
+
+	// 7. Go
+	goEntries := postEditEntries([]string{"go"})
+	if len(goEntries) != 1 || !strings.Contains(goEntries[0].Command, "go vet") {
+		t.Fatalf("goEntries = %+v", goEntries)
+	}
+
+	// 8. Fallback in hookEntries
+	fallback := hookEntries(detect.Facts{}, false)
+	foundFallback := false
+	for _, e := range fallback {
+		if e.Event == "PostToolUse" && strings.Contains(e.Command, "hook post-edit") {
+			foundFallback = true
+			break
+		}
+	}
+	if !foundFallback {
+		t.Fatalf("fallback hook post-edit not found in hookEntries: %+v", fallback)
+	}
+}
