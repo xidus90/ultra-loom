@@ -29,3 +29,5 @@ htmlcov/
 # lands here under this name too unless someone passes -o.
 /init
 /init.exe
+/ulinit
+/ulinit.exe
