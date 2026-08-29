@@ -303,10 +303,30 @@ func run(opts Options) (int, string) {
 		// is what this run left standing.
 		return exitOwn, landed(err.Error(), written)
 	}
-	if facts.HasGit && facts.HooksPath == "" && opts.Exec != nil {
-		_, _ = opts.Exec(opts.Root, "git", "config", "core.hooksPath", ".githooks")
+	if facts.HasGit {
+		if facts.HooksPath == "" && opts.Exec != nil {
+			_, _ = opts.Exec(opts.Root, "git", "config", "core.hooksPath", ".githooks")
+		}
+		_ = writeGitHooks(opts.Root)
 	}
 	return exitDone, describe(plan, merged.what, notes, false)
+}
+
+func writeGitHooks(root string) error {
+	hooksDir := filepath.Join(root, ".githooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return err
+	}
+	_ = writeHookIfMissing(filepath.Join(hooksDir, "pre-commit"), "#!/usr/bin/env bash\n# UltraLoom pre-commit quality gate\nset -euo pipefail\n\nuv run ultraloom check all\n")
+	_ = writeHookIfMissing(filepath.Join(hooksDir, "commit-msg"), "#!/usr/bin/env bash\n# UltraLoom commit message quality gate\nset -euo pipefail\n\nulinit check commit-msg \"$1\"\n")
+	return nil
+}
+
+func writeHookIfMissing(path, content string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return os.WriteFile(path, []byte(content), 0o755)
+	}
+	return nil
 }
 
 // decisions is what this run starts from: the answer file a previous run left,

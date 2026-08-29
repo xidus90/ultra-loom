@@ -1390,3 +1390,40 @@ func TestSettingsWriteErrors(t *testing.T) {
 		t.Fatal("expected error for .claude as file, got nil")
 	}
 }
+
+func TestWriteGitHooks(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := writeGitHooks(tmpDir); err != nil {
+		t.Fatalf("writeGitHooks failed: %v", err)
+	}
+
+	preCommit := filepath.Join(tmpDir, ".githooks", "pre-commit")
+	commitMsg := filepath.Join(tmpDir, ".githooks", "commit-msg")
+
+	if _, err := os.Stat(preCommit); err != nil {
+		t.Fatalf("expected .githooks/pre-commit, got: %v", err)
+	}
+	if _, err := os.Stat(commitMsg); err != nil {
+		t.Fatalf("expected .githooks/commit-msg, got: %v", err)
+	}
+
+	// Calling again does not fail or overwrite custom content
+	os.WriteFile(commitMsg, []byte("custom hook"), 0755)
+	if err := writeGitHooks(tmpDir); err != nil {
+		t.Fatalf("second call failed: %v", err)
+	}
+	data, _ := os.ReadFile(commitMsg)
+	if string(data) != "custom hook" {
+		t.Fatalf("expected custom hook preserved, got %s", string(data))
+	}
+}
+
+func TestWriteGitHooksError(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Create .githooks as a file so that MkdirAll fails
+	hooksFile := filepath.Join(tmpDir, ".githooks")
+	os.WriteFile(hooksFile, []byte("file"), 0644)
+	if err := writeGitHooks(tmpDir); err == nil {
+		t.Fatal("expected error for .githooks as file, got nil")
+	}
+}

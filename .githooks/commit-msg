@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# UltraLoom commit message quality gate
+set -euo pipefail
+
+./ulinit check commit-msg "$1"
