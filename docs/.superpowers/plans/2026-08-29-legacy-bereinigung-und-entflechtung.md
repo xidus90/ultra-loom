@@ -32,9 +32,9 @@
 - Consumes: None
 - Produces: Cleaned `src/ultraloom/` tree with legacy wrappers removed.
 
-- [ ] **Step 1: Remove legacy files**
-- [ ] **Step 2: Verify removals via git status**
-- [ ] **Step 3: Commit deletion**
+- [x] **Step 1: Remove legacy files**
+- [x] **Step 2: Verify removals via git status**
+- [x] **Step 3: Commit deletion**
 
 ---
 
@@ -51,12 +51,12 @@
 - Consumes: `src/ultraloom/cli.py`
 - Produces: Cleaned CLI without `policy` or `hook post-edit` subcommands; simplified `checks.py` without `toolchain` import.
 
-- [ ] **Step 1: Remove `policy` and `hook post-edit` subcommands from `src/ultraloom/cli.py`**
-- [ ] **Step 2: Update `src/ultraloom/hooks/cli.py` to remove `post-edit` dispatch**
-- [ ] **Step 3: Remove `toolchain` references from `src/ultraloom/checks.py`**
-- [ ] **Step 4: Update CLI and hooks test suites in `tests/test_cli.py` and `tests/hooks/test_cli.py`**
-- [ ] **Step 5: Run `uv run pytest` to verify 100% test pass and 100% Python coverage**
-- [ ] **Step 6: Commit**
+- [x] **Step 1: Remove `policy` and `hook post-edit` subcommands from `src/ultraloom/cli.py`**
+- [x] **Step 2: Update `src/ultraloom/hooks/cli.py` to remove `post-edit` dispatch**
+- [x] **Step 3: Remove `toolchain` references from `src/ultraloom/checks.py`**
+- [x] **Step 4: Update CLI and hooks test suites in `tests/test_cli.py` and `tests/hooks/test_cli.py`**
+- [x] **Step 5: Run `uv run pytest` to verify 100% test pass and 100% Python coverage**
+- [x] **Step 6: Commit**
 
 ---
 
@@ -70,11 +70,11 @@
 - Consumes: `cmd/init/run.go`
 - Produces: `preCommitHook` generating `uv run ultraloom check all`.
 
-- [ ] **Step 1: Update `preCommitHook` in `cmd/init/run.go` to use `uv run ultraloom check all`**
-- [ ] **Step 2: Update assertions in `cmd/init/run_test.go`**
-- [ ] **Step 3: Run `go test ./...` and verify $\ge 98.0\%$ Go statement coverage**
-- [ ] **Step 4: Run full quality gate `uv run ultraloom check all`**
-- [ ] **Step 5: Commit**
+- [x] **Step 1: Update `preCommitHook` in `cmd/init/run.go` to use `uv run ultraloom check all`**
+- [x] **Step 2: Update assertions in `cmd/init/run_test.go`**
+- [x] **Step 3: Run `go test ./...` and verify $\ge 98.0\%$ Go statement coverage**
+- [x] **Step 4: Run full quality gate `uv run ultraloom check all`**
+- [x] **Step 5: Commit**
 
 ---
 
@@ -88,8 +88,8 @@
 - Consumes: Complete command inventory (Go installer & runtime commands, UltraLoom flow & commit commands).
 - Produces: Up-to-date bilingual documentation outlining installer commands (`ulinit`, `ulguard`) and CLI commands (`ultraloom run`, `ultraloom check`, `ultraloom commit-msg`).
 
-- [ ] **Step 1: Update `README.md` with the full categorized command reference**
-- [ ] **Step 2: Update `README.de.md` with the German translation of the command reference**
-- [ ] **Step 3: Verify cross-links between `README.md` and `README.de.md`**
-- [ ] **Step 4: Run `uv run ultraloom check all`**
-- [ ] **Step 5: Commit**
+- [x] **Step 1: Update `README.md` with the full categorized command reference**
+- [x] **Step 2: Update `README.de.md` with the German translation of the command reference**
+- [x] **Step 3: Verify cross-links between `README.md` and `README.de.md`**
+- [x] **Step 4: Run `uv run ultraloom check all`**
+- [x] **Step 5: Commit**

@@ -6,6 +6,93 @@ A check chain that puts one interface in front of ruff, eslint, gdlint, mypy,
 tsc, pytest, vitest and coverage — and an optional graph harness for agent
 flows.
 
+## Command Inventory
+
+UltraLoom provides native Go binaries for project setup and sub-millisecond policy enforcement, alongside a Python CLI for verification checks, agent flows, and commit language validation:
+
+### 1. Installer & Setup (Go / `ulinit`)
+
+The installer inspects the repository, validates toolchains on `$PATH`, installs missing tools, and configures direct Tier-1 shims in `.claude/settings.json`:
+
+```bash
+# Interactive project initialization
+ulinit
+
+# Non-interactive initialization with defaults
+ulinit --yes
+
+# Dry-run inspection without writing files
+ulinit --dry-run
+
+# Inspect detected stacks, tools, and facts only (JSON output)
+ulinit --detect-only
+
+# Auto-install missing stack tools via uv tool
+ulinit --install-tools
+
+# Explicitly specify a tool's executable path
+ulinit --tool-path ruff=/usr/local/bin/ruff
+```
+
+### 2. Policy Guard (Go / `ulguard`)
+
+Fast `<1ms` `PreToolUse` policy enforcer that validates file write targets, notebook operations, and shell commands against built-in rules and `.ultraloom/policy.toml`:
+
+```bash
+# Invoked by Claude Code PreToolUse hook (reads JSON payload on stdin)
+ulguard --root .
+```
+
+### 3. Check Chain & Verification (Python / `ultraloom check`)
+
+Runs linters, typecheckers, test suites, and coverage reporting:
+
+```bash
+uvx ultraloom check lint       # Run linter
+uvx ultraloom check types      # Run typechecker
+uvx ultraloom check test       # Run tests
+uvx ultraloom check coverage   # Report coverage
+uvx ultraloom check all        # Run complete verification suite
+```
+
+### 4. Agent Flows & Graph Runtime (Python / `ultraloom run`)
+
+Executes multi-turn agent repair loops with audit journals and worktree isolation:
+
+```bash
+# Run the verify-until-green flow
+uv run ultraloom run verify-until-green
+
+# View audit journal entries from past runs
+uv run ultraloom show 0001
+
+# Resume a run waiting at a gate
+uv run ultraloom resume 0001 --answer "yes"
+```
+
+### 5. Commit Message Language Gate (Python / `ultraloom commit-msg`)
+
+Validates commit message language against the configured policy in `[commit].language`:
+
+```bash
+# Validate a commit message file (invoked by Git commit-msg hook)
+uv run ultraloom commit-msg .git/COMMIT_EDITMSG
+
+# Calibrate language thresholds against git history
+uv run ultraloom commit-msg --calibrate 50 --language en
+```
+
+### 6. Agent Lifecycle Hooks (Python / `ultraloom hook`)
+
+Tracks agent state and turn completion:
+
+```bash
+uv run ultraloom hook session-start   # Reports pending gates & records base commit
+uv run ultraloom hook stop            # Verifies changed files before ending turn
+uv run ultraloom hook subagent-start  # Records remote/HEAD snapshot
+uv run ultraloom hook subagent-stop   # Reports remote ref drift
+```
+
 ## The check chain
 
     uvx ultraloom check lint
