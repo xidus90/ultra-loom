@@ -43,6 +43,28 @@ func TestCheckToolsDefaultLookup(t *testing.T) {
 	_, _ = DefaultLookPath("go")
 }
 
+func TestCheckToolsCPP(t *testing.T) {
+	fakePaths := map[string]string{
+		"clang-format": "/usr/bin/clang-format",
+		"clang-tidy":   "/usr/bin/clang-tidy",
+		"cmake":        "/usr/bin/cmake",
+		"ninja":        "/usr/bin/ninja",
+	}
+	lookup := func(name string) (string, error) {
+		if path, ok := fakePaths[name]; ok {
+			return path, nil
+		}
+		return "", errors.New("not found")
+	}
+	found, missing := CheckTools([]string{"cpp"}, lookup)
+	if len(missing) != 0 {
+		t.Fatalf("expected 0 missing cpp tools, got %v", missing)
+	}
+	if found["cmake"] != "/usr/bin/cmake" || found["clang-format"] != "/usr/bin/clang-format" {
+		t.Fatalf("unexpected found tools: %v", found)
+	}
+}
+
 func TestInstallTool(t *testing.T) {
 	spec := ToolSpec{
 		Name:       "ruff",

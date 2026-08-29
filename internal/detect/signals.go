@@ -25,14 +25,13 @@ var signals = []signal{
 	{path: "requirements.txt", stacks: []string{"python"}},
 	{path: "manage.py", stacks: []string{"python", "django"}},
 	{path: "project.godot", stacks: []string{"godot", "gdscript"}},
-	{path: "project.godot", stacks: []string{"csharp"}, contains: "[dotnet]"},
-	{glob: "*.csproj", stacks: []string{"csharp"}},
-	{glob: "*.sln", stacks: []string{"csharp"}},
-	// Two rows for one conclusion, because either NuGet reference is enough
-	// and `contains` holds a single string. What it buys downstream is
-	// `dotnet test` and a coverlet LCOV that joins the merge.
-	{glob: "*.csproj", stacks: []string{"gdunit4"}, contains: "gdUnit4.api"},
-	{glob: "*.csproj", stacks: []string{"gdunit4"}, contains: "gdUnit4.test.adapter"},
+	{path: "CMakeLists.txt", stacks: []string{"cpp", "cmake"}},
+	{path: "CMakePresets.json", stacks: []string{"cpp", "cmake"}},
+	{path: "meson.build", stacks: []string{"cpp", "meson"}},
+	{glob: "*.cpp", stacks: []string{"cpp"}},
+	{glob: "*.hpp", stacks: []string{"cpp"}},
+	{path: ".clang-tidy", stacks: []string{"cpp", "clang-tidy"}},
+	{path: ".clang-format", stacks: []string{"cpp", "clang-format"}},
 	{path: "tsconfig.json", besides: "package.json", stacks: []string{"typescript"}},
 	{path: "biome.json", stacks: []string{"biome", "typescript"}},
 	{path: "pnpm-workspace.yaml", stacks: []string{"pnpm"}},

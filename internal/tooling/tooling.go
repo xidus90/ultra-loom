@@ -23,8 +23,11 @@ var StackTools = map[string][]ToolSpec{
 	"gdscript": {
 		{Name: "gdlint", Stack: "gdscript", InstallCmd: "uv tool install gdtoolkit==4.3.3", Description: "GDScript linter and code quality checker"},
 	},
-	"csharp": {
-		{Name: "dotnet", Stack: "csharp", InstallCmd: "winget install Microsoft.DotNet.SDK.9", Description: ".NET SDK for C# building and formatting"},
+	"cpp": {
+		{Name: "clang-format", Stack: "cpp", InstallCmd: "winget install LLVM.LLVM", Description: "Clang code formatter for C++"},
+		{Name: "clang-tidy", Stack: "cpp", InstallCmd: "winget install LLVM.LLVM", Description: "Clang static analyzer and linter for C++"},
+		{Name: "cmake", Stack: "cpp", InstallCmd: "winget install Kitware.CMake", Description: "Cross-platform build system generator"},
+		{Name: "ninja", Stack: "cpp", InstallCmd: "winget install Ninja-build.Ninja", Description: "Fast build executor"},
 	},
 	"typescript": {
 		{Name: "npx", Stack: "typescript", InstallCmd: "npm install -g npx", Description: "Node package runner"},

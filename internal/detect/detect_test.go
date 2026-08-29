@@ -21,16 +21,18 @@ func TestUvManagedPythonIsDetected(t *testing.T) {
 	}
 }
 
-func TestGodotWithDotnetKeepsBothStacks(t *testing.T) {
+func TestGodotKeepsGdscriptStack(t *testing.T) {
 	tree := fstest.MapFS{
-		"project.godot": {Data: []byte("config_version=5\n\n[dotnet]\n\nproject/assembly_name=\"space\"\n")},
-		"space.csproj":  {Data: []byte("<Project/>")},
+		"project.godot": {Data: []byte("config_version=5\n\nproject/assembly_name=\"space\"\n")},
 	}
 	facts := Detect(tree)
-	for _, want := range []string{"godot", "gdscript", "csharp"} {
+	for _, want := range []string{"godot", "gdscript"} {
 		if !has(facts.Stacks, want) {
 			t.Fatalf("stacks = %v, want %s", facts.Stacks, want)
 		}
+	}
+	if has(facts.Stacks, "csharp") {
+		t.Fatalf("stacks = %v, want no csharp", facts.Stacks)
 	}
 }
 
@@ -41,18 +43,31 @@ func TestAnEmptyTreeDetectsNothingAndSaysSo(t *testing.T) {
 	}
 }
 
-// A Godot project without the C# section is the false alarm this must not
-// raise: separating the two is the whole reason `contains` exists.
-func TestGodotWithoutDotnetStaysGdscript(t *testing.T) {
+func TestCPPSignalsAreDetected(t *testing.T) {
 	tree := fstest.MapFS{
-		"project.godot": {Data: []byte("config_version=5\n")},
+		"CMakeLists.txt": {Data: []byte("cmake_minimum_required(VERSION 3.20)\n")},
+		".clang-format":  {Data: []byte("BasedOnStyle: LLVM\n")},
+		".clang-tidy":    {Data: []byte("Checks: '*'\n")},
 	}
 	facts := Detect(tree)
-	if !has(facts.Stacks, "gdscript") {
-		t.Fatalf("stacks = %v, want gdscript", facts.Stacks)
+	for _, want := range []string{"cpp", "cmake", "clang-format", "clang-tidy"} {
+		if !has(facts.Stacks, want) {
+			t.Errorf("stacks = %v, want %s", facts.Stacks, want)
+		}
 	}
 	if has(facts.Stacks, "csharp") {
 		t.Fatalf("stacks = %v, want no csharp", facts.Stacks)
+	}
+}
+
+func TestCPPGlobSignalsAreDetected(t *testing.T) {
+	tree := fstest.MapFS{
+		"main.cpp":   {Data: []byte("int main() { return 0; }\n")},
+		"header.hpp": {Data: []byte("#pragma once\n")},
+	}
+	facts := Detect(tree)
+	if !has(facts.Stacks, "cpp") {
+		t.Fatalf("stacks = %v, want cpp from *.cpp and *.hpp globs", facts.Stacks)
 	}
 }
 
@@ -63,14 +78,16 @@ func TestAWorkspaceMemberIsSeenOneLevelDown(t *testing.T) {
 		"backend/pyproject.toml":  {Data: []byte("[project]\n")},
 		"frontend/tsconfig.json":  {Data: []byte("{}")},
 		"frontend/package.json":   {Data: []byte("{}")},
-		"game/project.godot":      {Data: []byte("config_version=5\n\n[dotnet]\n")},
-		"game/game.csproj":        {Data: []byte("<Project/>")},
+		"game/CMakeLists.txt":     {Data: []byte("cmake_minimum_required(VERSION 3.20)\n")},
 	}
 	facts := Detect(tree)
-	for _, want := range []string{"python", "typescript", "godot", "gdscript", "csharp"} {
+	for _, want := range []string{"python", "typescript", "cpp", "cmake"} {
 		if !has(facts.Stacks, want) {
 			t.Fatalf("stacks = %v, want %s", facts.Stacks, want)
 		}
+	}
+	if has(facts.Stacks, "csharp") {
+		t.Fatalf("stacks = %v, want no csharp", facts.Stacks)
 	}
 	// Two levels down is a member's own layout, not a member.
 	if has(facts.Stacks, "rust") {
@@ -133,20 +150,17 @@ func TestDjangoAsksAboutMigrations(t *testing.T) {
 	}
 }
 
-func TestGdUnit4IsSeenInTheCsproj(t *testing.T) {
-	for _, reference := range []string{"gdUnit4.api", "gdUnit4.test.adapter"} {
-		t.Run(reference, func(t *testing.T) {
-			facts := Detect(fstest.MapFS{
-				"game.csproj": {Data: []byte("<Project><PackageReference Include=\"" + reference + "\" /></Project>")},
-			})
-			if !has(facts.Stacks, "gdunit4") {
-				t.Fatalf("stacks = %v, want gdunit4", facts.Stacks)
-			}
-		})
+func TestMesonIsDetectedAsCPP(t *testing.T) {
+	facts := Detect(fstest.MapFS{
+		"meson.build": {Data: []byte("project('myproj', 'cpp')\n")},
+	})
+	for _, want := range []string{"cpp", "meson"} {
+		if !has(facts.Stacks, want) {
+			t.Fatalf("stacks = %v, want %s", facts.Stacks, want)
+		}
 	}
-	plain := Detect(fstest.MapFS{"game.csproj": {Data: []byte("<Project/>")}})
-	if has(plain.Stacks, "gdunit4") {
-		t.Fatalf("stacks = %v, want no gdunit4", plain.Stacks)
+	if has(facts.Stacks, "csharp") {
+		t.Fatalf("stacks = %v, want no csharp", facts.Stacks)
 	}
 }
 

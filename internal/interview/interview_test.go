@@ -412,7 +412,7 @@ func TestAskToolsSkip(t *testing.T) {
 
 func TestAskToolsProvidePath(t *testing.T) {
 	tools := []tooling.ToolSpec{
-		{Name: "custom", Stack: "csharp", InstallCmd: ""},
+		{Name: "custom", Stack: "cpp", InstallCmd: ""},
 		{Name: "ruff", Stack: "python", InstallCmd: "uv tool install ruff"},
 	}
 	// First tool: enter "path", then empty path (retry), then "/opt/bin/custom"

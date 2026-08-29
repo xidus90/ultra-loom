@@ -54,6 +54,11 @@ def godot_project(root: Path) -> Path:
     return root
 
 
+def cpp_project(root: Path) -> Path:
+    (root / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.20)\n", encoding="utf-8")
+    return root
+
+
 def local_tool(root: Path, name: str) -> Path:
     tool = root / name
     tool.write_text("", encoding="utf-8")
@@ -138,6 +143,24 @@ def test_the_godot_preset_is_found_from_project_godot(tmp_path: Path) -> None:
     godot_project(tmp_path)
 
     assert resolve_check("lint", load_config(tmp_path)).argvs[0] == ("uvx", "gdlint", ".")
+
+
+def test_the_cpp_cmake_preset_is_found_from_cmakelists(tmp_path: Path) -> None:
+    cpp_project(tmp_path)
+    local_tool(tmp_path, "clang-tidy")
+    local_tool(tmp_path, "ctest")
+    local_tool(tmp_path, "gcovr")
+
+    lint = resolve_check("lint", load_config(tmp_path)).argvs[0]
+    test = resolve_check("test", load_config(tmp_path)).argvs[0]
+    cov = resolve_check("coverage", load_config(tmp_path)).argvs[0]
+
+    assert (Path(lint[0]).name, lint[1:]) == ("clang-tidy", ("-p", "build"))
+    assert (Path(test[0]).name, test[1:]) == (
+        "ctest",
+        ("--test-dir", "build", "--output-on-failure"),
+    )
+    assert (Path(cov[0]).name, cov[1:]) == ("gcovr", ("--cobertura", "coverage.xml"))
 
 
 def test_gdscript_has_no_typechecker_and_says_so(tmp_path: Path) -> None:

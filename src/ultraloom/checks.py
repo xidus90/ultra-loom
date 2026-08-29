@@ -88,6 +88,11 @@ PRESETS: Mapping[str, Mapping[str, Preset]] = {
             after="test",
         ),
     },
+    "CMakeLists.txt": {
+        "lint": Preset(("clang-tidy", "-p", "build")),
+        "test": Preset(("ctest", "--test-dir", "build", "--output-on-failure")),
+        "coverage": Preset(("gcovr", "--cobertura", "coverage.xml")),
+    },
     "package.json": {
         "lint": Preset(("eslint", ".")),
         "types": Preset(("tsc", "--noEmit")),

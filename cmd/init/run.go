@@ -812,12 +812,12 @@ func postEditEntries(stacks []string) []settings.Entry {
 			Command: "gdlint .", Timeout: 15,
 		})
 	}
-	if hasStack("csharp") {
+	if hasStack("cpp") {
 		entries = append(entries,
 			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-				Command: "dotnet format --verify-no-changes", Timeout: 30},
+				Command: "clang-format -i", Timeout: 15},
 			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-				Command: "dotnet build --no-restore", Timeout: 45},
+				Command: "cmake --build build --parallel", Timeout: 45},
 		)
 	}
 	if hasStack("typescript") {

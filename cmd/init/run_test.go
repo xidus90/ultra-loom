@@ -906,9 +906,9 @@ func TestPostEditEntriesPerStack(t *testing.T) {
 			commands: []string{"gdlint ."},
 		},
 		{
-			name:     "csharp",
-			stacks:   []string{"csharp"},
-			commands: []string{"dotnet format --verify-no-changes", "dotnet build --no-restore"},
+			name:     "cpp",
+			stacks:   []string{"cpp", "cmake"},
+			commands: []string{"clang-format -i", "cmake --build build --parallel"},
 		},
 		{
 			name:     "typescript",
@@ -926,9 +926,9 @@ func TestPostEditEntriesPerStack(t *testing.T) {
 			commands: []string{"go vet ./..."},
 		},
 		{
-			name:     "multi-stack csharp and godot",
-			stacks:   []string{"csharp", "gdscript", "godot"},
-			commands: []string{"gdlint .", "dotnet format --verify-no-changes", "dotnet build --no-restore"},
+			name:     "multi-stack cpp and godot",
+			stacks:   []string{"cpp", "gdscript", "godot"},
+			commands: []string{"gdlint .", "clang-format -i", "cmake --build build --parallel"},
 		},
 		{
 			name:     "unknown stack fallback",
@@ -1327,10 +1327,10 @@ func TestPostEditEntriesAllStacks(t *testing.T) {
 		t.Fatalf("gd = %+v", gd)
 	}
 
-	// 4. C#
-	cs := postEditEntries([]string{"csharp"})
-	if len(cs) != 2 || !strings.Contains(cs[0].Command, "dotnet format") || !strings.Contains(cs[1].Command, "dotnet build") {
-		t.Fatalf("cs = %+v", cs)
+	// 4. C++
+	cpp := postEditEntries([]string{"cpp"})
+	if len(cpp) != 2 || !strings.Contains(cpp[0].Command, "clang-format") || !strings.Contains(cpp[1].Command, "cmake --build") {
+		t.Fatalf("cpp = %+v", cpp)
 	}
 
 	// 5. TypeScript
