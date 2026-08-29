@@ -52,7 +52,7 @@ tests = ["tests/", "pyproject.toml"]
 [verify.lint]
 commands = [
   "uv run ruff check .",
-  "uv run --script hooks/gofmt-check.py cmd internal",
+  "./ulinit check gofmt cmd internal",
   "go vet ./...",
 ]
 threaded = true

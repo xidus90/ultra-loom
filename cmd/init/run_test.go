@@ -1372,3 +1372,21 @@ func TestPostEditEntriesAllStacks(t *testing.T) {
 		t.Fatalf("ruff check not found in pyHookEntries: %+v", pyHookEntries)
 	}
 }
+
+func TestSettingsWriteUnchanged(t *testing.T) {
+	sw := settingsWrite{changed: false}
+	if err := sw.apply(); err != nil {
+		t.Fatalf("expected nil error for unchanged settingsWrite, got %v", err)
+	}
+}
+
+func TestSettingsWriteErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Create a file named .claude so that MkdirAll or CheckParents fails
+	claudeFile := filepath.Join(tmpDir, ".claude")
+	os.WriteFile(claudeFile, []byte("file"), 0644)
+	sw := settingsWrite{root: tmpDir, changed: true, body: []byte("{}")}
+	if err := sw.apply(); err == nil {
+		t.Fatal("expected error for .claude as file, got nil")
+	}
+}

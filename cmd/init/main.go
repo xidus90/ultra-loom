@@ -32,6 +32,10 @@ func main() {
 
 // cli is main without the process, so the tests can drive it.
 func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "check" {
+		return runCheck(args[1:], stdout, stderr)
+	}
+
 	flags := flag.NewFlagSet("ultraloom-init", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	showVersion := flags.Bool("version", false, "print the version and exit")

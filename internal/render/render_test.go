@@ -484,4 +484,15 @@ func TestRenderDocumentTemplatesAccordingToAgents(t *testing.T) {
 	if _, ok := filesClaude[".claude/skills/verify-until-green/SKILL.md"]; !ok {
 		t.Fatal("want .claude verify-until-green skill")
 	}
+
+	// 4. No agents
+	fNoAgents := fixture()
+	fNoAgents.Project.Agents = []string{}
+	filesNoAgents, err := Render(fNoAgents, false)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if len(filesNoAgents) != 4 {
+		t.Fatalf("expected exactly 4 core files for no agents, got %d", len(filesNoAgents))
+	}
 }

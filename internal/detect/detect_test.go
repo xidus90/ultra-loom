@@ -249,6 +249,21 @@ func (f listableFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	return fs.ReadDir(f.tree, name)
 }
 
+func TestEcosystemToolingDetection(t *testing.T) {
+	tree := fstest.MapFS{
+		"biome.json":          {Data: []byte("{}")},
+		"pnpm-workspace.yaml": {Data: []byte("packages:\n  - 'apps/*'")},
+		".gdlintrc":           {Data: []byte("")},
+		"docker-compose.yml":  {Data: []byte("version: '3'")},
+	}
+	facts := Detect(tree)
+	for _, want := range []string{"biome", "typescript", "pnpm", "gdlint", "gdscript", "docker"} {
+		if !has(facts.Stacks, want) {
+			t.Errorf("stacks = %v, want %s", facts.Stacks, want)
+		}
+	}
+}
+
 func has(all []string, one string) bool {
 	for _, candidate := range all {
 		if candidate == one {

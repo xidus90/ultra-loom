@@ -205,3 +205,13 @@ func TestRelativePathHelper(t *testing.T) {
 		t.Fatalf("outside = %q", outside)
 	}
 }
+
+func TestGuardBlocksMultiEdit(t *testing.T) {
+	root := t.TempDir()
+	payload := `{"tool_name": "MultiEdit", "tool_input": {"file_path": ".env"}}`
+	var stderr bytes.Buffer
+	code := runGuard(strings.NewReader(payload), &stderr, root)
+	if code != ExitDenied {
+		t.Fatalf("code = %d, want ExitDenied for MultiEdit on .env", code)
+	}
+}

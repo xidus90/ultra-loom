@@ -136,7 +136,7 @@ func checkTool(root string, payload HookPayload, policy PolicyFile) []string {
 	// File tools
 	var path string
 	switch tool {
-	case "Write", "Edit":
+	case "Write", "Edit", "MultiEdit":
 		if p, ok := input["file_path"].(string); ok {
 			path = p
 		}

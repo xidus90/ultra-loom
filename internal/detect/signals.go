@@ -34,6 +34,11 @@ var signals = []signal{
 	{glob: "*.csproj", stacks: []string{"gdunit4"}, contains: "gdUnit4.api"},
 	{glob: "*.csproj", stacks: []string{"gdunit4"}, contains: "gdUnit4.test.adapter"},
 	{path: "tsconfig.json", besides: "package.json", stacks: []string{"typescript"}},
+	{path: "biome.json", stacks: []string{"biome", "typescript"}},
+	{path: "pnpm-workspace.yaml", stacks: []string{"pnpm"}},
+	{path: ".gdlintrc", stacks: []string{"gdlint", "gdscript"}},
+	{path: "docker-compose.yml", stacks: []string{"docker"}},
+	{path: "compose.yaml", stacks: []string{"docker"}},
 	{path: "Cargo.toml", stacks: []string{"rust"}},
 	{path: "go.mod", stacks: []string{"go"}},
 }
