@@ -784,65 +784,17 @@ func applyAgentsFlag(given string, target *[]string) error {
 }
 
 func postEditEntries(stacks []string) []settings.Entry {
-	var entries []settings.Entry
-	hasStack := func(name string) bool {
-		return has(stacks, name)
+	if len(stacks) == 0 {
+		return nil
 	}
-
-	if hasStack("python") {
-		if hasStack("uv") {
-			entries = append(entries,
-				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-					Command: "ruff check --output-format=concise .", Timeout: 15},
-				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-					Command: "dmypy run -- --no-error-summary --no-pretty", Timeout: 30},
-			)
-		} else {
-			entries = append(entries,
-				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-					Command: "ruff check --output-format=concise .", Timeout: 15},
-				settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-					Command: "mypy --no-error-summary --no-pretty", Timeout: 30},
-			)
-		}
+	return []settings.Entry{
+		{
+			Event:   "PostToolUse",
+			Matcher: "Write|Edit|NotebookEdit",
+			Command: `ulguard post-edit --root "${CLAUDE_PROJECT_DIR}"`,
+			Timeout: 60,
+		},
 	}
-	if hasStack("gdscript") {
-		entries = append(entries, settings.Entry{
-			Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-			Command: "gdlint .", Timeout: 15,
-		})
-	}
-	if hasStack("cpp") {
-		entries = append(entries,
-			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-				Command: "clang-format -i", Timeout: 15},
-			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-				Command: "cmake --build build --parallel", Timeout: 45},
-		)
-	}
-	if hasStack("typescript") {
-		entries = append(entries,
-			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-				Command: "npx eslint .", Timeout: 20},
-			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-				Command: "npx tsc --noEmit", Timeout: 30},
-		)
-	}
-	if hasStack("rust") {
-		entries = append(entries,
-			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-				Command: "cargo clippy -- -D warnings", Timeout: 30},
-			settings.Entry{Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-				Command: "cargo fmt --check", Timeout: 15},
-		)
-	}
-	if hasStack("go") {
-		entries = append(entries, settings.Entry{
-			Event: "PostToolUse", Matcher: "Write|Edit|NotebookEdit",
-			Command: "go vet ./...", Timeout: 20,
-		})
-	}
-	return entries
 }
 
 // describe is the whole output of a run, in the order write.Commit works in,

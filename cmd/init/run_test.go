@@ -888,75 +888,36 @@ func TestPostEditEntriesPerStack(t *testing.T) {
 	cases := []struct {
 		name     string
 		stacks   []string
-		commands []string
+		expected string
 	}{
 		{
 			name:     "python with uv",
 			stacks:   []string{"python", "uv"},
-			commands: []string{"ruff check --output-format=concise .", "dmypy run -- --no-error-summary --no-pretty"},
-		},
-		{
-			name:     "python plain",
-			stacks:   []string{"python"},
-			commands: []string{"ruff check --output-format=concise .", "mypy --no-error-summary --no-pretty"},
-		},
-		{
-			name:     "gdscript",
-			stacks:   []string{"gdscript", "godot"},
-			commands: []string{"gdlint ."},
+			expected: `ulguard post-edit --root "${CLAUDE_PROJECT_DIR}"`,
 		},
 		{
 			name:     "cpp",
 			stacks:   []string{"cpp", "cmake"},
-			commands: []string{"clang-format -i", "cmake --build build --parallel"},
+			expected: `ulguard post-edit --root "${CLAUDE_PROJECT_DIR}"`,
 		},
 		{
-			name:     "typescript",
-			stacks:   []string{"typescript"},
-			commands: []string{"npx eslint .", "npx tsc --noEmit"},
-		},
-		{
-			name:     "rust",
-			stacks:   []string{"rust"},
-			commands: []string{"cargo clippy -- -D warnings", "cargo fmt --check"},
-		},
-		{
-			name:     "go",
-			stacks:   []string{"go"},
-			commands: []string{"go vet ./..."},
-		},
-		{
-			name:     "multi-stack cpp and godot",
-			stacks:   []string{"cpp", "gdscript", "godot"},
-			commands: []string{"gdlint .", "clang-format -i", "cmake --build build --parallel"},
-		},
-		{
-			name:     "unknown stack fallback",
-			stacks:   []string{"other"},
-			commands: nil,
+			name:     "empty stacks",
+			stacks:   nil,
+			expected: "",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			entries := postEditEntries(tc.stacks)
-			var gotCommands []string
-			for _, e := range entries {
-				gotCommands = append(gotCommands, e.Command)
-			}
-			if tc.commands == nil {
+			if tc.expected == "" {
 				if len(entries) != 0 {
-					t.Fatalf("want 0 entries for unknown stack, got %v", gotCommands)
+					t.Fatalf("want 0 entries for empty stack, got %v", entries)
 				}
 				return
 			}
-			if len(gotCommands) != len(tc.commands) {
-				t.Fatalf("got %d commands %v, want %d %v", len(gotCommands), gotCommands, len(tc.commands), tc.commands)
-			}
-			for i, cmd := range tc.commands {
-				if gotCommands[i] != cmd {
-					t.Errorf("[%d] got %q, want %q", i, gotCommands[i], cmd)
-				}
+			if len(entries) != 1 || entries[0].Command != tc.expected {
+				t.Fatalf("expected 1 entry %q, got %v", tc.expected, entries)
 			}
 		})
 	}
@@ -972,7 +933,7 @@ func TestLifecycleHookOrder(t *testing.T) {
 	for _, e := range entries {
 		events = append(events, e.Event)
 	}
-	wantOrder := []string{"SessionStart", "PreToolUse", "PostToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "Stop"}
+	wantOrder := []string{"SessionStart", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "Stop"}
 	if len(events) != len(wantOrder) {
 		t.Fatalf("got %d events %v, want %d %v", len(events), events, len(wantOrder), wantOrder)
 	}
@@ -1309,59 +1270,29 @@ func TestGatherWithExistingWiki(t *testing.T) {
 }
 
 func TestPostEditEntriesAllStacks(t *testing.T) {
-	// 1. Python with uv
-	pyUV := postEditEntries([]string{"python", "uv"})
-	if len(pyUV) != 2 || !strings.Contains(pyUV[0].Command, "ruff check") || !strings.Contains(pyUV[1].Command, "dmypy run") {
-		t.Fatalf("pyUV = %+v", pyUV)
+	// Stacks present yields ulguard post-edit hook
+	entries := postEditEntries([]string{"python", "uv", "cpp"})
+	if len(entries) != 1 || !strings.Contains(entries[0].Command, "ulguard post-edit") {
+		t.Fatalf("entries = %+v", entries)
 	}
 
-	// 2. Python without uv
-	pyPlain := postEditEntries([]string{"python"})
-	if len(pyPlain) != 2 || !strings.Contains(pyPlain[0].Command, "ruff check") || !strings.Contains(pyPlain[1].Command, "mypy") {
-		t.Fatalf("pyPlain = %+v", pyPlain)
+	// Empty stacks yields nil
+	empty := postEditEntries(nil)
+	if len(empty) != 0 {
+		t.Fatalf("expected 0 entries for nil stacks, got %+v", empty)
 	}
 
-	// 3. GDScript
-	gd := postEditEntries([]string{"gdscript"})
-	if len(gd) != 1 || !strings.Contains(gd[0].Command, "gdlint .") {
-		t.Fatalf("gd = %+v", gd)
-	}
-
-	// 4. C++
-	cpp := postEditEntries([]string{"cpp"})
-	if len(cpp) != 2 || !strings.Contains(cpp[0].Command, "clang-format") || !strings.Contains(cpp[1].Command, "cmake --build") {
-		t.Fatalf("cpp = %+v", cpp)
-	}
-
-	// 5. TypeScript
-	ts := postEditEntries([]string{"typescript"})
-	if len(ts) != 2 || !strings.Contains(ts[0].Command, "npx eslint") || !strings.Contains(ts[1].Command, "npx tsc") {
-		t.Fatalf("ts = %+v", ts)
-	}
-
-	// 6. Rust
-	rs := postEditEntries([]string{"rust"})
-	if len(rs) != 2 || !strings.Contains(rs[0].Command, "cargo clippy") || !strings.Contains(rs[1].Command, "cargo fmt") {
-		t.Fatalf("rs = %+v", rs)
-	}
-
-	// 7. Go
-	goEntries := postEditEntries([]string{"go"})
-	if len(goEntries) != 1 || !strings.Contains(goEntries[0].Command, "go vet") {
-		t.Fatalf("goEntries = %+v", goEntries)
-	}
-
-	// 8. Python stack in hookEntries
+	// Python stack in hookEntries
 	pyHookEntries := hookEntries(detect.Facts{Stacks: []string{"python"}}, false)
-	foundRuff := false
+	foundPostEdit := false
 	for _, e := range pyHookEntries {
-		if e.Event == "PostToolUse" && strings.Contains(e.Command, "ruff check") {
-			foundRuff = true
+		if e.Event == "PostToolUse" && strings.Contains(e.Command, "ulguard post-edit") {
+			foundPostEdit = true
 			break
 		}
 	}
-	if !foundRuff {
-		t.Fatalf("ruff check not found in pyHookEntries: %+v", pyHookEntries)
+	if !foundPostEdit {
+		t.Fatalf("ulguard post-edit not found in pyHookEntries: %+v", pyHookEntries)
 	}
 }
 
