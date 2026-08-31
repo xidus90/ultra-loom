@@ -56,10 +56,18 @@ var extensionStackMap = map[string]string{
 
 func runPostEdit(stdin io.Reader, stderr io.Writer, root string) int {
 	facts := detect.Detect(os.DirFS(root))
-	return runPostEditWithStacks(stdin, stderr, root, facts.Stacks, defaultCommandRunner)
+	wikiDir := facts.WikiPath
+	if wikiDir == "" {
+		wikiDir = resolveWikiDir(root)
+	}
+	return runPostEditWithContext(stdin, stderr, root, facts.Stacks, wikiDir, defaultCommandRunner)
 }
 
 func runPostEditWithStacks(stdin io.Reader, stderr io.Writer, root string, stacks []string, runner CommandRunner) int {
+	return runPostEditWithContext(stdin, stderr, root, stacks, "wiki/", runner)
+}
+
+func runPostEditWithContext(stdin io.Reader, stderr io.Writer, root string, stacks []string, wikiDir string, runner CommandRunner) int {
 	var payload HookPayload
 	if err := json.NewDecoder(stdin).Decode(&payload); err != nil {
 		return ExitOK
@@ -79,7 +87,7 @@ func runPostEditWithStacks(stdin io.Reader, stderr io.Writer, root string, stack
 	}
 
 	targetStack, hasTarget := extensionStackMap[ext]
-	if targetStack == "wiki" && !isWikiPath(rawPath, root) {
+	if targetStack == "wiki" && !isWikiPath(rawPath, root, wikiDir) {
 		return ExitOK
 	}
 	commands := getCommandsForStacks(stacks, targetStack, hasTarget, rawPath)
@@ -178,17 +186,50 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 	return cmds
 }
 
-func isWikiPath(rawPath, root string) bool {
-	norm := filepath.ToSlash(rawPath)
-	norm = strings.TrimPrefix(norm, "./")
-	if strings.HasPrefix(norm, "wiki/") || strings.HasPrefix(norm, "docs/wiki/") || strings.Contains(norm, "/wiki/") {
+func resolveWikiDir(root string) string {
+	if data, err := os.ReadFile(filepath.Join(root, ".ultraloom", "answers.toml")); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "bundle") && strings.Contains(trimmed, "=") {
+				parts := strings.SplitN(trimmed, "=", 2)
+				val := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+				if val != "" {
+					return filepath.ToSlash(val)
+				}
+			}
+		}
+	}
+	facts := detect.Detect(os.DirFS(root))
+	if facts.WikiPath != "" {
+		return filepath.ToSlash(facts.WikiPath)
+	}
+	return "wiki/"
+}
+
+func isWikiPath(rawPath, root, configuredWikiDir string) bool {
+	wikiDir := strings.TrimSuffix(filepath.ToSlash(configuredWikiDir), "/")
+	if wikiDir == "" {
+		wikiDir = "wiki"
+	}
+
+	norm := strings.TrimPrefix(filepath.ToSlash(rawPath), "./")
+
+	if strings.HasPrefix(norm, wikiDir+"/") || norm == wikiDir ||
+		strings.Contains(norm, "/"+wikiDir+"/") ||
+		strings.HasPrefix(norm, "docs/wiki/") || strings.HasPrefix(norm, "wiki/") {
 		return true
 	}
+
 	if root != "" {
 		rel, err := filepath.Rel(root, rawPath)
 		if err == nil {
-			relNorm := filepath.ToSlash(rel)
-			return strings.HasPrefix(relNorm, "wiki/") || strings.HasPrefix(relNorm, "docs/wiki/") || strings.Contains(relNorm, "/wiki/")
+			relNorm := strings.TrimPrefix(filepath.ToSlash(rel), "./")
+			if strings.HasPrefix(relNorm, wikiDir+"/") || relNorm == wikiDir ||
+				strings.Contains(relNorm, "/"+wikiDir+"/") ||
+				strings.HasPrefix(relNorm, "docs/wiki/") || strings.HasPrefix(relNorm, "wiki/") {
+				return true
+			}
 		}
 	}
 	return false
