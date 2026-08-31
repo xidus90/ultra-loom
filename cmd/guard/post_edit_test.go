@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -104,7 +105,10 @@ func TestRunPostEdit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var ranCmds []string
+			var mu sync.Mutex
 			mockRunner := func(dir string, cmd string) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
 				ranCmds = append(ranCmds, cmd)
 				return "", nil
 			}

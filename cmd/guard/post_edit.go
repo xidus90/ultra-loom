@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/xidus90/ultra-loom/internal/detect"
 )
@@ -77,19 +78,29 @@ func runPostEditWithStacks(stdin io.Reader, stderr io.Writer, root string, stack
 	}
 
 	targetStack, hasTarget := extensionStackMap[ext]
-
 	commands := getCommandsForStacks(stacks, targetStack, hasTarget)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	hasFailure := false
+
 	for _, cmd := range commands {
-		out, err := runner(root, cmd)
-		if err != nil {
-			hasFailure = true
-			io.WriteString(stderr, out)
-			if out == "" {
-				io.WriteString(stderr, err.Error()+"\n")
+		wg.Add(1)
+		go func(c string) {
+			defer wg.Done()
+			out, err := runner(root, c)
+			if err != nil {
+				mu.Lock()
+				defer mu.Unlock()
+				hasFailure = true
+				io.WriteString(stderr, out)
+				if out == "" {
+					io.WriteString(stderr, err.Error()+"\n")
+				}
 			}
-		}
+		}(cmd)
 	}
+	wg.Wait()
 
 	if hasFailure {
 		return ExitDenied
