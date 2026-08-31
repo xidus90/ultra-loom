@@ -48,14 +48,14 @@ func TestRunPostEdit(t *testing.T) {
 			name:         "TypeScript file triggers eslint and tsc",
 			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "app.ts"}}`,
 			stacks:       []string{"typescript"},
-			expectedCmds: []string{"npx eslint .", "npx tsc --noEmit"},
+			expectedCmds: []string{"npx eslint --cache app.ts", "npx tsc --noEmit"},
 			expectedExit: 0,
 		},
 		{
 			name:         "TypeScript file in nested workspace triggers prefix npm commands",
 			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "frontend/src/app.tsx"}}`,
 			stacks:       []string{"typescript"},
-			expectedCmds: []string{"npm --prefix frontend run lint", "npm --prefix frontend run typecheck"},
+			expectedCmds: []string{"npx --prefix frontend eslint --config frontend/eslint.config.js --cache frontend/src/app.tsx", "npm --prefix frontend run typecheck"},
 			expectedExit: 0,
 		},
 		{

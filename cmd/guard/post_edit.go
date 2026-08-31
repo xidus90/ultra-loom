@@ -214,12 +214,23 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 	}
 	if shouldRun("typescript") {
 		if targetDir != "" {
-			cmds = append(cmds,
-				fmt.Sprintf("npm --prefix %s run lint", targetDir),
-				fmt.Sprintf("npm --prefix %s run typecheck", targetDir),
-			)
+			if hasTarget && targetPath != "" {
+				cmds = append(cmds,
+					fmt.Sprintf("npx --prefix %s eslint --config %s/eslint.config.js --cache %s", targetDir, targetDir, targetPath),
+					fmt.Sprintf("npm --prefix %s run typecheck", targetDir),
+				)
+			} else {
+				cmds = append(cmds,
+					fmt.Sprintf("npm --prefix %s run lint", targetDir),
+					fmt.Sprintf("npm --prefix %s run typecheck", targetDir),
+				)
+			}
 		} else {
-			cmds = append(cmds, "npx eslint .", "npx tsc --noEmit")
+			if hasTarget && targetPath != "" {
+				cmds = append(cmds, fmt.Sprintf("npx eslint --cache %s", targetPath), "npx tsc --noEmit")
+			} else {
+				cmds = append(cmds, "npx eslint --cache .", "npx tsc --noEmit")
+			}
 		}
 	}
 	if shouldRun("vue") {
