@@ -748,7 +748,7 @@ func hookEntries(facts detect.Facts, wikiHooks bool) []settings.Entry {
 		// slot of its own: identity there is (event, matcher), and an empty one
 		// would make this entry replace the stop gate above.
 		entries = append(entries, settings.Entry{Event: "Stop", Matcher: "wiki",
-			Command: "brain lint", Timeout: 120})
+			Command: `brain wiki-gate --root "${CLAUDE_PROJECT_DIR}"`, Timeout: 120})
 	}
 	return entries
 }

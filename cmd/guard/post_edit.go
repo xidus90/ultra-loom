@@ -23,7 +23,6 @@ func defaultCommandRunner(dir string, commandStr string) (string, error) {
 }
 
 var explicitIgnoredExtensions = map[string]bool{
-	".md":     true,
 	".txt":    true,
 	".json":   true,
 	".yaml":   true,
@@ -52,6 +51,7 @@ var extensionStackMap = map[string]string{
 	".jsx": "typescript",
 	".go":  "go",
 	".rs":  "rust",
+	".md":  "wiki",
 }
 
 func runPostEdit(stdin io.Reader, stderr io.Writer, root string) int {
@@ -159,6 +159,13 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 	}
 	if shouldRun("go") {
 		cmds = append(cmds, "go vet ./...")
+	}
+	if shouldRun("wiki") {
+		if hasTarget && targetPath != "" {
+			cmds = append(cmds, fmt.Sprintf("brain lint %s", targetPath))
+		} else {
+			cmds = append(cmds, "brain lint")
+		}
 	}
 
 	return cmds

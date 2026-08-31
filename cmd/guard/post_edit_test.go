@@ -59,6 +59,20 @@ func TestRunPostEdit(t *testing.T) {
 			expectedExit: 0,
 		},
 		{
+			name:         "Wiki markdown file triggers brain lint when wiki stack is active",
+			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "wiki/concept.md"}}`,
+			stacks:       []string{"python", "wiki"},
+			expectedCmds: []string{"brain lint wiki/concept.md"},
+			expectedExit: 0,
+		},
+		{
+			name:         "Markdown file triggers no commands when wiki stack is inactive",
+			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "docs/README.md"}}`,
+			stacks:       []string{"python"},
+			expectedCmds: []string{},
+			expectedExit: 0,
+		},
+		{
 			name:         "Go file triggers go vet",
 			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "cmd/main.go"}}`,
 			stacks:       []string{"go"},

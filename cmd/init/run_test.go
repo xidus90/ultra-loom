@@ -312,7 +312,7 @@ func TestBrainOnPathIsWrittenIntoTheProject(t *testing.T) {
 	if strings.Contains(mcp, "C:/tools") {
 		t.Fatalf("the resolved path reached the committed file:\n%s", mcp)
 	}
-	if !strings.Contains(read(t, root, ".claude/settings.json"), "brain lint") {
+	if !strings.Contains(read(t, root, ".claude/settings.json"), "brain wiki-gate") {
 		t.Fatal("the wiki hook was not installed although brain was found")
 	}
 }

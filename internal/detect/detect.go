@@ -52,6 +52,10 @@ func Detect(root fs.FS) Facts {
 		facts.HasGit = true
 	}
 	facts.readWiki(root)
+	if facts.WikiMode != "" && facts.WikiMode != "none" {
+		found["wiki"] = true
+		facts.Stacks = sorted(found)
+	}
 	return facts
 }
 
