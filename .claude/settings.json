@@ -14,11 +14,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|MultiEdit|Write|Bash",
-        "command": "uv run --directory C:/Users/micro/Documents/#GIT/ultra-brain python .ultra-brain/hooks/wiki_guard.py"
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "matcher": "Write|Edit|NotebookEdit|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -31,45 +27,12 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Write|Edit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "ruff check --output-format=concise .",
-            "timeout": 15
-          }
-        ],
-        "ultraLoomOwned": true
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dmypy run -- --no-error-summary --no-pretty",
-            "timeout": 30
-          }
-        ],
-        "ultraLoomOwned": true
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ulinit check gofmt .",
-            "timeout": 15
-          }
-        ],
-        "ultraLoomOwned": true
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "go vet ./...",
-            "timeout": 20
+            "command": "ulguard post-edit --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 60
           }
         ],
         "ultraLoomOwned": true
