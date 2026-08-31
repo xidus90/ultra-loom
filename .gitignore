@@ -33,6 +33,8 @@ htmlcov/
 /ulinit.exe
 /ulguard
 /ulguard.exe
+/ulguard_*.exe
+/ulinit_*.exe
 
 # Temporary files and test profiles
 *.out
