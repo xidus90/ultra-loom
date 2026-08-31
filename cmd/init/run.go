@@ -705,6 +705,19 @@ func mergeSettings(opts Options, facts detect.Facts, filled answers.Answers, wik
 	if len(result.Skipped) > 0 {
 		note = settingsPath + ": left to the project -- " + strings.Join(result.Skipped, "; ")
 	}
+	var legacyWarnings []string
+	knownLegacy := []string{"format_on_edit.py", "post_edit.py", "guard_paths.py", "wiki_gate.py", "generate_index.py", "lint.py"}
+	for _, leg := range knownLegacy {
+		if strings.Contains(string(existing), leg) {
+			legacyWarnings = append(legacyWarnings, fmt.Sprintf("obsolete legacy hook %q detected (superseded by native ulguard)", leg))
+		}
+	}
+	if len(legacyWarnings) > 0 {
+		if note != "" {
+			note += "; "
+		}
+		note += strings.Join(legacyWarnings, "; ")
+	}
 	return out, exitDone, note
 }
 

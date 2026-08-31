@@ -65,6 +65,36 @@ func Detect(root fs.FS) Facts {
 // documentation under wiki/ would otherwise be told it has a brain bundle,
 // and everything downstream would act on it.
 func (facts *Facts) readWiki(root fs.FS) {
+	if brainToml, err := fs.ReadFile(root, ".brain.toml"); err == nil {
+		lines := strings.Split(string(brainToml), "\n")
+		hasWikiDeclared := false
+		for _, l := range lines {
+			trimmed := strings.TrimSpace(l)
+			if strings.HasPrefix(trimmed, "wiki") && strings.Contains(trimmed, "=") {
+				val := strings.TrimSpace(strings.TrimPrefix(trimmed, "wiki"))
+				val = strings.TrimPrefix(val, "=")
+				val = strings.TrimSpace(val)
+				if val == "true" {
+					hasWikiDeclared = true
+				}
+			}
+			if strings.HasPrefix(trimmed, "[wiki]") {
+				hasWikiDeclared = true
+			}
+		}
+		if hasWikiDeclared {
+			facts.WikiMode = "brain"
+			facts.WikiPath = "wiki/"
+			for _, cand := range []string{"docs/wiki", "wiki"} {
+				if _, err := fs.Stat(root, cand); err == nil {
+					facts.WikiPath = cand + "/"
+					break
+				}
+			}
+			return
+		}
+	}
+
 	for _, cand := range []string{"wiki", "docs/wiki"} {
 		entries, err := fs.ReadDir(root, cand)
 		if err != nil || len(entries) == 0 {

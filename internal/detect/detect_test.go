@@ -211,6 +211,25 @@ func TestAWikiIndexWithoutTheMarkerIsNotABundle(t *testing.T) {
 	}
 }
 
+func TestBrainTomlWithWikiIsDetectedAsBrainMode(t *testing.T) {
+	facts := Detect(fstest.MapFS{
+		".brain.toml": {Data: []byte("[area]\nscope = \"my-scope\"\nwiki = true\n")},
+		"docs/wiki/index.md": {Data: []byte("# docs wiki\n")},
+	})
+	if facts.WikiMode != "brain" || facts.WikiPath != "docs/wiki/" {
+		t.Fatalf("expected brain mode and docs/wiki/ path, got %q %q", facts.WikiMode, facts.WikiPath)
+	}
+	hasWikiStack := false
+	for _, s := range facts.Stacks {
+		if s == "wiki" {
+			hasWikiStack = true
+		}
+	}
+	if !hasWikiStack {
+		t.Fatalf("expected wiki stack in %v", facts.Stacks)
+	}
+}
+
 // An unreadable tree is a fact, not an error: what cannot be read carries no
 // signal, and detection reports what is left of the tree.
 func TestAnUnlistableTreeYieldsNoStacks(t *testing.T) {

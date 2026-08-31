@@ -12,6 +12,16 @@ func main() {
 }
 
 func cli(args []string, stdin io.Reader, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "status" || args[0] == "explain" || args[0] == "doctor") {
+		flags := flag.NewFlagSet("ultraloom-guard status", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		root := flags.String("root", ".", "path to the project root")
+		if err := flags.Parse(args[1:]); err != nil {
+			return ExitInternal
+		}
+		return runStatus(os.Stdout, stderr, *root)
+	}
+
 	if len(args) > 0 && args[0] == "post-edit" {
 		flags := flag.NewFlagSet("ultraloom-guard post-edit", flag.ContinueOnError)
 		flags.SetOutput(stderr)
