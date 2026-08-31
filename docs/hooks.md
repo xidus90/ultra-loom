@@ -75,6 +75,12 @@ flowchart TD
 | **GDScript** | `.gd` | `gdlint <file>` | Targeted file-level GDScript linting |
 | **C++ / C** | `.cpp`, `.hpp`, `.cc`, `.cxx`, `.c`, `.h` | `clang-format -i <file>`<br>`cmake --build build --parallel` | Code formatting and parallel build check |
 | **TypeScript / JS** | `.ts`, `.tsx`, `.js`, `.jsx` | `npx eslint .`<br>`npx tsc --noEmit` | Parallel ESLint and TypeScript compilation check |
+| **Vue** | `.vue` | `npx vue-tsc --noEmit` | Vue Single-File Component static type checking |
+| **Svelte** | `.svelte` | `npx svelte-check` | Svelte component diagnostics and type verification |
+| **CSS / SCSS** | `.css`, `.scss`, `.sass`, `.less` | `npx stylelint <file>` | CSS/SCSS linting for invalid selectors and property errors |
+| **HTML** | `.html`, `.htm` | `npx htmlhint <file>` | HTML syntax and markup validation |
+| **Shell / Bash** | `.sh`, `.bash`, `.zsh` | `shellcheck <file>` | Shell script static analysis for POSIX compliance and pitfalls |
+| **SQL** | `.sql` | `sqlfluff lint <file>` | SQL dialect syntax validation and formatting check |
 | **Rust** | `.rs` | `cargo clippy -- -D warnings`<br>`cargo fmt --check` | Clippy linter with zero-warning gate and formatting check |
 | **Go** | `.go` | `go vet ./...` | Go static analysis verification |
 | **Wiki (UltraBrain)** | `.md` *(inside wiki dir)* | `brain lint <file>` | Single-file OKF type and frontmatter validation |

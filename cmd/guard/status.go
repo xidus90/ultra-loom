@@ -141,12 +141,35 @@ func runStatus(stdout io.Writer, stderr io.Writer, root string) int {
 		fmt.Fprintln(stdout, "     * *.ts, *.tsx:    npx eslint . [parallel]")
 		fmt.Fprintln(stdout, "                       npx tsc --noEmit [parallel]")
 	}
+	if hasStack("vue") {
+		fmt.Fprintln(stdout, "     * *.vue:          npx vue-tsc --noEmit")
+	}
+	if hasStack("svelte") {
+		fmt.Fprintln(stdout, "     * *.svelte:       npx svelte-check")
+	}
+	if hasStack("css") {
+		fmt.Fprintln(stdout, "     * *.css, *.scss:  npx stylelint <target-file>")
+	}
+	if hasStack("html") {
+		fmt.Fprintln(stdout, "     * *.html:         npx htmlhint <target-file>")
+	}
+	if hasStack("shell") {
+		fmt.Fprintln(stdout, "     * *.sh, *.bash:   shellcheck <target-file>")
+	}
+	if hasStack("sql") {
+		fmt.Fprintln(stdout, "     * *.sql:          sqlfluff lint <target-file>")
+	}
 	if hasStack("rust") {
 		fmt.Fprintln(stdout, "     * *.rs:           cargo clippy -- -D warnings [parallel]")
 		fmt.Fprintln(stdout, "                       cargo fmt --check [parallel]")
 	}
 	if hasStack("go") {
-		fmt.Fprintln(stdout, "     * *.go:           go vet ./...")
+		if hasStack("golangci-lint") {
+			fmt.Fprintln(stdout, "     * *.go:           golangci-lint run --fast [parallel]")
+			fmt.Fprintln(stdout, "                       go vet ./... [parallel]")
+		} else {
+			fmt.Fprintln(stdout, "     * *.go:           go vet ./...")
+		}
 	}
 	if hasStack("wiki") {
 		fmt.Fprintf(stdout, "     * *.md (in %s): brain lint <target-file>\n", wikiDir)

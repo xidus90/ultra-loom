@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -15,10 +16,22 @@ import (
 
 type CommandRunner func(dir string, cmd string) (string, error)
 
-func defaultCommandRunner(dir string, commandStr string) (string, error) {
-	cmd := exec.Command("cmd", "/c", commandStr)
+func defaultCommandRunner(dir, command string) (string, error) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(out)
+		if strings.Contains(outStr, "is not recognized as an internal or external command") ||
+			strings.Contains(outStr, "command not found") {
+			return "", nil
+		}
+	}
 	return string(out), err
 }
 
@@ -37,21 +50,33 @@ var explicitIgnoredExtensions = map[string]bool{
 }
 
 var extensionStackMap = map[string]string{
-	".py":  "python",
-	".gd":  "gdscript",
-	".cpp": "cpp",
-	".hpp": "cpp",
-	".cc":  "cpp",
-	".cxx": "cpp",
-	".c":   "cpp",
-	".h":   "cpp",
-	".ts":  "typescript",
-	".tsx": "typescript",
-	".js":  "typescript",
-	".jsx": "typescript",
-	".go":  "go",
-	".rs":  "rust",
-	".md":  "wiki",
+	".py":     "python",
+	".gd":     "gdscript",
+	".cpp":    "cpp",
+	".hpp":    "cpp",
+	".cc":     "cpp",
+	".cxx":    "cpp",
+	".c":      "cpp",
+	".h":      "cpp",
+	".ts":     "typescript",
+	".tsx":    "typescript",
+	".js":     "typescript",
+	".jsx":    "typescript",
+	".vue":    "vue",
+	".svelte": "svelte",
+	".css":    "css",
+	".scss":   "css",
+	".sass":   "css",
+	".less":   "css",
+	".html":   "html",
+	".htm":    "html",
+	".sh":     "shell",
+	".bash":   "shell",
+	".zsh":    "shell",
+	".sql":    "sql",
+	".go":     "go",
+	".rs":     "rust",
+	".md":     "wiki",
 }
 
 func runPostEdit(stdin io.Reader, stderr io.Writer, root string) int {
@@ -120,26 +145,51 @@ func runPostEditWithContext(stdin io.Reader, stderr io.Writer, root string, stac
 	return ExitOK
 }
 
+var standardSrcDirs = map[string]bool{
+	"src":    true,
+	"lib":    true,
+	"pkg":    true,
+	"cmd":    true,
+	"tests":  true,
+	"test":   true,
+	"dist":   true,
+	"build":  true,
+	"public": true,
+}
+
+func getWorkspaceDir(targetPath string, hasTarget bool) string {
+	if !hasTarget || targetPath == "" {
+		return ""
+	}
+	norm := strings.TrimPrefix(filepath.ToSlash(targetPath), "./")
+	parts := strings.Split(norm, "/")
+	if len(parts) > 1 && parts[0] != "." && parts[0] != "" && !standardSrcDirs[parts[0]] {
+		return parts[0]
+	}
+	return ""
+}
+
 func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, targetPath string) []string {
 	var cmds []string
-	has := func(s string) bool {
-		for _, stack := range stacks {
-			if stack == s {
+	has := func(stack string) bool {
+		for _, s := range stacks {
+			if s == stack {
 				return true
 			}
 		}
 		return false
 	}
-
-	shouldRun := func(s string) bool {
-		if !has(s) {
+	shouldRun := func(stack string) bool {
+		if !has(stack) {
 			return false
 		}
-		if !hasTarget {
-			return true // Fallback: run all stacks
+		if hasTarget && targetStack != "" {
+			return targetStack == stack
 		}
-		return s == targetStack
+		return true
 	}
+
+	targetDir := getWorkspaceDir(targetPath, hasTarget)
 
 	if shouldRun("python") {
 		if has("uv") {
@@ -163,14 +213,6 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 		}
 	}
 	if shouldRun("typescript") {
-		targetDir := ""
-		if hasTarget && targetPath != "" {
-			norm := strings.TrimPrefix(filepath.ToSlash(targetPath), "./")
-			parts := strings.Split(norm, "/")
-			if len(parts) > 1 && parts[0] != "." && parts[0] != "" {
-				targetDir = parts[0]
-			}
-		}
 		if targetDir != "" {
 			cmds = append(cmds,
 				fmt.Sprintf("npm --prefix %s run lint", targetDir),
@@ -178,6 +220,50 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 			)
 		} else {
 			cmds = append(cmds, "npx eslint .", "npx tsc --noEmit")
+		}
+	}
+	if shouldRun("vue") {
+		if targetDir != "" {
+			cmds = append(cmds, fmt.Sprintf("npm --prefix %s run typecheck", targetDir))
+		} else {
+			cmds = append(cmds, "npx vue-tsc --noEmit")
+		}
+	}
+	if shouldRun("svelte") {
+		if targetDir != "" {
+			cmds = append(cmds, fmt.Sprintf("npm --prefix %s run check", targetDir))
+		} else {
+			cmds = append(cmds, "npx svelte-check")
+		}
+	}
+	if shouldRun("css") {
+		if targetDir != "" && hasTarget && targetPath != "" {
+			cmds = append(cmds, fmt.Sprintf("npx --prefix %s stylelint %s", targetDir, targetPath))
+		} else if hasTarget && targetPath != "" {
+			cmds = append(cmds, fmt.Sprintf("npx stylelint %s", targetPath))
+		} else {
+			cmds = append(cmds, "npx stylelint \"**/*.{css,scss}\"")
+		}
+	}
+	if shouldRun("html") {
+		if hasTarget && targetPath != "" {
+			cmds = append(cmds, fmt.Sprintf("npx htmlhint %s", targetPath))
+		} else {
+			cmds = append(cmds, "npx htmlhint \"**/*.html\"")
+		}
+	}
+	if shouldRun("shell") {
+		if hasTarget && targetPath != "" {
+			cmds = append(cmds, fmt.Sprintf("shellcheck %s", targetPath))
+		} else {
+			cmds = append(cmds, "shellcheck **/*.sh")
+		}
+	}
+	if shouldRun("sql") {
+		if hasTarget && targetPath != "" {
+			cmds = append(cmds, fmt.Sprintf("sqlfluff lint %s", targetPath))
+		} else {
+			cmds = append(cmds, "sqlfluff lint .")
 		}
 	}
 	if shouldRun("rust") {
