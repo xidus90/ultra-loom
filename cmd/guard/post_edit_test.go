@@ -41,7 +41,7 @@ func TestRunPostEdit(t *testing.T) {
 			name:         "GDScript file triggers only gdlint",
 			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "player.gd"}}`,
 			stacks:       []string{"gdscript", "cpp"},
-			expectedCmds: []string{"gdlint ."},
+			expectedCmds: []string{"gdlint"},
 			expectedExit: 0,
 		},
 		{

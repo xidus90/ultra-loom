@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -78,7 +79,7 @@ func runPostEditWithStacks(stdin io.Reader, stderr io.Writer, root string, stack
 	}
 
 	targetStack, hasTarget := extensionStackMap[ext]
-	commands := getCommandsForStacks(stacks, targetStack, hasTarget)
+	commands := getCommandsForStacks(stacks, targetStack, hasTarget, rawPath)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -108,7 +109,7 @@ func runPostEditWithStacks(stdin io.Reader, stderr io.Writer, root string, stack
 	return ExitOK
 }
 
-func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool) []string {
+func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, targetPath string) []string {
 	var cmds []string
 	has := func(s string) bool {
 		for _, stack := range stacks {
@@ -137,10 +138,18 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool) [
 		}
 	}
 	if shouldRun("gdscript") {
-		cmds = append(cmds, "gdlint .")
+		if hasTarget && targetPath != "" {
+			cmds = append(cmds, fmt.Sprintf("gdlint %s", targetPath))
+		} else {
+			cmds = append(cmds, "gdlint .")
+		}
 	}
 	if shouldRun("cpp") {
-		cmds = append(cmds, "clang-format -i", "cmake --build build --parallel")
+		if hasTarget && targetPath != "" {
+			cmds = append(cmds, fmt.Sprintf("clang-format -i %s", targetPath), "cmake --build build --parallel")
+		} else {
+			cmds = append(cmds, "clang-format -i", "cmake --build build --parallel")
+		}
 	}
 	if shouldRun("typescript") {
 		cmds = append(cmds, "npx eslint .", "npx tsc --noEmit")
