@@ -35,4 +35,8 @@ for a subagent. The history says what changed, not which tool held the pen.
 
 Whenever a tool invoked by a hook can be executed as a shim pinned to a specific version, it must be used that way. Direct pinned shims ensure deterministic runs, prevent toolchain drift across machines, and avoid monolithic wrapper overhead.
 
+## Benchmarks
+
+Whenever performance optimizations or benchmarks are executed, record the results chronologically in `docs/benchmarks.md` (and `docs/benchmarks.de.md`) with timestamp (date and time), test description, baseline vs. optimized comparisons, and cold/warm measurements.
+
 
