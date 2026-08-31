@@ -192,11 +192,17 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 	targetDir := getWorkspaceDir(targetPath, hasTarget)
 
 	if shouldRun("python") {
-		if has("uv") {
-			cmds = append(cmds, "ruff check --output-format=concise .", "dmypy run -- --no-error-summary --no-pretty")
-		} else {
-			cmds = append(cmds, "ruff check --output-format=concise .", "mypy --no-error-summary --no-pretty")
+		typeChecker := "mypy --no-error-summary --no-pretty"
+		if has("pyright") {
+			if has("uv") {
+				typeChecker = "uv run pyright"
+			} else {
+				typeChecker = "pyright"
+			}
+		} else if has("uv") {
+			typeChecker = "dmypy run -- --no-error-summary --no-pretty"
 		}
+		cmds = append(cmds, "ruff check --output-format=concise .", typeChecker)
 	}
 	if shouldRun("gdscript") {
 		if hasTarget && targetPath != "" {

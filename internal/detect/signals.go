@@ -21,6 +21,8 @@ type signal struct {
 
 var signals = []signal{
 	{path: "pyproject.toml", stacks: []string{"python"}},
+	{path: "pyproject.toml", contains: "[tool.pyright]", stacks: []string{"python", "pyright"}},
+	{path: "pyrightconfig.json", stacks: []string{"python", "pyright"}},
 	{path: "uv.lock", stacks: []string{"python", "uv"}},
 	{path: "requirements.txt", stacks: []string{"python"}},
 	{path: "manage.py", stacks: []string{"python", "django"}},

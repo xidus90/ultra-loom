@@ -122,7 +122,15 @@ func runStatus(stdout io.Writer, stderr io.Writer, root string) int {
 	}
 
 	if hasStack("python") {
-		if hasStack("uv") {
+		if hasStack("pyright") {
+			if hasStack("uv") {
+				fmt.Fprintln(stdout, "     * *.py:           ruff check --output-format=concise . [parallel]")
+				fmt.Fprintln(stdout, "                       uv run pyright [parallel]")
+			} else {
+				fmt.Fprintln(stdout, "     * *.py:           ruff check --output-format=concise . [parallel]")
+				fmt.Fprintln(stdout, "                       pyright [parallel]")
+			}
+		} else if hasStack("uv") {
 			fmt.Fprintln(stdout, "     * *.py:           ruff check --output-format=concise . [parallel]")
 			fmt.Fprintln(stdout, "                       dmypy run -- --no-error-summary --no-pretty [parallel]")
 		} else {
