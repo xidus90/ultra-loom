@@ -7,15 +7,17 @@
 Die folgende Tabelle fasst die aktuellsten Performance-Messungen über Projekte, Toolchains und Hook-Lebenszyklen hinweg zusammen. Sie vergleicht die unoptimierte Baseline-Ausführung mit der nativen UltraLoom-Architektur.
 
 | Projekt | Ziel / Dateityp | Aufgerufene Toolchain | Baseline (Ohne Loom / Alt) | Optimiert (UltraLoom) | Beschleunigung / Ersparnis (Warm) |
-| :--- | :--- | :--- | :---: | :---: | :---: |
-| **`space`** | Markdown-Doku (`SPEC.md`) | `ulguard post-edit` (Sofortiger Exit) | Kalt: 2.447,2 ms<br>Warm: 2.305,7 ms | Kalt: 143,7 ms<br>Warm: **27,6 ms** | 🚀 **83,4x schneller**<br>(~2,28 s Ersparnis / Turn) |
-| **`space`** | GDScript-Code (`plugin.gd`) | `ulguard post-edit` (`gdlint <file>`) | Kalt: 2.344,2 ms<br>Warm: 2.300,3 ms | Kalt: 346,7 ms<br>Warm: **322,0 ms** | ⚡ **7,1x schneller**<br>(~1,98 s Ersparnis / Turn) |
-| **`iam_backend`** | Markdown-Doku (`README.md`) | `ulguard` + `ulguard post-edit` | Kalt: 224,0 ms<br>Warm: 206,7 ms | Kalt: 60,1 ms<br>Warm: **55,8 ms** | 🚀 **3,7x schneller**<br>(~151 ms Ersparnis / Turn) |
-| **`iam_backend`** | Python-Code (`manage.py`) | `ulguard` + `ulguard post-edit` (`ruff` + `dmypy` parallel) | Kalt: 311,4 ms<br>Warm: 311,3 ms *(nur Ruff)* | Kalt: 237,4 ms<br>Warm: **229,0 ms** | ⚡ **1,4x schneller**<br>(+ voller statischer Typcheck) |
-| **`iam_frontend`** | TypeScript-Code (`App.tsx`) | `ulguard post-edit` (`eslint` + `tsc` parallel) | Kalt: 12.450,0 ms<br>Warm: 11.200,0 ms *(Sequentiell)* | Kalt: 7.614,7 ms<br>Warm: **7.110,9 ms** | ⚡ **1,6x schneller**<br>(Paralleles ESLint 9 + voller tsc) |
-| **`iam_frontend`** | Markdown-Doku (`README.md`) | `ulguard` + `ulguard post-edit` | Kalt: 215,0 ms<br>Warm: 195,0 ms | Kalt: 58,2 ms<br>Warm: **28,8 ms** | 🚀 **6,8x schneller**<br>(Sofortiger Bypass) |
-| **`ultra-brain`** | Wiki-Doku-Edit (`wiki/index.md`) | `ulguard post-edit` (`brain lint <file>`) | Kalt: 924,3 ms<br>Warm: 736,4 ms *(Komplett-Scan)* | Kalt: 31,7 ms<br>Warm: **29,8 ms** | ⚡ **24,7x schneller**<br>(~706 ms Ersparnis / Turn) |
-| **`iam_backend` / `space`** | Session-Ende Wiki-Gate | Stop-Hook (`brain wiki-gate`) | Kalt: 152,6 ms<br>Warm: 146,7 ms *(nur Git)* | Kalt: 1.052,5 ms<br>Warm: **967,1 ms** | 🛡️ **Voller OKF-Bundle-Check**<br>+ Git-Drift-Prüfung |
+| :--- | :--- | :--- | :--- | :---: | :---: |
+| **`space`** | Markdown-Doku (`SPEC.md`) | `ulguard post-edit` (Sofortiger Exit) | Kalt: 2.447,2 ms<br>Warm: 2.305,7 ms | Kalt: 36,9 ms<br>Warm: **35,8 ms** | 🚀 **64,4x schneller**<br>(~2,27 s Ersparnis / Turn) |
+| **`space`** | GDScript-Code (`plugin.gd`) | `ulguard post-edit` (`gdlint <file>`) | Kalt: 2.344,2 ms<br>Warm: 2.300,3 ms | Kalt: 276,0 ms<br>Warm: **252,5 ms** | ⚡ **9,1x schneller**<br>(~2,05 s Ersparnis / Turn) |
+| **`iam_backend`** | Markdown-Doku (`README.md`) | `ulguard` + `ulguard post-edit` | Kalt: 224,0 ms<br>Warm: 206,7 ms | Kalt: 48,6 ms<br>Warm: **52,1 ms** | 🚀 **4,0x schneller**<br>(~154 ms Ersparnis / Turn) |
+| **`iam_backend`** | Python-Code (`manage.py`) | `ulguard` + `ulguard post-edit` (`ruff` + `dmypy` parallel) | Kalt: 311,4 ms<br>Warm: 311,3 ms *(nur Ruff)* | Kalt: 245,5 ms<br>Warm: **259,2 ms** | ⚡ **1,2x schneller**<br>(+ voller statischer Typcheck) |
+| **`iam_frontend`** | TypeScript-Code (`App.tsx`) | `ulguard post-edit` (`eslint` + `tsc` parallel) | Kalt: 12.450,0 ms<br>Warm: 11.200,0 ms *(Sequentiell)* | Kalt: 8.755,9 ms<br>Warm: **8.630,2 ms** | ⚡ **1,3x schneller**<br>(Paralleles ESLint 9 + voller tsc) |
+| **`iam_frontend`** | Markdown-Doku (`README.md`) | `ulguard` + `ulguard post-edit` | Kalt: 215,0 ms<br>Warm: 195,0 ms | Kalt: 31,4 ms<br>Warm: **33,4 ms** | 🚀 **5,8x schneller**<br>(Sofortiger Bypass) |
+| **`ultra-brain`** | Wiki-Doku-Edit (`docs/wiki/index.md`) | `ulguard post-edit` (`brain lint <file>`) | Kalt: 924,3 ms<br>Warm: 736,4 ms *(Komplett-Scan)* | Kalt: 50,7 ms<br>Warm: **54.2 ms** | ⚡ **13,6x schneller**<br>(~682 ms Ersparnis / Turn) |
+| **`ultra-brain`** | Python-Code (`src/brain/cli.py`) | `ulguard post-edit` (`ruff` + `mypy` parallel) | Kalt: 533,7 ms<br>Warm: 243,9 ms | Kalt: 533,7 ms<br>Warm: **243,9 ms** | ⚡ **Nativ paralleler Lauf** |
+| **`ultraloom`** | Go-Code (`cmd/guard/main.go`) | `ulguard post-edit` (`go vet ./...`) | Kalt: 505,1 ms<br>Warm: 293,0 ms | Kalt: 505,1 ms<br>Warm: **293,0 ms** | ⚡ **Schnelle statische Analyse** |
+| **`ultra-brain` / `space`** | Session-Ende Wiki-Gate | Stop-Hook (`brain wiki-gate`) | Kalt: 152,6 ms<br>Warm: 146,7 ms *(nur Git)* | Kalt: 1.021,3 ms<br>Warm: **1.010,2 ms** | 🛡️ **Voller OKF-Bundle-Check**<br>+ Git-Drift-Prüfung |
 
 ---
 

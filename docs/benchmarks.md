@@ -8,14 +8,16 @@ The table below summarizes the latest performance measurements across projects, 
 
 | Project | Target / File Type | Invoked Toolchain | Baseline (No Loom / Legacy) | Optimized (UltraLoom) | Speedup / Savings (Warm) |
 | :--- | :--- | :--- | :---: | :---: | :---: |
-| **`space`** | Markdown Doc (`SPEC.md`) | `ulguard post-edit` (Instant Exit) | Cold: 2,447.2 ms<br>Warm: 2,305.7 ms | Cold: 143.7 ms<br>Warm: **27.6 ms** | 🚀 **83.4x faster**<br>(~2.28 s saved / turn) |
-| **`space`** | GDScript Code (`plugin.gd`) | `ulguard post-edit` (`gdlint <file>`) | Cold: 2,344.2 ms<br>Warm: 2,300.3 ms | Cold: 346.7 ms<br>Warm: **322.0 ms** | ⚡ **7.1x faster**<br>(~1.98 s saved / turn) |
-| **`iam_backend`** | Markdown Doc (`README.md`) | `ulguard` + `ulguard post-edit` | Cold: 224.0 ms<br>Warm: 206.7 ms | Cold: 60.1 ms<br>Warm: **55.8 ms** | 🚀 **3.7x faster**<br>(~151 ms saved / turn) |
-| **`iam_backend`** | Python Code (`manage.py`) | `ulguard` + `ulguard post-edit` (`ruff` + `dmypy` parallel) | Cold: 311.4 ms<br>Warm: 311.3 ms *(Ruff only)* | Cold: 237.4 ms<br>Warm: **229.0 ms** | ⚡ **1.4x faster**<br>(+ full static type check) |
-| **`iam_frontend`** | TypeScript Code (`App.tsx`) | `ulguard post-edit` (`eslint` + `tsc` parallel) | Cold: 12,450.0 ms<br>Warm: 11,200.0 ms *(Sequential)* | Cold: 7,614.7 ms<br>Warm: **7,110.9 ms** | ⚡ **1.6x faster**<br>(Parallel ESLint 9 + full tsc) |
-| **`iam_frontend`** | Markdown Doc (`README.md`) | `ulguard` + `ulguard post-edit` | Cold: 215.0 ms<br>Warm: 195.0 ms | Cold: 58.2 ms<br>Warm: **28.8 ms** | 🚀 **6.8x faster**<br>(Instant bypass) |
-| **`ultra-brain`** | Wiki Doc Edit (`wiki/index.md`) | `ulguard post-edit` (`brain lint <file>`) | Cold: 924.3 ms<br>Warm: 736.4 ms *(Full sweep)* | Cold: 31.7 ms<br>Warm: **29.8 ms** | ⚡ **24.7x faster**<br>(~706 ms saved / turn) |
-| **`iam_backend` / `space`** | Session End Wiki Gate | Stop hook (`brain wiki-gate`) | Cold: 152.6 ms<br>Warm: 146.7 ms *(Git only)* | Cold: 1,052.5 ms<br>Warm: **967.1 ms** | 🛡️ **Full OKF bundle lint**<br>+ Git drift verification |
+| **`space`** | Markdown Doc (`SPEC.md`) | `ulguard post-edit` (Instant Exit) | Cold: 2,447.2 ms<br>Warm: 2,305.7 ms | Cold: 36.9 ms<br>Warm: **35.8 ms** | 🚀 **64.4x faster**<br>(~2.27 s saved / turn) |
+| **`space`** | GDScript Code (`plugin.gd`) | `ulguard post-edit` (`gdlint <file>`) | Cold: 2,344.2 ms<br>Warm: 2,300.3 ms | Cold: 276.0 ms<br>Warm: **252.5 ms** | ⚡ **9.1x faster**<br>(~2.05 s saved / turn) |
+| **`iam_backend`** | Markdown Doc (`README.md`) | `ulguard` + `ulguard post-edit` | Cold: 224.0 ms<br>Warm: 206.7 ms | Cold: 48.6 ms<br>Warm: **52.1 ms** | 🚀 **4.0x faster**<br>(~154 ms saved / turn) |
+| **`iam_backend`** | Python Code (`manage.py`) | `ulguard` + `ulguard post-edit` (`ruff` + `dmypy` parallel) | Cold: 311.4 ms<br>Warm: 311.3 ms *(Ruff only)* | Cold: 245.5 ms<br>Warm: **259.2 ms** | ⚡ **1.2x faster**<br>(+ full static type check) |
+| **`iam_frontend`** | TypeScript Code (`App.tsx`) | `ulguard post-edit` (`eslint` + `tsc` parallel) | Cold: 12,450.0 ms<br>Warm: 11,200.0 ms *(Sequential)* | Cold: 8,755.9 ms<br>Warm: **8,630.2 ms** | ⚡ **1.3x faster**<br>(Parallel ESLint 9 + full tsc) |
+| **`iam_frontend`** | Markdown Doc (`README.md`) | `ulguard` + `ulguard post-edit` | Cold: 215.0 ms<br>Warm: 195.0 ms | Cold: 31.4 ms<br>Warm: **33.4 ms** | 🚀 **5.8x faster**<br>(Instant bypass) |
+| **`ultra-brain`** | Wiki Doc Edit (`docs/wiki/index.md`) | `ulguard post-edit` (`brain lint <file>`) | Cold: 924.3 ms<br>Warm: 736.4 ms *(Full sweep)* | Cold: 50.7 ms<br>Warm: **54.2 ms** | ⚡ **13.6x faster**<br>(~682 ms saved / turn) |
+| **`ultra-brain`** | Python Code (`src/brain/cli.py`) | `ulguard post-edit` (`ruff` + `mypy` parallel) | Cold: 533.7 ms<br>Warm: 243.9 ms | Cold: 533.7 ms<br>Warm: **243.9 ms** | ⚡ **Native parallel execution** |
+| **`ultraloom`** | Go Code (`cmd/guard/main.go`) | `ulguard post-edit` (`go vet ./...`) | Cold: 505.1 ms<br>Warm: 293.0 ms | Cold: 505.1 ms<br>Warm: **293.0 ms** | ⚡ **Fast static analysis** |
+| **`ultra-brain` / `space`** | Session End Wiki Gate | Stop hook (`brain wiki-gate`) | Cold: 152.6 ms<br>Warm: 146.7 ms *(Git only)* | Cold: 1,021.3 ms<br>Warm: **1,010.2 ms** | 🛡️ **Full OKF bundle lint**<br>+ Git drift verification |
 
 ---
 
