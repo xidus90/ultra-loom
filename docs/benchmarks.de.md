@@ -14,7 +14,7 @@ Die folgenden Tabellen fassen die aktuellsten Performance-Messungen über alle 5
 | **`iam_backend`**<br>*(Django / Python / Docker)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`manage.py`)<br>`PostToolUse` (`README.md` Doku) | `ulguard`<br>`ulguard` (Refusal)<br>`ruff` + `dmypy`<br>*[ÜBERSPRUNGEN]* | 30,8 ms<br>27,9 ms<br>245,5 ms<br>48,6 ms | **27,5 ms**<br>**27,9 ms**<br>**259,2 ms**<br>**52,1 ms** | 🛡️ Blockiert `.env` in 28 ms<br>⚡ Paralleler Ruff + dmypy<br>🚀 4,0x schneller als Althook |
 | **`iam_workers`**<br>*(Python 3.13 / UV / Pyright)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`worker.py`)<br>`PostToolUse` (`README.md` Doku) | `ulguard`<br>`ulguard` (Refusal)<br>`ruff` + `pyright`<br>*[ÜBERSPRUNGEN]* | 30,1 ms<br>25,1 ms<br>1.713,6 ms<br>30,5 ms | **25,7 ms**<br>**25,1 ms**<br>**1.650,0 ms**<br>**32,2 ms** | 🛡️ Blockiert `.env` in 25 ms<br>⚡ Paralleler Ruff + Pyright Strict<br>🚀 5,3x schneller als Althook |
 | **`iam_frontend`**<br>*(React 19 / TS / Vite / ESLint 9)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`App.tsx`)<br>`PostToolUse` (`README.md` Doku) | `ulguard`<br>`ulguard` (Refusal)<br>`eslint --cache` + `tsc`<br>*[ÜBERSPRUNGEN]* | 31,3 ms<br>28,9 ms<br>2.123,7 ms<br>31,4 ms | **30,9 ms**<br>**28,9 ms**<br>**1.787,9 ms**<br>**33,4 ms** | 🛡️ Blockiert `.env` in 29 ms<br>⚡ Paralleler ESLint 9 + tsc<br>🚀 6,3x schneller als Althook |
-| **`ultra-brain`**<br>*(Python / Wiki Engine)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`cli.py`)<br>`PostToolUse` (`README.md` Doku)<br>`PostToolUse` (`docs/wiki/index.md`)<br>`Stop` (`brain wiki-gate`) | `ulguard`<br>`ulguard` (Refusal)<br>`ruff` + `mypy`<br>*[ÜBERSPRUNGEN]*<br>`brain lint`<br>`brain wiki-gate` | 29,5 ms<br>26,1 ms<br>533,7 ms<br>46,3 ms<br>50,7 ms<br>1.021,3 ms | **27,0 ms**<br>**26,1 ms**<br>**243,9 ms**<br>**49,2 ms**<br>**54,2 ms**<br>**1.010,2 ms** | 🛡️ Blockiert `.env` in 26 ms<br>⚡ Parallele Goroutinen<br>⚡ 13,6x schneller als Komplett-Scan<br>🛡️ 100% grünes Stop-Gate |
+| **`ultra-brain`**<br>*(Python / Go-Kern)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`cli.py`)<br>`PostToolUse` (`README.md` Doku)<br>`PostToolUse` (`docs/wiki/index.md`)<br>`Stop` (`brain wiki-gate`) | `ulguard`<br>`ulguard` (Refusal)<br>`ruff` + `mypy`<br>*[ÜBERSPRUNGEN]*<br>`brain lint` (Natives Go)<br>`brain wiki-gate` (Natives Go) | 29,5 ms<br>26,1 ms<br>533,7 ms<br>46,3 ms<br>143,9 ms<br>229,5 ms | **27,0 ms**<br>**26,1 ms**<br>**243,9 ms**<br>**49,2 ms**<br>**25,5 ms**<br>**98,5 ms** | 🛡️ Blockiert `.env` in 26 ms<br>⚡ Parallele Goroutinen<br>🚀 35,1x schneller als Python-CLI<br>🛡️ Sub-100ms Stop-Gate |
 | **`ultraloom`**<br>*(Go Core)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`main.go`)<br>`PostToolUse` (`README.md` Doku) | `ulguard`<br>`ulguard` (Refusal)<br>`go vet ./...`<br>*[ÜBERSPRUNGEN]* | 29,9 ms<br>28,4 ms<br>505,1 ms<br>41,1 ms | **26,5 ms**<br>**28,4 ms**<br>**293,0 ms**<br>**35,9 ms** | 🛡️ Blockiert `.env` in 28 ms<br>⚡ Schnelle statische Analyse<br>🚀 Sofortiger Bypass |
 
 ### Toolchain-Beschleunigungsvergleich (Optimiert vs. Baseline)
@@ -29,10 +29,38 @@ Die folgenden Tabellen fassen die aktuellsten Performance-Messungen über alle 5
 | **`iam_workers`** | Markdown-Doku (`README.md`) | `ulguard` + `ulguard post-edit` | Kalt: 210,0 ms<br>Warm: 188,0 ms | Kalt: 30,5 ms<br>Warm: **32,2 ms** | 🚀 **5,8x schneller**<br>(Sofortiger Bypass) |
 | **`iam_frontend`** | TypeScript-Code (`App.tsx`) | `ulguard post-edit` (`eslint --cache` + `tsc` parallel) | Kalt: 12.450,0 ms<br>Warm: 11.200,0 ms *(Sequentiell)* | Kalt: 2.123,7 ms<br>Warm: **1.787,9 ms** | 🚀 **6,3x schneller**<br>(~9,41 s Ersparnis / Turn) |
 | **`iam_frontend`** | Markdown-Doku (`README.md`) | `ulguard` + `ulguard post-edit` | Kalt: 215,0 ms<br>Warm: 195,0 ms | Kalt: 31,4 ms<br>Warm: **33,4 ms** | 🚀 **5,8x schneller**<br>(Sofortiger Bypass) |
-| **`ultra-brain`** | Wiki-Doku-Edit (`docs/wiki/index.md`) | `ulguard post-edit` (`brain lint <file>`) | Kalt: 924,3 ms<br>Warm: 736,4 ms *(Komplett-Scan)* | Kalt: 50,7 ms<br>Warm: **54.2 ms** | ⚡ **13,6x schneller**<br>(~682 ms Ersparnis / Turn) |
+| **`ultra-brain`** | Wiki-Doku-Edit (`docs/wiki/index.md`) | `ulguard post-edit` (`brain lint <file>` Go) | Kalt: 924,7 ms<br>Warm: 896,1 ms *(Python CLI)* | Kalt: 143,9 ms<br>Warm: **25,5 ms** | 🚀 **35,1x schneller**<br>(~870 ms Ersparnis / Turn) |
 | **`ultra-brain`** | Python-Code (`src/brain/cli.py`) | `ulguard post-edit` (`ruff` + `mypy` parallel) | Kalt: 533,7 ms<br>Warm: 243,9 ms | Kalt: 533,7 ms<br>Warm: **243,9 ms** | ⚡ **Nativ paralleler Lauf** |
 | **`ultraloom`** | Go-Code (`cmd/guard/main.go`) | `ulguard post-edit` (`go vet ./...`) | Kalt: 505,1 ms<br>Warm: 293,0 ms | Kalt: 505,1 ms<br>Warm: **293,0 ms** | ⚡ **Schnelle statische Analyse** |
-| **`ultra-brain` / `space`** | Session-Ende Wiki-Gate | Stop-Hook (`brain wiki-gate`) | Kalt: 152,6 ms<br>Warm: 146,7 ms *(nur Git)* | Kalt: 1.021,3 ms<br>Warm: **1.010,2 ms** | 🛡️ **Voller OKF-Bundle-Check**<br>+ Git-Drift-Prüfung |
+| **`ultra-brain` / `space`** | Session-Ende Wiki-Gate | Stop-Hook (`brain wiki-gate` Go) | Kalt: 961,3 ms<br>Warm: 1.033,8 ms *(Python)* | Kalt: 229,5 ms<br>Warm: **98,5 ms** | 🛡️ **10,5x schneller**<br>(Sub-100ms Stop-Gate) |
+
+---
+
+## Zukünftige Optimierungs-Roadmap
+
+* **Option B (Vollständige UltraBrain Go-Migration):**
+  * Portierung des **MCP-Servers** (`brain.mcp`) und der **Hybrid-Suche** (`brain search`) in natives Go.
+  * Beseitigt den dauerhaften Python-Daemon-Prozess und senkt den MCP-Speicherbedarf von ~120 MB auf **< 15 MB**.
+  * Ermöglicht verzögerungsfreie Streaming-Tool-Antworten (< 2 ms) für KI-Agenten bei Katalog- und Wiki-Abfragen.
+
+---
+
+## Chronologisches Benchmark-Protokoll
+
+### 31.08.2026 19:35:00 MESZ — UltraBrain Core-Migration: Python vs. Natives Go
+
+* **Repository:** `ultra-brain` (Branch `feature/go-brain-core` in `feature/ultra-brain-project-folder` gemergt)
+* **Ziel:** Benchmark der nativen Go-Implementierung (`brain.exe`) gegenüber der ursprünglichen Python 3.13 / UV CLI über alle primären Wiki-Lebenszyklen.
+* **Ergebnisse:**
+  * `brain lint <file>` fiel von **896,1 ms** auf **25,5 ms** (**35,1x schneller**).
+  * `brain wiki-gate` fiel von **1.033,8 ms** auf **98,5 ms** (**10,5x schneller**).
+  * `brain catalog` fiel von **937,1 ms** auf **31,2 ms** (**30,1x schneller**).
+
+| Befehl | Python 3.13 Baseline | Go Native Binary | Beschleunigung |
+| :--- | :---: | :---: | :---: |
+| `brain lint docs/wiki/index.md` | Kalt: 924,7 ms<br>Warm: 896,1 ms | Kalt: 143,9 ms<br>Warm: **25,5 ms** | 🚀 **35,1x schneller** |
+| `brain wiki-gate` (Gesamtes Bündel) | Kalt: 961,3 ms<br>Warm: 1.033,8 ms | Kalt: 229,5 ms<br>Warm: **98,5 ms** | ⚡ **10,5x schneller** |
+| `brain catalog` (Index-Dump) | Kalt: 1.154,1 ms<br>Warm: 937,1 ms | Kalt: 32,8 ms<br>Warm: **31,2 ms** | 🚀 **30,1x schneller** |
 
 ---
 
