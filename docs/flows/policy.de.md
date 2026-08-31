@@ -11,6 +11,7 @@ Aufruf:
 
 ```bash
 ulguard --root .                        # Payload von stdin (PreToolUse-Hook)
+ulguard post-edit --root .              # Payload von stdin (PostToolUse-Hook)
 ```
 
 Die Regeln selbst, ihr Schema und die vollständige Liste der Voreinstellungen

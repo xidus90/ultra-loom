@@ -39,13 +39,16 @@ ulinit check gofmt [paths...]
 ulinit check coverage --go-floor 98.5 --summary "$(go tool cover -func=... | tail -n 1)"
 ```
 
-### 2. Policy Guard (Go / `ulguard`)
+### 2. Policy Guard & Hook Dispatcher (Go / `ulguard`)
 
-Fast `<1ms` `PreToolUse` policy enforcer that validates file write targets (Write, Edit, MultiEdit), notebook operations, and shell commands against built-in rules and `.ultraloom/policy.toml`:
+Fast `<1ms` `PreToolUse` policy enforcer and selective `PostToolUse` edit hook dispatcher:
 
 ```bash
 # Invoked by Claude Code or Gemini PreToolUse hook (reads JSON payload on stdin)
 ulguard --root .
+
+# Invoked by PostToolUse hook on file edit/write (selectively triggers relevant stack checks)
+ulguard post-edit --root .
 ```
 
 ### 3. Check Chain & Verification (Python / `ultraloom check`)

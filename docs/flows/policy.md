@@ -11,6 +11,7 @@ Invocation:
 
 ```bash
 ulguard --root .                         # payload from stdin (PreToolUse hook)
+ulguard post-edit --root .               # payload from stdin (PostToolUse hook)
 ```
 
 The rules themselves, their schema and the full list of defaults are in `.ultraloom/policy.toml` and the
