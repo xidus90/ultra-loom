@@ -80,6 +80,13 @@ func TestRunPostEdit(t *testing.T) {
 			expectedExit: 0,
 		},
 		{
+			name:         "Markdown file outside wiki directory is skipped even when wiki stack is active",
+			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "README.md"}}`,
+			stacks:       []string{"python", "wiki"},
+			expectedCmds: []string{},
+			expectedExit: 0,
+		},
+		{
 			name:         "Go file triggers go vet",
 			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "cmd/main.go"}}`,
 			stacks:       []string{"go"},

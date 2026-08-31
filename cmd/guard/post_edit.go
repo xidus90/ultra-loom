@@ -79,6 +79,9 @@ func runPostEditWithStacks(stdin io.Reader, stderr io.Writer, root string, stack
 	}
 
 	targetStack, hasTarget := extensionStackMap[ext]
+	if targetStack == "wiki" && !isWikiPath(rawPath, root) {
+		return ExitOK
+	}
 	commands := getCommandsForStacks(stacks, targetStack, hasTarget, rawPath)
 
 	var wg sync.WaitGroup
@@ -173,4 +176,20 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 	}
 
 	return cmds
+}
+
+func isWikiPath(rawPath, root string) bool {
+	norm := filepath.ToSlash(rawPath)
+	norm = strings.TrimPrefix(norm, "./")
+	if strings.HasPrefix(norm, "wiki/") || strings.HasPrefix(norm, "docs/wiki/") || strings.Contains(norm, "/wiki/") {
+		return true
+	}
+	if root != "" {
+		rel, err := filepath.Rel(root, rawPath)
+		if err == nil {
+			relNorm := filepath.ToSlash(rel)
+			return strings.HasPrefix(relNorm, "wiki/") || strings.HasPrefix(relNorm, "docs/wiki/") || strings.Contains(relNorm, "/wiki/")
+		}
+	}
+	return false
 }
