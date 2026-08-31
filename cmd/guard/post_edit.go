@@ -163,7 +163,22 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 		}
 	}
 	if shouldRun("typescript") {
-		cmds = append(cmds, "npx eslint .", "npx tsc --noEmit")
+		targetDir := ""
+		if hasTarget && targetPath != "" {
+			norm := strings.TrimPrefix(filepath.ToSlash(targetPath), "./")
+			parts := strings.Split(norm, "/")
+			if len(parts) > 1 && parts[0] != "." && parts[0] != "" {
+				targetDir = parts[0]
+			}
+		}
+		if targetDir != "" {
+			cmds = append(cmds,
+				fmt.Sprintf("npm --prefix %s run lint", targetDir),
+				fmt.Sprintf("npm --prefix %s run typecheck", targetDir),
+			)
+		} else {
+			cmds = append(cmds, "npx eslint .", "npx tsc --noEmit")
+		}
 	}
 	if shouldRun("rust") {
 		cmds = append(cmds, "cargo clippy -- -D warnings", "cargo fmt --check")

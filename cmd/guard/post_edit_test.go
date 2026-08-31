@@ -52,6 +52,13 @@ func TestRunPostEdit(t *testing.T) {
 			expectedExit: 0,
 		},
 		{
+			name:         "TypeScript file in nested workspace triggers prefix npm commands",
+			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "frontend/src/app.tsx"}}`,
+			stacks:       []string{"typescript"},
+			expectedCmds: []string{"npm --prefix frontend run lint", "npm --prefix frontend run typecheck"},
+			expectedExit: 0,
+		},
+		{
 			name:         "Rust file triggers clippy and fmt",
 			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "src/lib.rs"}}`,
 			stacks:       []string{"rust"},

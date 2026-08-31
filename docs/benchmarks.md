@@ -12,6 +12,8 @@ The table below summarizes the latest performance measurements across projects, 
 | **`space`** | GDScript Code (`plugin.gd`) | `ulguard post-edit` (`gdlint <file>`) | Cold: 2,344.2 ms<br>Warm: 2,300.3 ms | Cold: 346.7 ms<br>Warm: **322.0 ms** | ⚡ **7.1x faster**<br>(~1.98 s saved / turn) |
 | **`iam_backend`** | Markdown Doc (`README.md`) | `ulguard` + `ulguard post-edit` | Cold: 224.0 ms<br>Warm: 206.7 ms | Cold: 60.1 ms<br>Warm: **55.8 ms** | 🚀 **3.7x faster**<br>(~151 ms saved / turn) |
 | **`iam_backend`** | Python Code (`manage.py`) | `ulguard` + `ulguard post-edit` (`ruff` + `dmypy` parallel) | Cold: 311.4 ms<br>Warm: 311.3 ms *(Ruff only)* | Cold: 237.4 ms<br>Warm: **229.0 ms** | ⚡ **1.4x faster**<br>(+ full static type check) |
+| **`iam_frontend`** | TypeScript Code (`App.tsx`) | `ulguard post-edit` (`eslint` + `tsc` parallel) | Cold: 12,450.0 ms<br>Warm: 11,200.0 ms *(Sequential)* | Cold: 7,614.7 ms<br>Warm: **7,110.9 ms** | ⚡ **1.6x faster**<br>(Parallel ESLint 9 + full tsc) |
+| **`iam_frontend`** | Markdown Doc (`README.md`) | `ulguard` + `ulguard post-edit` | Cold: 215.0 ms<br>Warm: 195.0 ms | Cold: 58.2 ms<br>Warm: **28.8 ms** | 🚀 **6.8x faster**<br>(Instant bypass) |
 | **`ultra-brain`** | Wiki Doc Edit (`wiki/index.md`) | `ulguard post-edit` (`brain lint <file>`) | Cold: 924.3 ms<br>Warm: 736.4 ms *(Full sweep)* | Cold: 31.7 ms<br>Warm: **29.8 ms** | ⚡ **24.7x faster**<br>(~706 ms saved / turn) |
 | **`iam_backend` / `space`** | Session End Wiki Gate | Stop hook (`brain wiki-gate`) | Cold: 152.6 ms<br>Warm: 146.7 ms *(Git only)* | Cold: 1,052.5 ms<br>Warm: **967.1 ms** | 🛡️ **Full OKF bundle lint**<br>+ Git drift verification |
 
