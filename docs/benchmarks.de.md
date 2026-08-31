@@ -4,7 +4,19 @@
 
 ## Aktuelle Benchmark-Übersicht (Referenztabelle)
 
-Die folgende Tabelle fasst die aktuellsten Performance-Messungen über Projekte, Toolchains und Hook-Lebenszyklen hinweg zusammen. Sie vergleicht die unoptimierte Baseline-Ausführung mit der nativen UltraLoom-Architektur.
+Die folgenden Tabellen fassen die aktuellsten Performance-Messungen über alle 5 gemessenen Repositories, Toolchains und Hook-Lebenszyklen hinweg zusammen. Sie vergleichen die unoptimierte Baseline-Ausführung mit der nativen UltraLoom-Architektur.
+
+### Multi-Repository Gesamtsystem-Übersicht
+
+| Repository & Stack | Event / Zieldatei | Ausgeführte Tools | Kalt-Latenz | Warm-Latenz | Bewertung & Status |
+| :--- | :--- | :--- | :---: | :---: | :--- |
+| **`space`**<br>*(Godot / GDScript / C++ / Wiki)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`plugin.gd`)<br>`PostToolUse` (`SPEC.md` Doku)<br>`PostToolUse` (`wiki/.../index.md`)<br>`Stop` (`brain wiki-gate`) | `ulguard`<br>`ulguard` (Refusal)<br>`gdlint`<br>*[ÜBERSPRUNGEN]*<br>`brain lint`<br>`brain wiki-gate` | 29,2 ms<br>27,4 ms<br>276,0 ms<br>36,9 ms<br>1.096,5 ms<br>1.190,9 ms | **27,2 ms**<br>**27,4 ms**<br>**252,5 ms**<br>**35,8 ms**<br>**986,2 ms**<br>**1.207,1 ms** | 🛡️ Blockiert `.env` in 27 ms<br>⚡ 9,1x schneller als Althook<br>🚀 64,4x schneller als Althook<br>🔍 Prüft OKF-Bundle-Links |
+| **`iam_backend`**<br>*(Django / Python / Docker)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`manage.py`)<br>`PostToolUse` (`README.md` Doku) | `ulguard`<br>`ulguard` (Refusal)<br>`ruff` + `dmypy`<br>*[ÜBERSPRUNGEN]* | 30,8 ms<br>27,9 ms<br>245,5 ms<br>48,6 ms | **27,5 ms**<br>**27,9 ms**<br>**259,2 ms**<br>**52,1 ms** | 🛡️ Blockiert `.env` in 28 ms<br>⚡ Paralleler Ruff + dmypy<br>🚀 4,0x schneller als Althook |
+| **`iam_frontend`**<br>*(React 19 / TS / Vite / ESLint 9)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`App.tsx`)<br>`PostToolUse` (`README.md` Doku) | `ulguard`<br>`ulguard` (Refusal)<br>`eslint --cache` + `tsc`<br>*[ÜBERSPRUNGEN]* | 31,3 ms<br>28,9 ms<br>2.123,7 ms<br>31,4 ms | **30,9 ms**<br>**28,9 ms**<br>**1.787,9 ms**<br>**33,4 ms** | 🛡️ Blockiert `.env` in 29 ms<br>⚡ Paralleler ESLint 9 + tsc<br>🚀 6,3x schneller als Althook |
+| **`ultra-brain`**<br>*(Python / Wiki Engine)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`cli.py`)<br>`PostToolUse` (`README.md` Doku)<br>`PostToolUse` (`docs/wiki/index.md`)<br>`Stop` (`brain wiki-gate`) | `ulguard`<br>`ulguard` (Refusal)<br>`ruff` + `mypy`<br>*[ÜBERSPRUNGEN]*<br>`brain lint`<br>`brain wiki-gate` | 29,5 ms<br>26,1 ms<br>533,7 ms<br>46,3 ms<br>50,7 ms<br>1.021,3 ms | **27,0 ms**<br>**26,1 ms**<br>**243,9 ms**<br>**49,2 ms**<br>**54,2 ms**<br>**1.010,2 ms** | 🛡️ Blockiert `.env` in 26 ms<br>⚡ Parallele Goroutinen<br>⚡ 13,6x schneller als Komplett-Scan<br>🛡️ 100% grünes Stop-Gate |
+| **`ultraloom`**<br>*(Go Core)* | `PreToolUse` (Sicherer Edit)<br>`PreToolUse` (Schutzdatei `.env`)<br>`PostToolUse` (`main.go`)<br>`PostToolUse` (`README.md` Doku) | `ulguard`<br>`ulguard` (Refusal)<br>`go vet ./...`<br>*[ÜBERSPRUNGEN]* | 29,9 ms<br>28,4 ms<br>505,1 ms<br>41,1 ms | **26,5 ms**<br>**28,4 ms**<br>**293,0 ms**<br>**35,9 ms** | 🛡️ Blockiert `.env` in 28 ms<br>⚡ Schnelle statische Analyse<br>🚀 Sofortiger Bypass |
+
+### Toolchain-Beschleunigungsvergleich (Optimiert vs. Baseline)
 
 | Projekt | Ziel / Dateityp | Aufgerufene Toolchain | Baseline (Ohne Loom / Alt) | Optimiert (UltraLoom) | Beschleunigung / Ersparnis (Warm) |
 | :--- | :--- | :--- | :--- | :---: | :---: |

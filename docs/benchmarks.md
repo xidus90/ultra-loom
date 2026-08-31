@@ -2,12 +2,24 @@
 
 [Deutsche Version](benchmarks.de.md)
 
-## Current Benchmark Summary (Quick Reference)
+### Current Benchmark Summary (Quick Reference)
 
-The table below summarizes the latest performance measurements across projects, toolchains, and lifecycle events, comparing unoptimized baseline execution against the UltraLoom native architecture.
+The tables below summarize the latest performance measurements across all 5 benchmarked repositories, toolchains, and lifecycle events, comparing unoptimized baseline execution against the UltraLoom native architecture.
+
+### Multi-Repository End-to-End Suite Overview
+
+| Repository & Stack | Event / Target File | Invoked Tools | Cold Latency | Warm Latency | Evaluation & Status |
+| :--- | :--- | :--- | :---: | :---: | :--- |
+| **`space`**<br>*(Godot / GDScript / C++ / Wiki)* | `PreToolUse` (Safe Edit)<br>`PreToolUse` (Protected `.env`)<br>`PostToolUse` (`plugin.gd`)<br>`PostToolUse` (`SPEC.md` Doc)<br>`PostToolUse` (`wiki/.../index.md`)<br>`Stop` (`brain wiki-gate`) | `ulguard`<br>`ulguard` (Refusal)<br>`gdlint`<br>*[BYPASSED]*<br>`brain lint`<br>`brain wiki-gate` | 29.2 ms<br>27.4 ms<br>276.0 ms<br>36.9 ms<br>1,096.5 ms<br>1,190.9 ms | **27.2 ms**<br>**27.4 ms**<br>**252.5 ms**<br>**35.8 ms**<br>**986.2 ms**<br>**1,207.1 ms** | 🛡️ Blocks `.env` in 27 ms<br>⚡ 9.1x faster than legacy hook<br>🚀 64.4x faster than legacy hook<br>🔍 Validates OKF bundle links |
+| **`iam_backend`**<br>*(Django / Python / Docker)* | `PreToolUse` (Safe Edit)<br>`PreToolUse` (Protected `.env`)<br>`PostToolUse` (`manage.py`)<br>`PostToolUse` (`README.md` Doc) | `ulguard`<br>`ulguard` (Refusal)<br>`ruff` + `dmypy`<br>*[BYPASSED]* | 30.8 ms<br>27.9 ms<br>245.5 ms<br>48.6 ms | **27.5 ms**<br>**27.9 ms**<br>**259.2 ms**<br>**52.1 ms** | 🛡️ Blocks `.env` in 28 ms<br>⚡ Concurrent Ruff + dmypy<br>🚀 4.0x faster than legacy hook |
+| **`iam_frontend`**<br>*(React 19 / TS / Vite / ESLint 9)* | `PreToolUse` (Safe Edit)<br>`PreToolUse` (Protected `.env`)<br>`PostToolUse` (`App.tsx`)<br>`PostToolUse` (`README.md` Doc) | `ulguard`<br>`ulguard` (Refusal)<br>`eslint --cache` + `tsc`<br>*[BYPASSED]* | 31.3 ms<br>28.9 ms<br>2,123.7 ms<br>31.4 ms | **30.9 ms**<br>**28.9 ms**<br>**1,787.9 ms**<br>**33.4 ms** | 🛡️ Blocks `.env` in 29 ms<br>⚡ Concurrent ESLint 9 + tsc<br>🚀 6.3x faster than legacy hook |
+| **`ultra-brain`**<br>*(Python / Wiki Engine)* | `PreToolUse` (Safe Edit)<br>`PreToolUse` (Protected `.env`)<br>`PostToolUse` (`cli.py`)<br>`PostToolUse` (`README.md` Doc)<br>`PostToolUse` (`docs/wiki/index.md`)<br>`Stop` (`brain wiki-gate`) | `ulguard`<br>`ulguard` (Refusal)<br>`ruff` + `mypy`<br>*[BYPASSED]*<br>`brain lint`<br>`brain wiki-gate` | 29.5 ms<br>26.1 ms<br>533.7 ms<br>46.3 ms<br>50.7 ms<br>1,021.3 ms | **27.0 ms**<br>**26.1 ms**<br>**243.9 ms**<br>**49.2 ms**<br>**54.2 ms**<br>**1,010.2 ms** | 🛡️ Blocks `.env` in 26 ms<br>⚡ Parallel goroutines<br>⚡ 13.6x faster than full sweep<br>🛡️ 100% green stop gate |
+| **`ultraloom`**<br>*(Go Core)* | `PreToolUse` (Safe Edit)<br>`PreToolUse` (Protected `.env`)<br>`PostToolUse` (`main.go`)<br>`PostToolUse` (`README.md` Doc) | `ulguard`<br>`ulguard` (Refusal)<br>`go vet ./...`<br>*[BYPASSED]* | 29.9 ms<br>28.4 ms<br>505.1 ms<br>41.1 ms | **26.5 ms**<br>**28.4 ms**<br>**293.0 ms**<br>**35.9 ms** | 🛡️ Blocks `.env` in 28 ms<br>⚡ Fast static analysis<br>🚀 Instant bypass |
+
+### Toolchain Speedup Comparison (Optimized vs. Baseline)
 
 | Project | Target / File Type | Invoked Toolchain | Baseline (No Loom / Legacy) | Optimized (UltraLoom) | Speedup / Savings (Warm) |
-| :--- | :--- | :--- | :---: | :---: | :---: |
+| :--- | :--- | :--- | :--- | :---: | :---: |
 | **`space`** | Markdown Doc (`SPEC.md`) | `ulguard post-edit` (Instant Exit) | Cold: 2,447.2 ms<br>Warm: 2,305.7 ms | Cold: 36.9 ms<br>Warm: **35.8 ms** | 🚀 **64.4x faster**<br>(~2.27 s saved / turn) |
 | **`space`** | GDScript Code (`plugin.gd`) | `ulguard post-edit` (`gdlint <file>`) | Cold: 2,344.2 ms<br>Warm: 2,300.3 ms | Cold: 276.0 ms<br>Warm: **252.5 ms** | ⚡ **9.1x faster**<br>(~2.05 s saved / turn) |
 | **`iam_backend`** | Markdown Doc (`README.md`) | `ulguard` + `ulguard post-edit` | Cold: 224.0 ms<br>Warm: 206.7 ms | Cold: 48.6 ms<br>Warm: **52.1 ms** | 🚀 **4.0x faster**<br>(~154 ms saved / turn) |
@@ -17,7 +29,7 @@ The table below summarizes the latest performance measurements across projects, 
 | **`ultra-brain`** | Wiki Doc Edit (`docs/wiki/index.md`) | `ulguard post-edit` (`brain lint <file>`) | Cold: 924.3 ms<br>Warm: 736.4 ms *(Full sweep)* | Cold: 50.7 ms<br>Warm: **54.2 ms** | ⚡ **13.6x faster**<br>(~682 ms saved / turn) |
 | **`ultra-brain`** | Python Code (`src/brain/cli.py`) | `ulguard post-edit` (`ruff` + `mypy` parallel) | Cold: 533.7 ms<br>Warm: 243.9 ms | Cold: 533.7 ms<br>Warm: **243.9 ms** | ⚡ **Native parallel execution** |
 | **`ultraloom`** | Go Code (`cmd/guard/main.go`) | `ulguard post-edit` (`go vet ./...`) | Cold: 505.1 ms<br>Warm: 293.0 ms | Cold: 505.1 ms<br>Warm: **293.0 ms** | ⚡ **Fast static analysis** |
-| **`ultra-brain` / `space`** | Session End Wiki Gate | Stop hook (`brain wiki-gate`) | Cold: 152.6 ms<br>Warm: 146.7 ms *(Git only)* | Cold: 1,021.3 ms<br>Warm: **1,010.2 ms** | 🛡️ **Full OKF bundle lint**<br>+ Git drift verification |
+| **`ultra-brain` / `space`** | Session End Wiki Gate | Stop hook (`brain wiki-gate`) | Cold: 152.6 ms<br>Warm: 146.7 ms *(Git only)* | Cold: 1,021.3 ms<br>Warm: **1,010.2 ms** | 🛡️ **Full OKF bundle lint**<br>+ Git drift verification |>+ Git drift verification |
 
 ---
 
