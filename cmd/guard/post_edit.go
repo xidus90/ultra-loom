@@ -161,10 +161,14 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 		cmds = append(cmds, "go vet ./...")
 	}
 	if shouldRun("wiki") {
+		prefix := "brain lint"
+		if has("uv") {
+			prefix = "uv run brain lint"
+		}
 		if hasTarget && targetPath != "" {
-			cmds = append(cmds, fmt.Sprintf("brain lint %s", targetPath))
+			cmds = append(cmds, fmt.Sprintf("%s %s", prefix, targetPath))
 		} else {
-			cmds = append(cmds, "brain lint")
+			cmds = append(cmds, prefix)
 		}
 	}
 

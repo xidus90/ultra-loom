@@ -65,16 +65,24 @@ func Detect(root fs.FS) Facts {
 // documentation under wiki/ would otherwise be told it has a brain bundle,
 // and everything downstream would act on it.
 func (facts *Facts) readWiki(root fs.FS) {
-	entries, err := fs.ReadDir(root, "wiki")
-	if err != nil || len(entries) == 0 {
+	for _, cand := range []string{"wiki", "docs/wiki"} {
+		entries, err := fs.ReadDir(root, cand)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		index, err := fs.ReadFile(root, path.Join(cand, "index.md"))
+		if err == nil && strings.Contains(string(index), okfMarker) {
+			facts.WikiMode, facts.WikiPath = "brain", cand+"/"
+			return
+		}
+		bundle, err := fs.ReadFile(root, path.Join(cand, "bundle.toml"))
+		if err == nil && strings.Contains(string(bundle), okfMarker) {
+			facts.WikiMode, facts.WikiPath = "brain", cand+"/"
+			return
+		}
+		facts.Ambiguous = append(facts.Ambiguous, wikiNote)
 		return
 	}
-	index, err := fs.ReadFile(root, "wiki/index.md")
-	if err == nil && strings.Contains(string(index), okfMarker) {
-		facts.WikiMode, facts.WikiPath = "brain", "wiki/"
-		return
-	}
-	facts.Ambiguous = append(facts.Ambiguous, wikiNote)
 }
 
 // doubts collects the questions the tree raises without answering.

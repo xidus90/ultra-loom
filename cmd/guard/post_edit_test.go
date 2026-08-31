@@ -66,6 +66,13 @@ func TestRunPostEdit(t *testing.T) {
 			expectedExit: 0,
 		},
 		{
+			name:         "Wiki markdown file triggers uv run brain lint when uv stack is active",
+			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "wiki/concept.md"}}`,
+			stacks:       []string{"python", "uv", "wiki"},
+			expectedCmds: []string{"uv run brain lint wiki/concept.md"},
+			expectedExit: 0,
+		},
+		{
 			name:         "Markdown file triggers no commands when wiki stack is inactive",
 			payload:      `{"tool_name": "Edit", "tool_input": {"file_path": "docs/README.md"}}`,
 			stacks:       []string{"python"},
