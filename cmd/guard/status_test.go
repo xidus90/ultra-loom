@@ -195,3 +195,19 @@ func TestRunStatusPlainPythonAndGo(t *testing.T) {
 		t.Fatalf("expected post not found, got:\n%s", out)
 	}
 }
+
+func TestRunStatusPyrightWithUV(t *testing.T) {
+	tmp := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmp, "pyproject.toml"), []byte("[project]\nname=\"p\"\n[tool.pyright]\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(tmp, "uv.lock"), []byte(""), 0o644)
+
+	var stdout, stderr bytes.Buffer
+	code := runStatus(&stdout, &stderr, tmp)
+	if code != ExitOK {
+		t.Fatalf("expected ExitOK, got %d", code)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "uv run pyright") {
+		t.Fatalf("expected uv run pyright in status output, got:\n%s", out)
+	}
+}

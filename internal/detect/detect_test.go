@@ -324,6 +324,21 @@ func TestDetectWikiBundleAndContainsVariants(t *testing.T) {
 	if has(facts3.Stacks, "pyright") {
 		t.Fatalf("did not expect pyright without contains match, got %v", facts3.Stacks)
 	}
+
+	// 4. tsconfig.json without package.json (besides check)
+	tree4 := fstest.MapFS{
+		"tsconfig.json": {Data: []byte("{}")},
+	}
+	facts4 := Detect(tree4)
+	if has(facts4.Stacks, "typescript") {
+		t.Fatalf("did not expect typescript without package.json, got %v", facts4.Stacks)
+	}
+
+	// 5. Unreadable file with sig.contains
+	facts5 := Detect(listableFS{tree: tree3})
+	if has(facts5.Stacks, "pyright") {
+		t.Fatalf("did not expect pyright with unreadable pyproject.toml")
+	}
 }
 
 func has(all []string, one string) bool {

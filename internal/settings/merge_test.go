@@ -461,4 +461,14 @@ func TestOrderHooksAndFormatBlockEdgeCases(t *testing.T) {
 	if string(emptyRaw) != "{}" {
 		t.Fatalf("expected {}, got %s", string(emptyRaw))
 	}
+
+	// 3. hooks property as non-slice in a block map
+	blockNonSliceHooks := map[string]any{
+		"matcher": "Write",
+		"hooks":   "not-a-slice",
+	}
+	formatted := formatBlock(blockNonSliceHooks, "  ")
+	if !strings.Contains(formatted, `"not-a-slice"`) {
+		t.Fatalf("expected non-slice hooks to be formatted, got %s", formatted)
+	}
 }

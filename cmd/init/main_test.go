@@ -281,6 +281,10 @@ func TestCliCheckSubcommandsDetailed(t *testing.T) {
 		t.Fatalf("expected code 0 for clean gofmt, got %d (%s)", code, stderr.String())
 	}
 
+	// 7b. gofmt without paths defaults to "."
+	stderr.Reset()
+	_ = cli([]string{"check", "gofmt"}, nothing(), &stdout, &stderr)
+
 	dirtyFile := filepath.Join(tmpDir, "dirty.go")
 	writeFile(t, dirtyFile, "package main\nfunc  main( ) {}\n")
 	stderr.Reset()

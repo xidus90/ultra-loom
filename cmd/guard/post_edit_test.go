@@ -443,6 +443,10 @@ func TestGetCommandsForStacksVariants(t *testing.T) {
 	if len(pyrightPlain) != 2 || !strings.Contains(pyrightPlain[1], "pyright") || strings.Contains(pyrightPlain[1], "uv run") {
 		t.Fatalf("expected plain pyright, got %v", pyrightPlain)
 	}
+	pyrightUV := getCommandsForStacks([]string{"python", "pyright", "uv"}, "python", true, "src/main.py")
+	if len(pyrightUV) != 2 || !strings.Contains(pyrightUV[1], "uv run pyright") {
+		t.Fatalf("expected uv run pyright, got %v", pyrightUV)
+	}
 
 	// 15. Vue nested
 	vueNested := getCommandsForStacks([]string{"vue"}, "vue", true, "frontend/src/Component.vue")

@@ -448,6 +448,13 @@ func TestAskToolsNoInstallCommandAndInvalidInput(t *testing.T) {
 	if len(res) != 1 || res[0].Action != ToolPath || res[0].CustomPath != "/opt/bin/tool" {
 		t.Fatalf("expected ToolPath, got %+v", res)
 	}
+
+	// Empty input for tool without install command defaults to Skip
+	var out2 bytes.Buffer
+	res2, err2 := AskTools(strings.NewReader("\n"), &out2, true, tools)
+	if err2 != nil || len(res2) != 1 || res2[0].Action != ToolSkip {
+		t.Fatalf("expected ToolSkip for empty input, got %+v", res2)
+	}
 }
 
 type errReader struct{}
