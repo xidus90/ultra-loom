@@ -6,6 +6,18 @@ Eine Prüfkette, die eine einzige Schnittstelle vor ruff, eslint, gdlint, mypy,
 tsc, pytest, vitest und coverage setzt — und einen optionalen Graph-Harness für
 Agenten-Abläufe.
 
+## Installation
+
+Die nativen Go-Binärdateien (`ulguard`, `ulinit`) und Shell-Shims direkt in `$GOBIN` (`~/go/bin`) installieren:
+
+```bash
+# Windows (PowerShell)
+pwsh ./scripts/install.ps1
+
+# Linux / macOS (Bash)
+./scripts/install.sh
+```
+
 ## Befehlsübersicht
 
 UltraLoom bietet native Go-Binärdateien für Projekt-Setup und Sub-Millisekunden-Policy-Prüfungen sowie eine Python-CLI für Qualitätsprüfungen, Agenten-Flows und Commit-Sprachvalidierung:

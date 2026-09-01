@@ -6,6 +6,18 @@ A check chain that puts one interface in front of ruff, eslint, gdlint, mypy,
 tsc, pytest, vitest and coverage — and an optional graph harness for agent
 flows.
 
+## Installation
+
+Install the native Go binaries (`ulguard`, `ulinit`) and shell shims directly into your `$GOBIN` (`~/go/bin`):
+
+```bash
+# Windows (PowerShell)
+pwsh ./scripts/install.ps1
+
+# Linux / macOS (Bash)
+./scripts/install.sh
+```
+
 ## Command Inventory
 
 UltraLoom provides native Go binaries for project setup and sub-millisecond policy enforcement, alongside a Python CLI for verification checks, agent flows, and commit language validation:
