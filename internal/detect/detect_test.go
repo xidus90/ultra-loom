@@ -213,7 +213,7 @@ func TestAWikiIndexWithoutTheMarkerIsNotABundle(t *testing.T) {
 
 func TestBrainTomlWithWikiIsDetectedAsBrainMode(t *testing.T) {
 	facts := Detect(fstest.MapFS{
-		".brain.toml": {Data: []byte("[area]\nscope = \"my-scope\"\nwiki = true\n")},
+		".brain.toml":        {Data: []byte("[area]\nscope = \"my-scope\"\nwiki = true\n")},
 		"docs/wiki/index.md": {Data: []byte("# docs wiki\n")},
 	})
 	if facts.WikiMode != "brain" || facts.WikiPath != "docs/wiki/" {
@@ -294,6 +294,35 @@ func TestEcosystemToolingDetection(t *testing.T) {
 		if !has(facts.Stacks, want) {
 			t.Errorf("stacks = %v, want %s", facts.Stacks, want)
 		}
+	}
+}
+
+func TestDetectWikiBundleAndContainsVariants(t *testing.T) {
+	// 1. .brain.toml with [wiki] header
+	tree1 := fstest.MapFS{
+		".brain.toml": {Data: []byte("[area]\nname=\"test\"\n[wiki]\n")},
+	}
+	facts1 := Detect(tree1)
+	if facts1.WikiMode != "brain" {
+		t.Fatalf("expected WikiMode=brain from [wiki] header, got %s", facts1.WikiMode)
+	}
+
+	// 2. bundle.toml with okf marker
+	tree2 := fstest.MapFS{
+		"wiki/bundle.toml": {Data: []byte("format = \"" + okfMarker + "\"\n")},
+	}
+	facts2 := Detect(tree2)
+	if facts2.WikiMode != "brain" || facts2.WikiPath != "wiki/" {
+		t.Fatalf("expected WikiMode=brain from bundle.toml, got mode=%s path=%s", facts2.WikiMode, facts2.WikiPath)
+	}
+
+	// 3. pyproject.toml without [tool.pyright]
+	tree3 := fstest.MapFS{
+		"pyproject.toml": {Data: []byte("[project]\nname=\"x\"\n")},
+	}
+	facts3 := Detect(tree3)
+	if has(facts3.Stacks, "pyright") {
+		t.Fatalf("did not expect pyright without contains match, got %v", facts3.Stacks)
 	}
 }
 

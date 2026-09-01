@@ -157,7 +157,7 @@ def test_a_finding_carries_the_line_and_its_hits() -> None:
 
 @pytest.mark.parametrize("word", ["die", "war", "man", "den", "hat", "in", "so", "an"])
 def test_german_words_that_are_also_english_never_count(word: str) -> None:
-    """"Let the process die in the war room" must not be a finding.
+    """ "Let the process die in the war room" must not be a finding.
 
     Presence of a German word is evidence only when the word means nothing in
     the target language. A gate with false positives gets routed around with
@@ -294,9 +294,7 @@ def test_a_quoted_span_does_not_wrap_across_lines() -> None:
     far more often than half a citation, so both halves are scored as prose.
     """
     text = (
-        "Widen the gate\n\n"
-        'He said "es behebt den Fehler und das\n'
-        'Problem und der Bericht" and left'
+        'Widen the gate\n\nHe said "es behebt den Fehler und das\nProblem und der Bericht" and left'
     )
     assert [f.line_number for f in scan(text, "en", 2)] == [3, 4]
 
@@ -344,11 +342,7 @@ def test_a_git_hint_line_does_not_move_the_span_flags() -> None:
 def test_an_exempted_line_still_carries_its_span_onward() -> None:
     """An allowed line is the author's text too, so a span it opens goes on below."""
     allow = (re.compile("^WIP"),)
-    text = (
-        "Widen the gate\n\n"
-        "WIP `Ref: behebt den Fehler\n"
-        "und das Problem` and stopped"
-    )
+    text = "Widen the gate\n\nWIP `Ref: behebt den Fehler\nund das Problem` and stopped"
     assert scan(text, "en", 2, allow) == ()
 
 
@@ -383,11 +377,7 @@ def test_an_unpaired_backtick_does_not_outlive_its_paragraph() -> None:
 
 def test_a_span_wrapped_inside_one_paragraph_is_still_exempt() -> None:
     """The bound is the paragraph, so a span that stays inside one is untouched."""
-    code = (
-        "Widen the gate\n\n"
-        "He wrote `Ref: behebt den Fehler\n"
-        "und das Problem` and stopped"
-    )
+    code = "Widen the gate\n\nHe wrote `Ref: behebt den Fehler\nund das Problem` and stopped"
     assert scan(code, "en", 2) == ()
     # No quoted twin: a quoted span does not wrap, so there is nothing for
     # the paragraph bound to bound. See test_a_quoted_span_does_not_wrap.
@@ -395,19 +385,9 @@ def test_a_span_wrapped_inside_one_paragraph_is_still_exempt() -> None:
 
 def test_a_span_does_not_wrap_across_a_blank_line() -> None:
     """A paragraph break is not a plausible span interior, so the span ends there."""
-    code = (
-        "Widen the gate\n\n"
-        "He wrote `Ref: behebt den Fehler\n"
-        "\n"
-        "und das Problem` and stopped"
-    )
+    code = "Widen the gate\n\nHe wrote `Ref: behebt den Fehler\n\nund das Problem` and stopped"
     assert [finding.line_number for finding in scan(code, "en", 2)] == [5]
-    quoted = (
-        "Widen the gate\n\n"
-        'He said "es behebt den Fehler\n'
-        "\n"
-        'und das Problem" and stopped'
-    )
+    quoted = 'Widen the gate\n\nHe said "es behebt den Fehler\n\nund das Problem" and stopped'
     assert [finding.line_number for finding in scan(quoted, "en", 2)] == [5]
 
 
@@ -468,11 +448,7 @@ def test_the_tail_of_a_carried_span_cannot_pass_as_a_trailer() -> None:
     the closing backtick starts the line, so a tail that happens to open with
     a trailer key matches TRAILER and takes the whole line out of scoring.
     """
-    text = (
-        "Widen the gate\n\n"
-        "He wrote `something\n"
-        "x`Ref: das und der Bericht"
-    )
+    text = "Widen the gate\n\nHe wrote `something\nx`Ref: das und der Bericht"
     assert [f.line_number for f in scan(text, "en", 2)] == [4]
 
 
@@ -601,18 +577,91 @@ def test_ordinary_english_survives_the_merged_list() -> None:
 def test_no_source_word_is_ordinary_in_its_target_language() -> None:
     # The rule the spec makes binding, held by a test rather than a comment.
     ordinary_english = {
-        "a", "as", "in", "to", "her", "do", "no", "son", "come", "the", "and",
-        "or", "not", "on", "is", "are", "was", "be", "at", "by", "of", "for",
-        "with", "if", "then", "than", "there", "here", "now", "new", "old",
-        "set", "get", "put", "run", "may", "can", "will", "does", "did", "all",
-        "over", "from", "this", "that", "die", "war", "man", "den", "hat", "so",
-        "an", "fest", "still", "plus", "sans", "tout", "le", "lo", "tan",
+        "a",
+        "as",
+        "in",
+        "to",
+        "her",
+        "do",
+        "no",
+        "son",
+        "come",
+        "the",
+        "and",
+        "or",
+        "not",
+        "on",
+        "is",
+        "are",
+        "was",
+        "be",
+        "at",
+        "by",
+        "of",
+        "for",
+        "with",
+        "if",
+        "then",
+        "than",
+        "there",
+        "here",
+        "now",
+        "new",
+        "old",
+        "set",
+        "get",
+        "put",
+        "run",
+        "may",
+        "can",
+        "will",
+        "does",
+        "did",
+        "all",
+        "over",
+        "from",
+        "this",
+        "that",
+        "die",
+        "war",
+        "man",
+        "den",
+        "hat",
+        "so",
+        "an",
+        "fest",
+        "still",
+        "plus",
+        "sans",
+        "tout",
+        "le",
+        "lo",
+        "tan",
     }
     assert not (STOPWORDS["en"] & ordinary_english)
 
     ordinary_german = {
-        "in", "so", "am", "da", "im", "man", "ist", "war", "wir", "sie", "er",
-        "es", "wie", "was", "nun", "hat", "bei", "aus", "als", "ich", "du",
+        "in",
+        "so",
+        "am",
+        "da",
+        "im",
+        "man",
+        "ist",
+        "war",
+        "wir",
+        "sie",
+        "er",
+        "es",
+        "wie",
+        "was",
+        "nun",
+        "hat",
+        "bei",
+        "aus",
+        "als",
+        "ich",
+        "du",
     }
     assert not (STOPWORDS["de"] & ordinary_german)
 
@@ -629,10 +678,26 @@ def test_the_lexicon_is_not_fitted_to_the_words_of_its_own_tests() -> None:
     which is why that sentence was rewritten to fire on function words alone.
     """
     content_words = {
-        "aparece", "corrige", "entrada", "archivo", "erro", "ficheiro",
-        "erreur", "erreurs", "apparaissent", "entree", "fichier", "errore",
-        "appare", "corregge", "eroare", "apare", "intrare", "fisier",
-        "fitxer", "apareix",
+        "aparece",
+        "corrige",
+        "entrada",
+        "archivo",
+        "erro",
+        "ficheiro",
+        "erreur",
+        "erreurs",
+        "apparaissent",
+        "entree",
+        "fichier",
+        "errore",
+        "appare",
+        "corregge",
+        "eroare",
+        "apare",
+        "intrare",
+        "fisier",
+        "fitxer",
+        "apareix",
     }
     for target in LANGUAGES:
         assert not (STOPWORDS[target] & content_words)

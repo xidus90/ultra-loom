@@ -329,7 +329,6 @@ def child_env(
     return env
 
 
-
 def spawn_kwargs(platform: str) -> dict[str, object]:
     """How to start a process so that its descendants can be reached later.
 

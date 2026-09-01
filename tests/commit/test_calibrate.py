@@ -14,9 +14,9 @@ from ultraloom.commit.calibrate import HistoryError, calibrate, read_messages, r
 from ultraloom.process import Completed
 
 _MESSAGES = (
-    "Let the gate run one profile",                      # 0: English
-    "Rename the page to der-alte-fall.md",               # 1: one hit, a path
-    'The page says "der Bericht und das Ergebnis"',      # 2: quoted
+    "Let the gate run one profile",  # 0: English
+    "Rename the page to der-alte-fall.md",  # 1: one hit, a path
+    'The page says "der Bericht und das Ergebnis"',  # 2: quoted
     "Das Ergebnis und der Bericht fehlen vollstaendig",  # 3: German prose
 )
 

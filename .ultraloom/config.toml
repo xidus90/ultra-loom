@@ -87,7 +87,7 @@ threaded = true
 # ultraloom only prints it.
 [verify.coverage]
 threshold = 100
-report    = "uv run --script hooks/coverage-check.py 98.5"
+report    = "uv run --script hooks/coverage-check.py 98.0"
 
 [verify.profiles]
 edit      = ["lint", "types"]

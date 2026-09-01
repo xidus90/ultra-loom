@@ -66,8 +66,7 @@ def _report(findings: tuple[Finding, ...], language: str, stderr: TextIO) -> Non
     """
     other = "German" if language == "English" else "English"
     print(
-        f"ultraloom commit-msg: this message reads as {other}, "
-        f"and commits here are {language}.",
+        f"ultraloom commit-msg: this message reads as {other}, and commits here are {language}.",
         file=stderr,
     )
     for finding in findings:

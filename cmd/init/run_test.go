@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xidus90/ultra-loom/internal/answers"
 	"github.com/xidus90/ultra-loom/internal/detect"
 	"github.com/xidus90/ultra-loom/internal/vendoring"
 )
@@ -1348,5 +1349,39 @@ func TestWriteGitHooksError(t *testing.T) {
 	os.WriteFile(hooksFile, []byte("file"), 0644)
 	if err := writeGitHooks(tmpDir); err == nil {
 		t.Fatal("expected error for .githooks as file, got nil")
+	}
+}
+
+func TestMergeSettingsInvalidJSONAndNoClaude(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Invalid JSON in .claude/settings.json
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	_ = os.MkdirAll(claudeDir, 0755)
+	_ = os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("invalid json"), 0644)
+
+	opts := Options{Root: tmpDir, Yes: true, CommitLanguage: "en", DocsLanguage: "de", WikiMode: "none"}
+	code, report := run(opts)
+	if code != exitRefused {
+		t.Fatalf("expected exitRefused (2) for invalid settings.json, got %d (report: %s)", code, report)
+	}
+
+	// 2. Non-claude agent
+	facts := detect.Facts{}
+	ans := answers.Defaults(facts)
+	ans.Project.Agents = []string{"other"}
+	sw, retCode, msg := mergeSettings(opts, facts, ans, false)
+	if retCode != exitDone || sw.changed || msg != "" {
+		t.Fatalf("expected exitDone and no changes for non-claude agent, got code=%d changed=%v msg=%q", retCode, sw.changed, msg)
+	}
+
+	// 3. Legacy hook warnings in existing settings
+	legacySettings := `{"hooks": {"PreToolUse": [{"hooks": [{"command": "python format_on_edit.py"}]}]}}`
+	_ = os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(legacySettings), 0644)
+	ans2 := answers.Defaults(facts)
+	ans2.Project.Agents = []string{"claude"}
+	_, retCode2, msg2 := mergeSettings(opts, facts, ans2, false)
+	if retCode2 != exitDone || !strings.Contains(msg2, "legacy hook") {
+		t.Fatalf("expected legacy hook warning, got code=%d msg=%q", retCode2, msg2)
 	}
 }

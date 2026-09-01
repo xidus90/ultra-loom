@@ -86,9 +86,7 @@ def load_commit_policy(root: Path) -> CommitPolicy | None:
     if language not in LANGUAGES:
         # The offending value is named: the author of a typo needs to see what
         # was read, and the hook prints this line and nothing else.
-        raise ConfigError(
-            f"{path}: [commit].language must be one of {LANGUAGES}, not {language!r}"
-        )
+        raise ConfigError(f"{path}: [commit].language must be one of {LANGUAGES}, not {language!r}")
 
     threshold = commit.get("threshold", DEFAULT_THRESHOLD)
     # TOML's booleans are Python ints, and `threshold = true` is nobody's

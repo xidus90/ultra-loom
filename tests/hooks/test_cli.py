@@ -30,7 +30,6 @@ def test_hook_without_a_name_says_what_to_type(
     assert "which hook" in capsys.readouterr().err
 
 
-
 def test_stop_reads_the_payload_from_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -48,9 +47,7 @@ def test_stop_reads_the_payload_from_stdin(
 def test_subagent_start_reads_the_payload_from_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    payload = json.dumps(
-        {"session_id": "s1", "hook_event_name": "SubagentStart", "agent_id": "a1"}
-    )
+    payload = json.dumps({"session_id": "s1", "hook_event_name": "SubagentStart", "agent_id": "a1"})
     monkeypatch.setattr("sys.stdin", io.StringIO(payload))
 
     assert main(["hook", "subagent-start", "--root", str(tmp_path)]) == 0

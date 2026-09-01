@@ -109,8 +109,7 @@ def _commit_msg_misuse(args: argparse.Namespace) -> str | None:
     if args.calibrate is not None:
         if args.path is not None:
             return (
-                f"--calibrate measures the history, so it takes no message file "
-                f"-- drop {args.path}"
+                f"--calibrate measures the history, so it takes no message file -- drop {args.path}"
             )
         return None
     if args.path is None:
@@ -118,10 +117,7 @@ def _commit_msg_misuse(args: argparse.Namespace) -> str | None:
     if args.language is not None:
         # The hook's language comes from [commit], and it must: a flag that
         # overrode it would let a commit choose the rule it is judged by.
-        return (
-            "--language belongs to --calibrate; the hook reads [commit].language "
-            "from the config"
-        )
+        return "--language belongs to --calibrate; the hook reads [commit].language from the config"
     return None
 
 
@@ -185,19 +181,13 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="which checks to run: a comma-separated list, or a profile from [verify.profiles]",
     )
-    hook_subs.add_parser(
-        "subagent-start", parents=[common], help="remember where the remote stood"
-    )
-    hook_subs.add_parser(
-        "subagent-stop", parents=[common], help="report what a subagent changed"
-    )
+    hook_subs.add_parser("subagent-start", parents=[common], help="remember where the remote stood")
+    hook_subs.add_parser("subagent-stop", parents=[common], help="report what a subagent changed")
 
     commit_msg = subparsers.add_parser(
         "commit-msg", parents=[common], help="check a commit message's language"
     )
-    commit_msg.add_argument(
-        "path", nargs="?", help="the message file git passes to the hook"
-    )
+    commit_msg.add_argument("path", nargs="?", help="the message file git passes to the hook")
     commit_msg.add_argument(
         "--calibrate",
         type=int,

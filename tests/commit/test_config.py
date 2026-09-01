@@ -42,14 +42,17 @@ def test_the_threshold_can_be_raised(tmp_path: Path) -> None:
 
 
 def test_allow_patterns_are_compiled(tmp_path: Path) -> None:
-    root = _write(tmp_path, """
+    root = _write(
+        tmp_path,
+        """
 [commit]
 language = "en"
 
 [[commit.allow]]
 regex  = "^Quelle:"
 reason = "Zitierte Quelle, keine Prosa."
-""")
+""",
+    )
     policy = load_commit_policy(root)
     assert policy is not None
     assert policy.allow[0].search("Quelle: der Bericht") is not None
@@ -57,14 +60,17 @@ reason = "Zitierte Quelle, keine Prosa."
 
 def test_an_allow_regex_matches_what_it_names(tmp_path: Path) -> None:
     """Positive coverage for the accepted shape, not only its error cases."""
-    root = _write(tmp_path, """
+    root = _write(
+        tmp_path,
+        """
 [commit]
 language = "en"
 
 [[commit.allow]]
 regex  = "^Co-Authored-By:"
 reason = "Trailer, not prose."
-""")
+""",
+    )
     policy = load_commit_policy(root)
     assert policy is not None
     assert policy.allow[0].search("Co-Authored-By: Someone <someone@example.com>") is not None
@@ -79,9 +85,8 @@ reason = "Trailer, not prose."
         ('[commit]\nlanguage = "en"\nthreshold = "zwei"', "must be an integer"),
         ('[commit]\nlanguage = "en"\nthreshold = 0', "must be greater than zero"),
         ('[commit]\nlanguage = "en"\nthreshold = true', "must be an integer"),
-        ('[commit]\nthreshold = 2', "needs a `language`"),
-        ('[commit]\nlanguage = "en"\n[[commit.allow]]\nregex = "["\nreason = "x"',
-         "invalid regex"),
+        ("[commit]\nthreshold = 2", "needs a `language`"),
+        ('[commit]\nlanguage = "en"\n[[commit.allow]]\nregex = "["\nreason = "x"', "invalid regex"),
         ('[commit]\nlanguage = "en"\n[[commit.allow]]\nregex = "^x"', "needs a `reason`"),
         (
             '[commit]\nlanguage = "en"\n[[commit.allow]]\nreason = "x"',
@@ -89,13 +94,11 @@ reason = "Trailer, not prose."
         ),
         ('commit = "no table"', r"\[commit\] must be a table"),
         (
-            '[commit]\nlanguage = "en"\n[[commit.allow]]\n'
-            'match = "a"\nreason = "x"',
+            '[commit]\nlanguage = "en"\n[[commit.allow]]\nmatch = "a"\nreason = "x"',
             "has no `match` -- remove it and write a `regex`",
         ),
         (
-            '[commit]\nlanguage = "en"\n[[commit.allow]]\n'
-            'match = "a"\nregex = "^b"\nreason = "x"',
+            '[commit]\nlanguage = "en"\n[[commit.allow]]\nmatch = "a"\nregex = "^b"\nreason = "x"',
             "has no `match` -- remove it and write a `regex`",
         ),
         ('[commit]\nlanguage = "en"\nallow = "no list"', "must be a list of tables"),
@@ -131,8 +134,7 @@ def test_an_unknown_allow_key_is_refused_by_name(tmp_path: Path) -> None:
     """
     root = _write(
         tmp_path,
-        '[commit]\nlanguage = "en"\n\n[[commit.allow]]\n'
-        'regx = "^Fixes"\nreason = "a trailer"\n',
+        '[commit]\nlanguage = "en"\n\n[[commit.allow]]\nregx = "^Fixes"\nreason = "a trailer"\n',
     )
     with pytest.raises(ConfigError) as error:
         load_commit_policy(root)

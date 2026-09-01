@@ -204,6 +204,11 @@ func TestRelativePathHelper(t *testing.T) {
 	if !strings.Contains(outside, "outside.txt") {
 		t.Fatalf("outside = %q", outside)
 	}
+	otherDir := t.TempDir()
+	absOutside := relativePath(filepath.Join(otherDir, "other.txt"), root)
+	if !strings.Contains(absOutside, "other.txt") {
+		t.Fatalf("absOutside = %q", absOutside)
+	}
 }
 
 func TestGuardBlocksMultiEdit(t *testing.T) {

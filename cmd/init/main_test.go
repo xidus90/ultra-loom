@@ -230,15 +230,92 @@ func TestTheNullDeviceIsNobodyToAsk(t *testing.T) {
 	}
 }
 
-func TestMainFunction(t *testing.T) {
-	if os.Getenv("TEST_MAIN_INIT") == "1" {
-		main()
-		return
+func TestCliCheckSubcommandsDetailed(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. No subcommand
+	var stdout, stderr bytes.Buffer
+	if code := cli([]string{"check"}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for bare check, got %d", code)
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=TestMainFunction")
-	cmd.Env = append(os.Environ(), "TEST_MAIN_INIT=1")
-	cmd.Args = append(cmd.Args, "--version")
-	_ = cmd.Run()
+
+	// 2. Unknown subcommand
+	stderr.Reset()
+	if code := cli([]string{"check", "unknown-sub"}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for unknown check subcommand, got %d", code)
+	}
+
+	// 3. commit-msg missing arg
+	stderr.Reset()
+	if code := cli([]string{"check", "commit-msg"}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for missing commit-msg path, got %d", code)
+	}
+
+	// 4. commit-msg non-existent file
+	stderr.Reset()
+	if code := cli([]string{"check", "commit-msg", filepath.Join(tmpDir, "missing.txt")}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for missing file, got %d", code)
+	}
+
+	// 5. commit-msg valid
+	validFile := filepath.Join(tmpDir, "valid_commit.txt")
+	writeFile(t, validFile, "feat: add new feature\n\nExplain detail.")
+	stderr.Reset()
+	if code := cli([]string{"check", "commit-msg", validFile}, nothing(), &stdout, &stderr); code != 0 {
+		t.Fatalf("expected code 0 for valid commit msg, got %d (%s)", code, stderr.String())
+	}
+
+	// 6. commit-msg invalid
+	invalidFile := filepath.Join(tmpDir, "invalid_commit.txt")
+	writeFile(t, invalidFile, "feat: behebe den fehler in der komponente")
+	stderr.Reset()
+	if code := cli([]string{"check", "commit-msg", invalidFile}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for invalid commit msg, got %d", code)
+	}
+
+	// 7. gofmt clean & dirty
+	cleanFile := filepath.Join(tmpDir, "clean.go")
+	writeFile(t, cleanFile, "package main\n\nfunc main() {}\n")
+	stderr.Reset()
+	if code := cli([]string{"check", "gofmt", cleanFile}, nothing(), &stdout, &stderr); code != 0 {
+		t.Fatalf("expected code 0 for clean gofmt, got %d (%s)", code, stderr.String())
+	}
+
+	dirtyFile := filepath.Join(tmpDir, "dirty.go")
+	writeFile(t, dirtyFile, "package main\nfunc  main( ) {}\n")
+	stderr.Reset()
+	if code := cli([]string{"check", "gofmt", dirtyFile}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for dirty gofmt, got %d", code)
+	}
+
+	// 8. coverage check
+	stdout.Reset()
+	stderr.Reset()
+	if code := cli([]string{"check", "coverage", "--summary", "total: (statements) 99.5%"}, nothing(), &stdout, &stderr); code != 0 {
+		t.Fatalf("expected code 0 for passing coverage, got %d", code)
+	}
+
+	stderr.Reset()
+	if code := cli([]string{"check", "coverage", "--summary", "total: (statements) 80.0%"}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for failing coverage, got %d", code)
+	}
+
+	stderr.Reset()
+	if code := cli([]string{"check", "coverage", "--summary", "not a summary"}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for invalid summary, got %d", code)
+	}
+
+	stderr.Reset()
+	if code := cli([]string{"check", "coverage", "--invalid-flag"}, nothing(), &stdout, &stderr); code != 1 {
+		t.Fatalf("expected code 1 for invalid flag, got %d", code)
+	}
+}
+
+func TestCliHelpFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := cli([]string{"--help"}, nothing(), &stdout, &stderr); code != 0 {
+		t.Fatalf("expected code 0 for --help, got %d", code)
+	}
 }
 
 func TestGatherHooksPathError(t *testing.T) {
@@ -250,5 +327,17 @@ func TestGatherHooksPathError(t *testing.T) {
 	_, err := gather(tmpDir, brokenRunner)
 	if err == nil {
 		t.Fatal("expected error from broken HooksPath in gather, got nil")
+	}
+}
+
+func TestGatherWithWikiMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, filepath.Join(tmpDir, ".brain.toml"), "[area]\nname=\"test\"\nwiki=true\n")
+	facts, err := gather(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("gather failed: %v", err)
+	}
+	if facts.WikiMode != "brain" {
+		t.Fatalf("expected WikiMode=brain, got %q", facts.WikiMode)
 	}
 }
