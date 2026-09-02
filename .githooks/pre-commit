@@ -2,4 +2,8 @@
 # ultraloom pre-commit quality gate
 set -euo pipefail
 
+# Ensure user binaries (uv, etc.) are available in GUI Git environments (e.g. GitHub Desktop)
+export PATH="$HOME/.local/bin:$HOME/AppData/Local/hermes/bin:$HOME/go/bin:$PATH"
+
 uv run ultraloom check all
+

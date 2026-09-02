@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}/.ultraloom/vendor/ultraloom\" ultraloom hook session-start --root \"${CLAUDE_PROJECT_DIR}\"",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook session-start --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 20
           }
         ],
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}/.ultraloom/vendor/ultraloom\" ultraloom hook subagent-start --root \"${CLAUDE_PROJECT_DIR}\"",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook subagent-start --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 30
           }
         ],
@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}/.ultraloom/vendor/ultraloom\" ultraloom hook subagent-stop --root \"${CLAUDE_PROJECT_DIR}\"",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook subagent-stop --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 30
           }
         ],
