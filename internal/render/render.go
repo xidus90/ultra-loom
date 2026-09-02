@@ -20,13 +20,6 @@ import (
 //go:embed templates/*.tmpl templates/skills/*.tmpl
 var templates embed.FS
 
-// targets maps a template to the path it lands on in the project.
-var targets = map[string]string{
-	"answers.toml.tmpl": ".ultraloom/answers.toml",
-	"policy.toml.tmpl":  ".ultraloom/policy.toml",
-	"config.toml.tmpl":  ".ultraloom/config.toml",
-}
-
 // pushRule is built in rather than asked. `git push` means the same thing in
 // every repository -- whether commits reach the remote is a person's call --
 // and a project that answered nothing would otherwise get an empty policy as
@@ -105,7 +98,11 @@ func Render(a answers.Answers, coverageLane bool) (map[string]string, error) {
 
 	out := make(map[string]string, len(targetsList))
 	for _, item := range targetsList {
-		out[item.target] = one(item.tmpl, data)
+		rendered, err := one(item.tmpl, data)
+		if err != nil {
+			return nil, err
+		}
+		out[item.target] = rendered
 	}
 
 	return out, nil
@@ -207,10 +204,15 @@ func tomlList(all []string) string {
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
-func one(name string, data view) string {
+func one(name string, data view) (string, error) {
 	base := filepath.Base(name)
-	parsed := template.Must(template.New(base).Funcs(helpers).ParseFS(templates, "templates/"+name))
+	parsed, err := template.New(base).Funcs(helpers).ParseFS(templates, "templates/"+name)
+	if err != nil {
+		return "", err
+	}
 	var buffer strings.Builder
-	_ = parsed.Execute(&buffer, data)
-	return buffer.String()
+	if err := parsed.Execute(&buffer, data); err != nil {
+		return "", err
+	}
+	return buffer.String(), nil
 }

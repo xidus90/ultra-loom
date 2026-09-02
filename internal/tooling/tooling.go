@@ -8,38 +8,37 @@ import (
 )
 
 type ToolSpec struct {
-	Name        string
-	Stack       string
-	InstallCmd  string
-	Description string
+	Name       string
+	Stack      string
+	InstallCmd string
 }
 
 var StackTools = map[string][]ToolSpec{
 	"python": {
-		{Name: "uv", Stack: "python", InstallCmd: "curl -LsSf https://astral.sh/uv/install.sh | sh", Description: "Python package and tool manager"},
-		{Name: "ruff", Stack: "python", InstallCmd: "uv tool install ruff", Description: "Fast Python linter and formatter"},
-		{Name: "dmypy", Stack: "python", InstallCmd: "uv tool install mypy", Description: "Daemonized fast Python type checker"},
+		{Name: "uv", Stack: "python", InstallCmd: "curl -LsSf https://astral.sh/uv/install.sh | sh"},
+		{Name: "ruff", Stack: "python", InstallCmd: "uv tool install ruff"},
+		{Name: "dmypy", Stack: "python", InstallCmd: "uv tool install mypy"},
 	},
 	"gdscript": {
-		{Name: "gdlint", Stack: "gdscript", InstallCmd: "uv tool install gdtoolkit==4.3.3", Description: "GDScript linter and code quality checker"},
+		{Name: "gdlint", Stack: "gdscript", InstallCmd: "uv tool install gdtoolkit==4.3.3"},
 	},
 	"cpp": {
-		{Name: "clang-format", Stack: "cpp", InstallCmd: "winget install LLVM.LLVM", Description: "Clang code formatter for C++"},
-		{Name: "clang-tidy", Stack: "cpp", InstallCmd: "winget install LLVM.LLVM", Description: "Clang static analyzer and linter for C++"},
-		{Name: "cmake", Stack: "cpp", InstallCmd: "winget install Kitware.CMake", Description: "Cross-platform build system generator"},
-		{Name: "ninja", Stack: "cpp", InstallCmd: "winget install Ninja-build.Ninja", Description: "Fast build executor"},
+		{Name: "clang-format", Stack: "cpp", InstallCmd: "winget install LLVM.LLVM"},
+		{Name: "clang-tidy", Stack: "cpp", InstallCmd: "winget install LLVM.LLVM"},
+		{Name: "cmake", Stack: "cpp", InstallCmd: "winget install Kitware.CMake"},
+		{Name: "ninja", Stack: "cpp", InstallCmd: "winget install Ninja-build.Ninja"},
 	},
 	"typescript": {
-		{Name: "npx", Stack: "typescript", InstallCmd: "npm install -g npx", Description: "Node package runner"},
-		{Name: "eslint", Stack: "typescript", InstallCmd: "npm install -g eslint", Description: "TypeScript/JavaScript linter"},
-		{Name: "tsc", Stack: "typescript", InstallCmd: "npm install -g typescript", Description: "TypeScript compiler for type checking"},
+		{Name: "npx", Stack: "typescript", InstallCmd: "npm install -g npx"},
+		{Name: "eslint", Stack: "typescript", InstallCmd: "npm install -g eslint"},
+		{Name: "tsc", Stack: "typescript", InstallCmd: "npm install -g typescript"},
 	},
 	"rust": {
-		{Name: "cargo", Stack: "rust", InstallCmd: "rustup default stable", Description: "Rust package manager and build tool"},
+		{Name: "cargo", Stack: "rust", InstallCmd: "rustup default stable"},
 	},
 	"go": {
-		{Name: "go", Stack: "go", InstallCmd: "winget install GoLang.Go", Description: "Go compiler and toolchain"},
-		{Name: "gofmt", Stack: "go", InstallCmd: "winget install GoLang.Go", Description: "Go code formatter"},
+		{Name: "go", Stack: "go", InstallCmd: "winget install GoLang.Go"},
+		{Name: "gofmt", Stack: "go", InstallCmd: "winget install GoLang.Go"},
 	},
 }
 

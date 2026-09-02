@@ -476,3 +476,10 @@ func TestRenderDocumentTemplatesAccordingToAgents(t *testing.T) {
 		t.Fatalf("expected exactly 4 core files for no agents, got %d", len(filesNoAgents))
 	}
 }
+
+func TestOneReturnsErrorOnMissingTemplate(t *testing.T) {
+	_, err := one("does_not_exist.tmpl", view{})
+	if err == nil {
+		t.Fatal("expected error for nonexistent template, got nil")
+	}
+}
