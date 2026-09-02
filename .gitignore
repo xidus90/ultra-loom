@@ -37,11 +37,13 @@ htmlcov/
 /ulinit_*.exe
 
 # Temporary files and test profiles
-*.out
-*.cov
-*cov*
-$*
-cover*
+/*.out
+/*.cov
+/coverage
+/coverage.out
+/cover
+/guard_cover
+/cov_*.out
 
 # Local brain & wiki hook cache
 .ultra-brain/

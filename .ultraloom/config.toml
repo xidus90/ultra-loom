@@ -11,15 +11,9 @@
 # buy, and it does not.
 #
 # `gofmt -l` prints the unformatted files and *exits 0* even then, so it cannot
-# be a gate entry by itself; `hooks/gofmt-check.py` turns that output into an
-# exit code. In Python and not in bash, because the gate spawns whichever `bash`
-# PATH names first, and on this machine that is WSL's -- from there a Windows
-# gofmt cannot be reached by its bare name, and the lane failed with
-# `command not found` while `go vet` beside it ran fine.
-# It is given every Go source root by name -- `cmd` and, since `internal/detect`
-# exists, `internal`. Named and not `.`, because gofmt does not shrug at a
-# missing path but exits 2, and a root added here before it exists would take
-# the whole lane down.
+# be a gate entry by itself; `./ulinit check gofmt` turns that output into an
+# exit code. It is given every Go source root by name -- `cmd` and `internal`.
+# Named and not `.`, because gofmt does not shrug at a missing path but exits 2.
 #
 # `types` is named only to trade mypy for its daemon. A/B over this hook's own
 # post-edit path, back to back on 2026-08-27: warm 1400 ms -> 988 ms, cold

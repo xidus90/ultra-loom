@@ -107,7 +107,7 @@ func runStatus(stdout io.Writer, stderr io.Writer, root string) int {
 	fmt.Fprintln(stdout, "--------------------------------------------------------------------------------")
 
 	fmt.Fprintln(stdout, "[PreToolUse] (Matcher: Write|Edit|NotebookEdit|Bash|PowerShell)")
-	fmt.Fprintln(stdout, "  -> ulguard (Path-Jail, Protected Files & Size Limit in <5ms)")
+	fmt.Fprintln(stdout, "  -> ulguard (Path-Jail & Protected Files in <5ms)")
 
 	fmt.Fprintln(stdout, "\n[PostToolUse] (Matcher: Write|Edit|NotebookEdit)")
 	fmt.Fprintln(stdout, "  -> ulguard post-edit (Concurrent Goroutines per file type):")
