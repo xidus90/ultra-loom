@@ -343,8 +343,8 @@ def _measuring_state(
     if measure or after in alongside:
         return measure, ""
     return (), (
-        f"Achtung: `{after}` lief in diesem Lauf nicht; "
-        "dieser Bericht kann von einem älteren Lauf stammen."
+        f"Warning: `{after}` did not run in this pass; "
+        "this report may originate from an older run."
     )
 
 
@@ -693,7 +693,7 @@ def run_kinds(
                 pending.append(kind)
             else:
                 results[kind] = CheckResult(
-                    kind, False, f"läuft nicht, weil `{blocker}` rot war", BLOCKED
+                    kind, False, f"did not run because `{blocker}` was red", BLOCKED
                 )
         if not pending:
             continue

@@ -1125,7 +1125,7 @@ def test_check_all_reports_a_blocked_check_as_failed(
     out = capsys.readouterr().out
     assert code == 1
     assert "coverage: failed [blocked]" in out
-    assert "läuft nicht, weil `test` rot war" in out
+    assert "did not run because `test` was red" in out
 
 
 def test_check_prints_the_heading_of_every_command_of_one_kind(

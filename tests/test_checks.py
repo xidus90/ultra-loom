@@ -1065,7 +1065,7 @@ def test_a_configured_report_warns_when_what_it_reads_never_ran(tmp_path: Path) 
     godot_project(tmp_path)
     config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
     command = resolve_check("coverage", config, alongside=frozenset({"coverage"}))
-    assert "lief in diesem Lauf nicht" in command.warning
+    assert "did not run in this pass" in command.warning
 
 
 def test_a_predecessor_that_runs_silences_the_warning(tmp_path: Path) -> None:
@@ -1111,7 +1111,7 @@ def test_a_report_in_a_project_of_no_known_language_warns_too(tmp_path: Path) ->
     """No marker file, so the predecessor can only come from the project's own [verify.after]."""
     config = Config(root=tmp_path, coverage_report="check-lcov", after={"coverage": "test"})
     command = resolve_check("coverage", config, alongside=frozenset({"coverage"}))
-    assert "lief in diesem Lauf nicht" in command.warning
+    assert "did not run in this pass" in command.warning
 
 
 def test_run_check_takes_the_pass_along(tmp_path: Path) -> None:
@@ -1122,7 +1122,7 @@ def test_run_check_takes_the_pass_along(tmp_path: Path) -> None:
         after={"coverage": "test"},
     )
     result = run_check("coverage", config, frozenset({"coverage"}))
-    assert result.output.startswith("Achtung:")
+    assert result.output.startswith("Warning:")
     assert result.ok
 
 

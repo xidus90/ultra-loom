@@ -1308,7 +1308,7 @@ def test_the_report_names_what_did_not_run(tmp_path: Path) -> None:
     check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
     delta = check(VerifyState(kinds=("test", "coverage")))
 
-    assert "Nicht gelaufen, weil ein Vorgänger rot war: coverage" in str(delta["report"])
+    assert "Did not run because a predecessor was red: coverage" in str(delta["report"])
     # A check that did not run is never a passed check -- and never a defect
     # the repairer is asked to close either.
     assert delta["failing"] == ("test", "coverage")
@@ -1325,7 +1325,7 @@ def test_a_blocked_check_is_named_below_the_findings_not_among_them(tmp_path: Pa
     check = make_check(Config(root=tmp_path, test_paths=("tests/",)), runner)
     report = str(check(VerifyState(kinds=("test", "coverage")))["report"])
 
-    assert report.index("## test") < report.index("Nicht gelaufen")
+    assert report.index("## test") < report.index("Did not run")
     assert "## coverage" not in report
 
 
@@ -1350,7 +1350,7 @@ def test_a_report_of_nothing_but_blocked_checks_does_not_open_on_blank_lines() -
     """`_render` takes any tuple of red results, and the flow is not its only caller."""
     rendered = _render((CheckResult("coverage", False, "did not run", BLOCKED),))
 
-    assert rendered == "Nicht gelaufen, weil ein Vorgänger rot war: coverage"
+    assert rendered == "Did not run because a predecessor was red: coverage"
 
 
 def test_the_real_runner_may_not_be_handed_in_directly() -> None:
@@ -1500,7 +1500,7 @@ def test_the_render_clips_each_check_but_not_the_blocked_line() -> None:
     )
 
     assert "Zeilen ausgelassen" in rendered
-    assert rendered.endswith("Nicht gelaufen, weil ein Vorgänger rot war: coverage")
+    assert rendered.endswith("Did not run because a predecessor was red: coverage")
     assert "500" not in rendered
 
 

@@ -210,7 +210,7 @@ def _render(red: tuple[CheckResult, ...], *, limit: int | None = None) -> str:
     )
     if not blocked:
         return rendered
-    line = f"Nicht gelaufen, weil ein Vorgänger rot war: {', '.join(blocked)}"
+    line = f"Did not run because a predecessor was red: {', '.join(blocked)}"
     # Concatenated conditionally rather than always. `make_check` never reaches
     # the second arm -- a blocked check needs a red predecessor in the same
     # pass, so there is always a finding above the line, transitive chains
