@@ -1490,3 +1490,77 @@ func TestMergeSettingsInvalidJSONAndNoClaude(t *testing.T) {
 		t.Fatalf("expected legacy hook warning, got code=%d msg=%q", retCode2, msg2)
 	}
 }
+
+func TestEnsureGitignoreAddsBothArtifacts(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := ensureGitignore(tmpDir); err != nil {
+		t.Fatalf("ensureGitignore failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("expected a .gitignore, got: %v", err)
+	}
+	for _, want := range []string{".claude/settings.json.bak", ".ultraloom/hooks/"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("expected %q in .gitignore, got:\n%s", want, string(data))
+		}
+	}
+}
+
+// Run twice and the file may not grow: init is run again on every update, and
+// an entry appended each time is the kind of noise nobody reads any more.
+func TestEnsureGitignoreIsIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := ensureGitignore(tmpDir); err != nil {
+		t.Fatalf("first call failed: %v", err)
+	}
+	first, _ := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
+	if err := ensureGitignore(tmpDir); err != nil {
+		t.Fatalf("second call failed: %v", err)
+	}
+	second, _ := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
+	if string(first) != string(second) {
+		t.Fatalf("second call changed the file:\n%s\n---\n%s", string(first), string(second))
+	}
+}
+
+// An entry the project already carries is left where it is, whatever wording or
+// comment stands around it. Only what is missing gets appended.
+func TestEnsureGitignoreKeepsWhatIsAlreadyThere(t *testing.T) {
+	tmpDir := t.TempDir()
+	existing := "# mine\n.ultraloom/hooks/\nbuild/\n"
+	path := filepath.Join(tmpDir, ".gitignore")
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if err := ensureGitignore(tmpDir); err != nil {
+		t.Fatalf("ensureGitignore failed: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.HasPrefix(string(data), existing) {
+		t.Fatalf("expected the existing file to survive verbatim, got:\n%s", string(data))
+	}
+	if strings.Count(string(data), ".ultraloom/hooks/") != 1 {
+		t.Fatalf("expected .ultraloom/hooks/ exactly once, got:\n%s", string(data))
+	}
+	if !strings.Contains(string(data), ".claude/settings.json.bak") {
+		t.Fatalf("expected the missing entry to be appended, got:\n%s", string(data))
+	}
+}
+
+// A file without a closing newline must not have the first appended entry glued
+// onto its last line.
+func TestEnsureGitignoreSeparatesFromAnUnterminatedLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, ".gitignore")
+	if err := os.WriteFile(path, []byte("build/"), 0o644); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if err := ensureGitignore(tmpDir); err != nil {
+		t.Fatalf("ensureGitignore failed: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "build/.claude") {
+		t.Fatalf("entry glued onto the last line:\n%s", string(data))
+	}
+}

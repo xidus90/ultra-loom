@@ -321,6 +321,10 @@ func run(opts Options) (int, string) {
 			_, _ = opts.Exec(opts.Root, "git", "config", "core.hooksPath", ".githooks")
 		}
 		_ = writeGitHooks(opts.Root)
+		// Beside the hooks and for the same reason: what init sets up leaves
+		// artefacts behind, and a project should not have to discover them as
+		// untracked noise months later.
+		_ = ensureGitignore(opts.Root)
 	}
 	return exitDone, describe(plan, merged.what, notes, false)
 }
@@ -333,6 +337,59 @@ func writeGitHooks(root string) error {
 	_ = writeHookIfMissing(filepath.Join(hooksDir, "pre-commit"), "#!/usr/bin/env bash\n# UltraLoom pre-commit quality gate\nset -euo pipefail\n\nuv run ultraloom check all\n")
 	_ = writeHookIfMissing(filepath.Join(hooksDir, "commit-msg"), "#!/usr/bin/env bash\n# UltraLoom commit message quality gate\nset -euo pipefail\n\nulinit check commit-msg \"$1\"\n")
 	return nil
+}
+
+// The two files ultraloom leaves in a project that describe no project.
+//
+// settings.json.bak is the state of .claude/settings.json from before the hook
+// commands were rewritten -- recoverable from git in any case. .ultraloom/hooks/
+// holds one run-state file per session, carrying session ids and git snapshots;
+// two sessions in one checkout write two of them, and neither means anything to
+// the other. Both turned up as untracked noise in a project that had run init,
+// so init names them here rather than leaving every project to find out.
+var gitignoreEntries = []struct{ pattern, why string }{
+	{".claude/settings.json.bak", "Backup ultraloom writes before it rewrites the hook commands."},
+	{".ultraloom/hooks/", "Per-session run state: session ids and git snapshots."},
+}
+
+// Appends the entries a project is missing, and nothing else.
+//
+// Append rather than rewrite, and per entry rather than as a block: the file
+// belongs to the project, an entry it already carries is left where it stands
+// whatever comment surrounds it, and running init again may not grow the file.
+func ensureGitignore(root string) error {
+	path := filepath.Join(root, ".gitignore")
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	var missing []string
+	for _, entry := range gitignoreEntries {
+		if !hasGitignoreEntry(string(existing), entry.pattern) {
+			missing = append(missing, "\n# "+entry.why+"\n"+entry.pattern+"\n")
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	// A file whose last line has no newline of its own would otherwise take the
+	// first appended entry onto that line.
+	prefix := string(existing)
+	if prefix != "" && !strings.HasSuffix(prefix, "\n") {
+		prefix += "\n"
+	}
+	return os.WriteFile(path, []byte(prefix+strings.Join(missing, "")), 0o644)
+}
+
+// Whole lines only. A pattern that appears inside a longer one -- ".claude/" in
+// ".claude/settings.local.json" -- is a different rule and does not cover this.
+func hasGitignoreEntry(content, pattern string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 func writeHookIfMissing(path, content string) error {
