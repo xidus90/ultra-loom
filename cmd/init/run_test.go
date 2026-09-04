@@ -316,6 +316,12 @@ func TestBrainOnPathIsWrittenIntoTheProject(t *testing.T) {
 	if !strings.Contains(read(t, root, ".claude/settings.json"), "brain wiki-gate") {
 		t.Fatal("the wiki hook was not installed although brain was found")
 	}
+	// The write barrier goes in by name, like the two hooks above it. Until
+	// now it was reachable only as a file path into an ultra-brain checkout,
+	// which a foreign project cannot name without pinning one machine.
+	if !strings.Contains(read(t, root, ".claude/settings.json"), "brain guard") {
+		t.Fatal("the write barrier was not installed although brain was found")
+	}
 }
 
 // The whole point of the middle branch: a directory out of ULTRA_BRAIN_DIR is
@@ -934,7 +940,11 @@ func TestLifecycleHookOrder(t *testing.T) {
 	for _, e := range entries {
 		events = append(events, e.Event)
 	}
-	wantOrder := []string{"SessionStart", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "Stop"}
+	// Two PreToolUse entries, and they stand next to each other: the brain
+	// write barrier runs at the same point in the lifecycle as ulguard, and
+	// a list read as the order of events has to say so.
+	wantOrder := []string{"SessionStart", "PreToolUse", "PreToolUse",
+		"PostToolUse", "SubagentStart", "SubagentStop", "Stop", "Stop"}
 	if len(events) != len(wantOrder) {
 		t.Fatalf("got %d events %v, want %d %v", len(events), events, len(wantOrder), wantOrder)
 	}

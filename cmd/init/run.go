@@ -742,6 +742,20 @@ func hookEntries(facts detect.Facts, wikiHooks bool) []settings.Entry {
 		{Event: "PreToolUse", Matcher: "Write|Edit|NotebookEdit|Bash|PowerShell",
 			Command: `ulguard --root "${CLAUDE_PROJECT_DIR}"`, Timeout: 10},
 	}
+	if wikiHooks {
+		// The brain write barrier, beside the ulguard entry rather than
+		// after the stop gates: this list is read as the lifecycle order,
+		// and a PreToolUse hook appended last would say the wrong thing
+		// about when it runs. Its own matcher, so the merge gives it a slot
+		// of its own instead of replacing the entry above.
+		//
+		// By name, for the same reason as `brain lint` and `brain wiki-gate`:
+		// as a file path it would name one ultra-brain checkout on one
+		// machine, and it broke the moment that checkout moved.
+		entries = append(entries, settings.Entry{Event: "PreToolUse",
+			Matcher: "Write|Edit|MultiEdit|NotebookEdit",
+			Command: `brain guard`, Timeout: 15})
+	}
 
 	postEdit := postEditEntries(facts.Stacks)
 	if len(postEdit) > 0 {
