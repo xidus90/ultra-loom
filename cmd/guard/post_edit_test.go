@@ -428,14 +428,19 @@ func TestGetCommandsForStacksVariants(t *testing.T) {
 		t.Fatalf("expected sqlfluff lint ., got %v", sqlNoTarget)
 	}
 
-	// 13. Wiki variants
-	wikiPlain := getCommandsForStacks([]string{"wiki"}, "wiki", false, "")
-	if len(wikiPlain) != 1 || wikiPlain[0] != "brain lint" {
-		t.Fatalf("expected brain lint, got %v", wikiPlain)
+	// 13. Wiki variants. Both carry a target, because the lane has no other
+	// shape: what the two cases separate is `uv` in the stack, not the
+	// presence of a file. The target-less pair that stood here asserted an
+	// argument-less `brain lint`, a command that cannot run; the caller never
+	// produces that pair either, since `targetStack` is only ever "wiki" when
+	// the extension matched and `hasTarget` is true with it.
+	wikiPlain := getCommandsForStacks([]string{"wiki"}, "wiki", true, "wiki/concept.md")
+	if len(wikiPlain) != 1 || wikiPlain[0] != "brain lint wiki/concept.md" {
+		t.Fatalf("expected brain lint wiki/concept.md, got %v", wikiPlain)
 	}
-	wikiUV := getCommandsForStacks([]string{"wiki", "uv"}, "wiki", false, "")
-	if len(wikiUV) != 1 || wikiUV[0] != "uv run brain lint" {
-		t.Fatalf("expected uv run brain lint, got %v", wikiUV)
+	wikiUV := getCommandsForStacks([]string{"wiki", "uv"}, "wiki", true, "wiki/concept.md")
+	if len(wikiUV) != 1 || wikiUV[0] != "uv run brain lint wiki/concept.md" {
+		t.Fatalf("expected uv run brain lint wiki/concept.md, got %v", wikiUV)
 	}
 
 	// 14. Python with pyright (plain without uv)
@@ -458,5 +463,22 @@ func TestGetCommandsForStacksVariants(t *testing.T) {
 	svelteNested := getCommandsForStacks([]string{"svelte"}, "svelte", true, "frontend/src/App.svelte")
 	if len(svelteNested) != 1 || !strings.Contains(svelteNested[0], "npm --prefix frontend run check") {
 		t.Fatalf("expected npm --prefix frontend run check, got %v", svelteNested)
+	}
+}
+
+// A file whose extension names no stack draws the full chain -- every lane the
+// project has, because a gate that skips a check unnoticed is worse than none.
+// The wiki lane is the one exception, and this is why: `brain lint` reads one
+// file and has no argument-less form. Where `sqlfluff lint .` and `shellcheck
+// **/*.sh` still say something without a target, `brain lint` alone says
+// "file path required" and fails the whole run -- so the lane that cannot ask
+// its question stays out of the chain instead of poisoning it.
+func TestWikiLaneStaysOutWithoutATarget(t *testing.T) {
+	cmds := getCommandsForStacks([]string{"wiki"}, "", false, ".gitignore")
+
+	for _, cmd := range cmds {
+		if strings.HasPrefix(cmd, "brain lint") || strings.HasPrefix(cmd, "uv run brain lint") {
+			t.Fatalf("expected no argument-less brain lint, got %v", cmds)
+		}
 	}
 }

@@ -289,16 +289,18 @@ func getCommandsForStacks(stacks []string, targetStack string, hasTarget bool, t
 	if shouldRun("go") {
 		cmds = append(cmds, "go vet ./...")
 	}
-	if shouldRun("wiki") {
+	// The one lane with no argument-less form, and therefore the one that
+	// stays out when the chain runs wide. `sqlfluff lint .` and `shellcheck
+	// **/*.sh` still name something without a target; `brain lint` reads a
+	// single file, answers "file path required" to anything else, and fails
+	// the run it was appended to. A lane that cannot ask its question is
+	// silent rather than wrong.
+	if shouldRun("wiki") && hasTarget && targetPath != "" {
 		prefix := "brain lint"
 		if has("uv") {
 			prefix = "uv run brain lint"
 		}
-		if hasTarget && targetPath != "" {
-			cmds = append(cmds, fmt.Sprintf("%s %s", prefix, targetPath))
-		} else {
-			cmds = append(cmds, prefix)
-		}
+		cmds = append(cmds, fmt.Sprintf("%s %s", prefix, targetPath))
 	}
 
 	return cmds
