@@ -23,6 +23,11 @@ type Facts struct {
 	HooksPath string
 	WikiMode  string
 	WikiPath  string
+	// GodotDir is the area the Godot tree stands in, "" for the root.
+	// gdlint reads .gdlintrc from the working directory upwards, so a
+	// check started anywhere above this directory silently runs on
+	// defaults -- which is a different set of rules than the project's.
+	GodotDir string
 	// Ambiguous carries findings that must not be decided here -- a Django
 	// project whose migrations may be generated or wanted, a package.json
 	// that may be tooling only. The interview resolves them.
@@ -47,7 +52,7 @@ func Detect(root fs.FS) Facts {
 			}
 		}
 	}
-	facts := Facts{Stacks: sorted(found), Ambiguous: doubts(root, areas)}
+	facts := Facts{Stacks: sorted(found), Ambiguous: doubts(root, areas), GodotDir: godotArea(root, areas)}
 	if _, err := fs.Stat(root, ".git"); err == nil {
 		facts.HasGit = true
 	}
@@ -151,6 +156,27 @@ func searchAreas(root fs.FS) []string {
 		}
 	}
 	return areas
+}
+
+// godotArea names the directory the Godot tree stands in.
+//
+// project.godot before .gdlintrc: the engine file says a project is here,
+// while a lone .gdlintrc could as well configure a linter for scripts that
+// belong to a project elsewhere. Both are looked for because a tree may carry
+// only the second one, and the answer this serves is where gdlint has to
+// start.
+func godotArea(root fs.FS, areas []string) string {
+	for _, marker := range []string{"project.godot", ".gdlintrc"} {
+		for _, area := range areas {
+			if exists(root, path.Join(area, marker)) {
+				if area == "." {
+					return ""
+				}
+				return area
+			}
+		}
+	}
+	return ""
 }
 
 func matches(root fs.FS, area string, sig signal) bool {

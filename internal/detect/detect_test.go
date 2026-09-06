@@ -349,3 +349,33 @@ func has(all []string, one string) bool {
 	}
 	return false
 }
+
+// Where the Godot project stands is a fact and not a detail: gdlint looks its
+// configuration up from the working directory upwards, so a run started at the
+// repository root of a project that keeps its tree under godot/ finds no
+// .gdlintrc at all and lints on defaults.
+func TestGodotBelowTheRootIsNamed(t *testing.T) {
+	tree := fstest.MapFS{
+		"godot/project.godot": {Data: []byte("config_version=5\n")},
+		"godot/.gdlintrc":     {Data: []byte("max-line-length: 100\n")},
+	}
+
+	facts := Detect(tree)
+
+	if facts.GodotDir != "godot" {
+		t.Fatalf("GodotDir = %q, want %q", facts.GodotDir, "godot")
+	}
+}
+
+// A tree with the project at its root says so with an empty string rather than
+// with ".": the caller joins this onto a root path, and joining "." there adds
+// a segment that means nothing.
+func TestGodotAtTheRootNamesNoDirectory(t *testing.T) {
+	tree := fstest.MapFS{"project.godot": {Data: []byte("config_version=5\n")}}
+
+	facts := Detect(tree)
+
+	if facts.GodotDir != "" {
+		t.Fatalf("GodotDir = %q, want empty", facts.GodotDir)
+	}
+}

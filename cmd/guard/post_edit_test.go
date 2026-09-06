@@ -353,78 +353,78 @@ func TestIsWikiPath(t *testing.T) {
 
 func TestGetCommandsForStacksVariants(t *testing.T) {
 	// 1. Rust
-	rustCmds := getCommandsForStacks([]string{"rust"}, "rust", true, "src/main.rs")
-	if len(rustCmds) != 2 || !strings.Contains(rustCmds[0], "cargo clippy") {
+	rustCmds := getCommandsForStacks([]string{"rust"}, "rust", true, "src/main.rs", "")
+	if len(rustCmds) != 2 || !strings.Contains(rustCmds[0].text, "cargo clippy") {
 		t.Fatalf("expected cargo clippy, got %v", rustCmds)
 	}
 
 	// 2. Go
-	goCmds := getCommandsForStacks([]string{"go"}, "go", true, "main.go")
-	if len(goCmds) != 1 || !strings.Contains(goCmds[0], "go vet") {
+	goCmds := getCommandsForStacks([]string{"go"}, "go", true, "main.go", "")
+	if len(goCmds) != 1 || !strings.Contains(goCmds[0].text, "go vet") {
 		t.Fatalf("expected go vet, got %v", goCmds)
 	}
 
 	// 3. GDScript without target
-	gdCmds := getCommandsForStacks([]string{"gdscript"}, "gdscript", false, "")
-	if len(gdCmds) != 1 || !strings.Contains(gdCmds[0], "gdlint .") {
+	gdCmds := getCommandsForStacks([]string{"gdscript"}, "gdscript", false, "", "")
+	if len(gdCmds) != 1 || !strings.Contains(gdCmds[0].text, "gdlint .") {
 		t.Fatalf("expected gdlint ., got %v", gdCmds)
 	}
 
 	// 4. CPP without target
-	cppCmds := getCommandsForStacks([]string{"cpp"}, "cpp", false, "")
-	if len(cppCmds) != 2 || !strings.Contains(cppCmds[0], "clang-format -i") {
+	cppCmds := getCommandsForStacks([]string{"cpp"}, "cpp", false, "", "")
+	if len(cppCmds) != 2 || !strings.Contains(cppCmds[0].text, "clang-format -i") {
 		t.Fatalf("expected clang-format -i, got %v", cppCmds)
 	}
 
 	// 5. TypeScript with target in nested dir
-	tsNested := getCommandsForStacks([]string{"typescript"}, "typescript", true, "frontend/src/app.ts")
-	if len(tsNested) != 2 || !strings.Contains(tsNested[0], "npx --prefix frontend eslint") {
+	tsNested := getCommandsForStacks([]string{"typescript"}, "typescript", true, "frontend/src/app.ts", "")
+	if len(tsNested) != 2 || !strings.Contains(tsNested[0].text, "npx --prefix frontend eslint") {
 		t.Fatalf("expected npx --prefix frontend eslint, got %v", tsNested)
 	}
 
 	// 6. TypeScript root without target
-	tsRootNoTarget := getCommandsForStacks([]string{"typescript"}, "typescript", false, "")
-	if len(tsRootNoTarget) != 2 || !strings.Contains(tsRootNoTarget[0], "npx eslint --cache .") {
+	tsRootNoTarget := getCommandsForStacks([]string{"typescript"}, "typescript", false, "", "")
+	if len(tsRootNoTarget) != 2 || !strings.Contains(tsRootNoTarget[0].text, "npx eslint --cache .") {
 		t.Fatalf("expected npx eslint --cache ., got %v", tsRootNoTarget)
 	}
 
 	// 7. Vue without target in root
-	vueRoot := getCommandsForStacks([]string{"vue"}, "vue", false, "")
-	if len(vueRoot) != 1 || !strings.Contains(vueRoot[0], "npx vue-tsc --noEmit") {
+	vueRoot := getCommandsForStacks([]string{"vue"}, "vue", false, "", "")
+	if len(vueRoot) != 1 || !strings.Contains(vueRoot[0].text, "npx vue-tsc --noEmit") {
 		t.Fatalf("expected npx vue-tsc --noEmit, got %v", vueRoot)
 	}
 
 	// 8. Svelte without target in root
-	svelteRoot := getCommandsForStacks([]string{"svelte"}, "svelte", false, "")
-	if len(svelteRoot) != 1 || !strings.Contains(svelteRoot[0], "npx svelte-check") {
+	svelteRoot := getCommandsForStacks([]string{"svelte"}, "svelte", false, "", "")
+	if len(svelteRoot) != 1 || !strings.Contains(svelteRoot[0].text, "npx svelte-check") {
 		t.Fatalf("expected npx svelte-check, got %v", svelteRoot)
 	}
 
 	// 9. CSS variants
-	cssNested := getCommandsForStacks([]string{"css"}, "css", true, "frontend/src/styles.css")
-	if len(cssNested) != 1 || !strings.Contains(cssNested[0], "npx --prefix frontend stylelint") {
+	cssNested := getCommandsForStacks([]string{"css"}, "css", true, "frontend/src/styles.css", "")
+	if len(cssNested) != 1 || !strings.Contains(cssNested[0].text, "npx --prefix frontend stylelint") {
 		t.Fatalf("expected npx --prefix frontend stylelint, got %v", cssNested)
 	}
-	cssNoTarget := getCommandsForStacks([]string{"css"}, "css", false, "")
-	if len(cssNoTarget) != 1 || !strings.Contains(cssNoTarget[0], "npx stylelint \"**/*.{css,scss}\"") {
+	cssNoTarget := getCommandsForStacks([]string{"css"}, "css", false, "", "")
+	if len(cssNoTarget) != 1 || !strings.Contains(cssNoTarget[0].text, "npx stylelint \"**/*.{css,scss}\"") {
 		t.Fatalf("expected glob stylelint, got %v", cssNoTarget)
 	}
 
 	// 10. HTML variant without target
-	htmlNoTarget := getCommandsForStacks([]string{"html"}, "html", false, "")
-	if len(htmlNoTarget) != 1 || !strings.Contains(htmlNoTarget[0], "npx htmlhint \"**/*.html\"") {
+	htmlNoTarget := getCommandsForStacks([]string{"html"}, "html", false, "", "")
+	if len(htmlNoTarget) != 1 || !strings.Contains(htmlNoTarget[0].text, "npx htmlhint \"**/*.html\"") {
 		t.Fatalf("expected glob htmlhint, got %v", htmlNoTarget)
 	}
 
 	// 11. Shell variant without target
-	shNoTarget := getCommandsForStacks([]string{"shell"}, "shell", false, "")
-	if len(shNoTarget) != 1 || !strings.Contains(shNoTarget[0], "shellcheck **/*.sh") {
+	shNoTarget := getCommandsForStacks([]string{"shell"}, "shell", false, "", "")
+	if len(shNoTarget) != 1 || !strings.Contains(shNoTarget[0].text, "shellcheck **/*.sh") {
 		t.Fatalf("expected glob shellcheck, got %v", shNoTarget)
 	}
 
 	// 12. SQL variant without target
-	sqlNoTarget := getCommandsForStacks([]string{"sql"}, "sql", false, "")
-	if len(sqlNoTarget) != 1 || !strings.Contains(sqlNoTarget[0], "sqlfluff lint .") {
+	sqlNoTarget := getCommandsForStacks([]string{"sql"}, "sql", false, "", "")
+	if len(sqlNoTarget) != 1 || !strings.Contains(sqlNoTarget[0].text, "sqlfluff lint .") {
 		t.Fatalf("expected sqlfluff lint ., got %v", sqlNoTarget)
 	}
 
@@ -434,34 +434,37 @@ func TestGetCommandsForStacksVariants(t *testing.T) {
 	// argument-less `brain lint`, a command that cannot run; the caller never
 	// produces that pair either, since `targetStack` is only ever "wiki" when
 	// the extension matched and `hasTarget` is true with it.
-	wikiPlain := getCommandsForStacks([]string{"wiki"}, "wiki", true, "wiki/concept.md")
-	if len(wikiPlain) != 1 || wikiPlain[0] != "brain lint wiki/concept.md" {
+	wikiPlain := getCommandsForStacks([]string{"wiki"}, "wiki", true, "wiki/concept.md", "")
+	if len(wikiPlain) != 1 || wikiPlain[0].text != "brain lint wiki/concept.md" {
 		t.Fatalf("expected brain lint wiki/concept.md, got %v", wikiPlain)
 	}
-	wikiUV := getCommandsForStacks([]string{"wiki", "uv"}, "wiki", true, "wiki/concept.md")
-	if len(wikiUV) != 1 || wikiUV[0] != "uv run brain lint wiki/concept.md" {
+	wikiUV := getCommandsForStacks([]string{"wiki", "uv"}, "wiki", true, "wiki/concept.md", "")
+
+	if len(wikiUV) != 1 || wikiUV[0].text != "uv run brain lint wiki/concept.md" {
 		t.Fatalf("expected uv run brain lint wiki/concept.md, got %v", wikiUV)
 	}
 
 	// 14. Python with pyright (plain without uv)
-	pyrightPlain := getCommandsForStacks([]string{"python", "pyright"}, "python", true, "src/main.py")
-	if len(pyrightPlain) != 2 || !strings.Contains(pyrightPlain[1], "pyright") || strings.Contains(pyrightPlain[1], "uv run") {
+	pyrightPlain := getCommandsForStacks([]string{"python", "pyright"}, "python", true, "src/main.py", "")
+
+	if len(pyrightPlain) != 2 || !strings.Contains(pyrightPlain[1].text, "pyright") || strings.Contains(pyrightPlain[1].text, "uv run") {
 		t.Fatalf("expected plain pyright, got %v", pyrightPlain)
 	}
-	pyrightUV := getCommandsForStacks([]string{"python", "pyright", "uv"}, "python", true, "src/main.py")
-	if len(pyrightUV) != 2 || !strings.Contains(pyrightUV[1], "uv run pyright") {
+	pyrightUV := getCommandsForStacks([]string{"python", "pyright", "uv"}, "python", true, "src/main.py", "")
+
+	if len(pyrightUV) != 2 || !strings.Contains(pyrightUV[1].text, "uv run pyright") {
 		t.Fatalf("expected uv run pyright, got %v", pyrightUV)
 	}
 
 	// 15. Vue nested
-	vueNested := getCommandsForStacks([]string{"vue"}, "vue", true, "frontend/src/Component.vue")
-	if len(vueNested) != 1 || !strings.Contains(vueNested[0], "npm --prefix frontend run typecheck") {
+	vueNested := getCommandsForStacks([]string{"vue"}, "vue", true, "frontend/src/Component.vue", "")
+	if len(vueNested) != 1 || !strings.Contains(vueNested[0].text, "npm --prefix frontend run typecheck") {
 		t.Fatalf("expected npm --prefix frontend run typecheck, got %v", vueNested)
 	}
 
 	// 16. Svelte nested
-	svelteNested := getCommandsForStacks([]string{"svelte"}, "svelte", true, "frontend/src/App.svelte")
-	if len(svelteNested) != 1 || !strings.Contains(svelteNested[0], "npm --prefix frontend run check") {
+	svelteNested := getCommandsForStacks([]string{"svelte"}, "svelte", true, "frontend/src/App.svelte", "")
+	if len(svelteNested) != 1 || !strings.Contains(svelteNested[0].text, "npm --prefix frontend run check") {
 		t.Fatalf("expected npm --prefix frontend run check, got %v", svelteNested)
 	}
 }
@@ -474,11 +477,56 @@ func TestGetCommandsForStacksVariants(t *testing.T) {
 // "file path required" and fails the whole run -- so the lane that cannot ask
 // its question stays out of the chain instead of poisoning it.
 func TestWikiLaneStaysOutWithoutATarget(t *testing.T) {
-	cmds := getCommandsForStacks([]string{"wiki"}, "", false, ".gitignore")
+	cmds := getCommandsForStacks([]string{"wiki"}, "", false, ".gitignore", "")
 
 	for _, cmd := range cmds {
-		if strings.HasPrefix(cmd, "brain lint") || strings.HasPrefix(cmd, "uv run brain lint") {
+		if strings.HasPrefix(cmd.text, "brain lint") || strings.HasPrefix(cmd.text, "uv run brain lint") {
 			t.Fatalf("expected no argument-less brain lint, got %v", cmds)
 		}
+	}
+}
+
+// gdlint reads .gdlintrc from the working directory upwards, so where the
+// check starts decides which rules it applies. A project that keeps its Godot
+// tree under godot/ and is checked from the repository root gets no
+// configuration at all: the exclusion list stays unread and the whole of
+// addons/ is linted on default limits, which is how a single edit turns into
+// thousands of findings.
+func TestGdscriptRunsWhereTheGodotTreeStands(t *testing.T) {
+	cmds := getCommandsForStacks([]string{"gdscript"}, "gdscript", false, "", "godot")
+
+	if len(cmds) != 1 {
+		t.Fatalf("expected one command, got %v", cmds)
+	}
+	if cmds[0].dir != "godot" {
+		t.Fatalf("dir = %q, want %q", cmds[0].dir, "godot")
+	}
+	if cmds[0].text != "gdlint ." {
+		t.Fatalf("text = %q, want %q", cmds[0].text, "gdlint .")
+	}
+}
+
+// The target arrives named from the repository root, and the check runs one
+// directory down -- so the path has to lose that first segment or gdlint looks
+// for godot/godot/ui/system/system_view.gd.
+func TestGdscriptTargetIsRelativeToTheGodotTree(t *testing.T) {
+	cmds := getCommandsForStacks([]string{"gdscript"}, "gdscript", true, "godot/ui/system/system_view.gd", "godot")
+
+	if len(cmds) != 1 || cmds[0].dir != "godot" {
+		t.Fatalf("expected one command in godot/, got %v", cmds)
+	}
+	if cmds[0].text != "gdlint ui/system/system_view.gd" {
+		t.Fatalf("text = %q, want %q", cmds[0].text, "gdlint ui/system/system_view.gd")
+	}
+}
+
+// Every other lane keeps running at the root: they either read their
+// configuration from a file they are told about or carry their limits in the
+// command line, so moving them would change what they check for no gain.
+func TestOtherLanesStayAtTheRoot(t *testing.T) {
+	cmds := getCommandsForStacks([]string{"go"}, "go", true, "main.go", "godot")
+
+	if len(cmds) != 1 || cmds[0].dir != "" {
+		t.Fatalf("expected go vet at the root, got %v", cmds)
 	}
 }
