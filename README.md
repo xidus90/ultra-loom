@@ -61,7 +61,22 @@ ulguard --root .
 
 # Invoked by PostToolUse hook on file edit/write (selectively triggers relevant stack checks)
 ulguard post-edit --root .
+
+# Invoked by SessionStart hook: mirrors gitignored directories into a worktree
+# as junctions, and sweeps what worktrees git no longer holds left behind
+ulguard worktree-link --root .
+
+# Invoked by SessionEnd hook (reads JSON payload on stdin for the session id):
+# removes those junctions, but only when no other session stands on this tree
+ulguard worktree-unlink --root .
+
+# Run by hand: unlinks first, then `git worktree remove --force`
+ulguard worktree-remove <worktree path>
 ```
+
+Which directories get mirrored is declared in `.ultraloom/config.toml` under
+`[worktree].mirror`; the mechanism and its measurements are in
+[docs/flows/worktree-mirror.md](docs/flows/worktree-mirror.md).
 
 ### 3. Check Chain & Verification (Python / `ultraloom check`)
 

@@ -61,7 +61,22 @@ ulguard --root .
 
 # Wird vom PostToolUse-Hook bei Datei-Edits aufgerufen (führt selektiv relevante Stack-Checks aus)
 ulguard post-edit --root .
+
+# Wird vom SessionStart-Hook aufgerufen: spiegelt gitignorierte Verzeichnisse
+# als Junction in einen Worktree und fegt weg, was aufgegebene Worktrees liegen ließen
+ulguard worktree-link --root .
+
+# Wird vom SessionEnd-Hook aufgerufen (liest die Sitzungskennung als JSON-Payload auf stdin):
+# löst diese Junctions, aber nur wenn keine andere Sitzung auf diesem Baum steht
+ulguard worktree-unlink --root .
+
+# Von Hand: löst erst die Junctions, dann `git worktree remove --force`
+ulguard worktree-remove <worktree path>
 ```
+
+Welche Verzeichnisse gespiegelt werden, steht in `.ultraloom/config.toml` unter
+`[worktree].mirror`; der Mechanismus und seine Messungen stehen in
+[docs/flows/worktree-mirror.de.md](docs/flows/worktree-mirror.de.md).
 
 ### 3. Prüfkette & Verifikation (Python / `ultraloom check`)
 
