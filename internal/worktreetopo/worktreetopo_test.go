@@ -27,7 +27,8 @@ func git(t *testing.T, dir string, argv ...string) {
 }
 
 // A main checkout with one worktree in each of the two conventions this
-// repository actually uses.
+// repository provides for -- see conventionDirs. Whether either is occupied
+// right now is no part of what this fixture claims.
 func fixture(t *testing.T) (main string, claudeWt string, plainWt string) {
 	t.Helper()
 	main = t.TempDir()
@@ -141,13 +142,19 @@ func TestADirectoryOutsideAnyRepositoryIsANamedError(t *testing.T) {
 
 // An inherited GIT_DIR outranks the working directory, so a hook would
 // otherwise be told about the repository it was started from.
+//
+// The pointers go up before the fixture is built, not after: that way the
+// fixture's own `git init` and `git worktree add` run under a dirty
+// environment too, and a git helper that stopped stripping would take the
+// whole test down instead of only the Read below. It points at a t.TempDir(),
+// so what a regression corrupts is a temp directory.
 func TestAnInheritedGitDirDoesNotRedirectTheAnswer(t *testing.T) {
-	main, _, _ := fixture(t)
 	elsewhere := t.TempDir()
 	git(t, elsewhere, "init", "-q", "-b", "main")
-
 	t.Setenv("GIT_DIR", filepath.Join(elsewhere, ".git"))
 	t.Setenv("GIT_WORK_TREE", elsewhere)
+
+	main, _, _ := fixture(t)
 
 	topology, err := Read(main)
 	if err != nil {
@@ -171,8 +178,9 @@ func TestReadIgnoresTheOrderOfUnrelatedPorcelainFields(t *testing.T) {
 }
 
 // A directory git holds nothing about is neither the main checkout nor a
-// worktree. Both callers act only on a true answer: `worktree-link` builds a
-// mirror there, `worktree-unlink` takes one down.
+// worktree. Every caller acts only on a true answer -- stated as the contract
+// rather than as a list of subcommands, which would need a census and would go
+// stale as they land.
 func TestIsWorktreeSaysNoAboutADirectoryGitDoesNotHold(t *testing.T) {
 	main, _, _ := fixture(t)
 	topology, err := Read(main)

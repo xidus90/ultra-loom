@@ -78,6 +78,11 @@ func Read(dir string) (Topology, error) {
 // Porcelain output is a block per working tree, and the first line of each
 // block is the path. HEAD, branch, bare and detached are none of our business
 // here -- a worktree without a commit still owns its directory.
+//
+// The paths come back cleaned, and therefore in the platform separator: git
+// prints `C:/Users/...` on Windows, filepath.Clean's last step rewrites that
+// to backslashes. Callers that compare the result against a literal have to
+// expect the platform's spelling.
 func parse(output string) []string {
 	var paths []string
 	for _, line := range strings.Split(output, "\n") {
@@ -114,7 +119,9 @@ func (t Topology) IsWorktree(dir string) bool {
 //
 // They have to be scanned for, because being unregistered is what makes them
 // orphans -- `git worktree list` is the one answer that cannot name them. One
-// level deep, which is where `git worktree add` puts them.
+// level deep, which is this repository's convention and not a rule of the
+// tool: `git worktree add <path>` puts a worktree wherever <path> says, at any
+// depth. The two entries in `.worktrees` are what the convention looks like.
 func (t Topology) Orphans() ([]string, error) {
 	var orphans []string
 	for _, convention := range conventionDirs {
