@@ -1,13 +1,8 @@
 {
   "mcpServers": {
     "brain": {
-      "command": "uv",
+      "command": "brain",
       "args": [
-        "run",
-        "--no-sync",
-        "--directory",
-        "C:/Users/micro/Documents/#GIT/ultra-brain",
-        "brain",
         "mcp"
       ]
     }
