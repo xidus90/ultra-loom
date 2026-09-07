@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/xidus90/ultra-loom/internal/gitenv"
 	"github.com/xidus90/ultra-loom/internal/junction"
 	"github.com/xidus90/ultra-loom/internal/mirrorcfg"
 	"github.com/xidus90/ultra-loom/internal/sessions"
@@ -153,6 +155,92 @@ func runWorktreeUnlink(stdout, stderr io.Writer, stdin io.Reader, root string) i
 		return ExitInternal
 	}
 	return ExitOK
+}
+
+// runWorktreeRemove is the safe way to get rid of a worktree.
+//
+// Measured on 2026-09-07 in a t.TempDir() fixture: `git worktree remove
+// --force` on a worktree holding a junction exits 0 with no output, drops the
+// porcelain entry, and leaves both the directory and the junction standing.
+// The directory is then a tree git no longer knows, with a link into the main
+// checkout still in it. So the junctions come out first, and git is asked
+// afterwards.
+//
+// Two refusals, and both before anything is touched -- the read of the
+// topology is the only thing that happens ahead of them, and it only asks git
+// a question. The main checkout is refused by name, because a wrapper whose
+// worst outcome is deleting the repository has to say no to that one first; a
+// directory git holds no working tree at is refused because there is then
+// nothing here to remove and every candidate is somebody's data.
+//
+// This one writes to stdout, unlike worktree-link and worktree-unlink: those
+// fire at every session start and end in every project, this one is run by
+// hand, and a person deleting something should read what was deleted.
+func runWorktreeRemove(stdout, stderr io.Writer, target string) int {
+	topology, err := worktreetopo.Read(target)
+	if err != nil {
+		// A fault here and not the hook commands' silent "nothing to do": this
+		// directory was named by hand, and the name was wrong.
+		fmt.Fprintf(stderr, "ultraloom-guard worktree-remove: %v\n", err)
+		return ExitInternal
+	}
+	if sameDir(target, topology.Main) {
+		fmt.Fprintf(stderr,
+			"ultraloom-guard worktree-remove: %s is the main checkout\n", target)
+		return ExitInternal
+	}
+	worktree := registeredAs(topology, target)
+	if worktree == "" {
+		fmt.Fprintf(stderr,
+			"ultraloom-guard worktree-remove: git does not hold %s as a worktree\n", target)
+		return ExitInternal
+	}
+	mirror, err := mirrorcfg.Mirror(topology.Main)
+	if err != nil {
+		// Reported rather than treated as "no mirror": which junctions are
+		// ours is then unknown, and asking git while that is unknown is the
+		// order this whole subcommand exists to avoid.
+		fmt.Fprintf(stderr, "ultraloom-guard worktree-remove: %v\n", err)
+		return ExitInternal
+	}
+	if err := unlink(worktree, topology.Main, mirror); err != nil {
+		fmt.Fprintf(stderr, "ultraloom-guard worktree-remove: %v\n", err)
+		return ExitInternal
+	}
+	command := exec.Command("git", "worktree", "remove", "--force", worktree)
+	command.Dir = topology.Main
+	// See gitenv: GIT_DIR and its relatives outrank command.Dir, so without
+	// the strip this could remove a worktree of another repository entirely.
+	command.Env = gitenv.Environ()
+	if out, err := command.CombinedOutput(); err != nil {
+		// git's own words go through: it is the only one that knows why it
+		// refused, and the junctions are already out by now.
+		fmt.Fprintf(stderr, "ultraloom-guard worktree-remove: git: %v (%s)\n", err, out)
+		return ExitInternal
+	}
+	fmt.Fprintf(stdout, "removed %s\n", worktree)
+	return ExitOK
+}
+
+// registeredAs answers with git's own spelling of `target`, or "" if git holds
+// no working tree there.
+//
+// The caller passes that spelling on rather than its own argument, because
+// the two do not have to name the same directory: its git call runs with its
+// working directory in the main checkout, so a relative argument would resolve
+// there, while sameDir resolves it against this process's own. Taking the path
+// out of the porcelain closes the gap and needs no filepath.Abs -- whose only
+// failure mode, a working directory that cannot be read, no test can reach.
+//
+// Main is in Worktrees as well, so this matches it too -- which is harmless
+// only because the caller has already refused it above.
+func registeredAs(topology worktreetopo.Topology, target string) string {
+	for _, worktree := range topology.Worktrees {
+		if sameDir(target, worktree) {
+			return worktree
+		}
+	}
+	return ""
 }
 
 // unlink removes the configured junctions from one worktree.

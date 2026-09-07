@@ -3,6 +3,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"os"
 )
@@ -50,6 +51,18 @@ func cli(args []string, stdin io.Reader, stderr io.Writer) int {
 			return ExitInternal
 		}
 		return runWorktreeUnlink(os.Stdout, stderr, stdin, *root)
+	}
+
+	// The worktree comes as an argument and not as `--root`: this one is run by
+	// hand, and the caller is not standing in the directory that is about to
+	// disappear. The arity is checked because that argument is the whole
+	// instruction -- a mistyped call must not fall through to the guard below.
+	if len(args) > 0 && args[0] == "worktree-remove" {
+		if len(args) != 2 {
+			fmt.Fprintln(stderr, "usage: ulguard worktree-remove <worktree path>")
+			return ExitInternal
+		}
+		return runWorktreeRemove(os.Stdout, stderr, args[1])
 	}
 
 	flags := flag.NewFlagSet("ultraloom-guard", flag.ContinueOnError)

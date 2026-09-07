@@ -930,3 +930,176 @@ func TestCliDispatchesWorktreeLink(t *testing.T) {
 		t.Fatalf("exit = %d on an invalid flag, want ExitInternal", code)
 	}
 }
+
+// registered answers whether git still holds `worktree` as a working tree.
+//
+// Compared as cleaned, case-folded text and not with os.SameFile, although
+// every other comparison in this package uses SameFile: the path this is asked
+// about has just been deleted, and SameFile answers false for anything absent
+// -- so the check would pass no matter what git still holds. filepath.Clean
+// puts git's forward slashes into the platform spelling; the fold is for a
+// drive letter neither side promises the case of.
+func registered(t *testing.T, main string, worktree string) bool {
+	t.Helper()
+	command := exec.Command("git", "worktree", "list", "--porcelain")
+	command.Dir = main
+	// The clean environment the `git` helper above explains.
+	command.Env = gitenv.Environ()
+	out, err := command.Output()
+	if err != nil {
+		t.Fatalf("git worktree list: %v", err)
+	}
+	wanted := filepath.Clean(worktree)
+	for _, line := range strings.Split(string(out), "\n") {
+		rest, found := strings.CutPrefix(strings.TrimRight(line, "\r"), "worktree ")
+		if found && strings.EqualFold(filepath.Clean(rest), wanted) {
+			return true
+		}
+	}
+	return false
+}
+
+// The measured reason this command exists. On 2026-09-07 in a t.TempDir()
+// fixture, `git worktree remove --force` on a worktree holding a junction
+// exited 0 with no output, dropped the porcelain entry, and left both the
+// directory and the junction standing.
+func TestWorktreeRemoveLeavesNothingBehind(t *testing.T) {
+	main, worktree := linkedFixture(t, ".tools")
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeRemove(stdout, stderr, worktree); code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+
+	if _, err := os.Lstat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("the worktree directory survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(main, ".tools", "godot")); err != nil {
+		t.Fatalf("remove reached through the junction: %v", err)
+	}
+	if registered(t, main, worktree) {
+		t.Fatal("git still holds the worktree")
+	}
+	// Unlike the two hook commands this one speaks: a person deleting
+	// something should read what was deleted.
+	if !strings.Contains(stdout.String(), "removed ") {
+		t.Fatalf("stdout = %q, want what was removed named in it", stdout)
+	}
+}
+
+// The refusal a wrapper whose worst outcome is deleting the repository has to
+// make first.
+func TestWorktreeRemoveRefusesTheMainCheckout(t *testing.T) {
+	main, _ := worktreeFixture(t)
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeRemove(stdout, stderr, main); code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	// The message has to name the case: "git does not hold this as a worktree"
+	// would be false about the main checkout, which git holds first of all.
+	if !strings.Contains(stderr.String(), "main checkout") {
+		t.Fatalf("stderr = %q, want the main checkout named in it", stderr)
+	}
+	if _, err := os.Stat(main); err != nil {
+		t.Fatalf("the main checkout was touched: %v", err)
+	}
+}
+
+func TestWorktreeRemoveOfADirectoryGitDoesNotHoldIsAFailure(t *testing.T) {
+	main, _ := worktreeFixture(t)
+	stranger := filepath.Join(main, ".worktrees", "stranger")
+	mkdirAll(t, stranger)
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeRemove(stdout, stderr, stranger); code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Stat(stranger); err != nil {
+		t.Fatalf("a directory git does not hold was removed anyway: %v", err)
+	}
+}
+
+// Unlike the hook commands, a directory without a repository is a fault here
+// and not a no-op: this one was named by hand, and the name was wrong.
+func TestWorktreeRemoveOutsideARepositoryIsAFailure(t *testing.T) {
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeRemove(stdout, stderr, t.TempDir()); code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("a failure said nothing")
+	}
+}
+
+// A configuration that cannot be read leaves it unknown which junctions are
+// ours, and asking git while that is unknown is the one order this command
+// exists to avoid.
+func TestWorktreeRemoveReportsABrokenConfig(t *testing.T) {
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree\n")
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeRemove(stdout, stderr, worktree); code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "worktree-remove") {
+		t.Fatalf("stderr = %q, want the subcommand's name in it", stderr)
+	}
+	if !registered(t, main, worktree) {
+		t.Fatal("git was asked although the junctions were not taken out")
+	}
+}
+
+// And a candidate unlink cannot even look at stops it in the same place. `?`
+// is legal in a configured path and illegal in a Windows filename.
+func TestWorktreeRemoveReportsAPathItCannotInspect(t *testing.T) {
+	requireWindows(t)
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = ['bad?name']\n")
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeRemove(stdout, stderr, worktree); code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if !registered(t, main, worktree) {
+		t.Fatal("git was asked although a configured path was undecided")
+	}
+}
+
+// git's own refusal has to reach the caller. A lock is what makes it refuse
+// under a single --force: measured on 2026-09-07, `git worktree remove
+// --force` on a locked tree exited 128 with "cannot remove a locked working
+// tree; use 'remove -f -f' to override or unlock first", and the directory
+// stood.
+func TestWorktreeRemoveReportsGitsRefusal(t *testing.T) {
+	main, worktree := worktreeFixture(t)
+	git(t, main, "worktree", "lock", worktree)
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeRemove(stdout, stderr, worktree); code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "locked") {
+		t.Fatalf("stderr = %q, want git's own words in it", stderr)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("the worktree went away although git refused: %v", err)
+	}
+}
+
+func TestCliDispatchesWorktreeRemove(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := cli([]string{"worktree-remove", t.TempDir()}, strings.NewReader(""), &stderr); code != ExitInternal {
+		t.Fatalf("exit = %d outside a repository, want ExitInternal", code)
+	}
+	// The path is an argument and not a flag, so the arity is the only thing
+	// standing between a mistyped call and a directory that disappears.
+	stderr.Reset()
+	if code := cli([]string{"worktree-remove"}, strings.NewReader(""), &stderr); code != ExitInternal {
+		t.Fatalf("exit = %d without a path, want ExitInternal", code)
+	}
+	if !strings.Contains(stderr.String(), "usage:") {
+		t.Fatalf("stderr = %q, want a usage line", &stderr)
+	}
+}
