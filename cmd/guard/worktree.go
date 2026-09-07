@@ -168,10 +168,12 @@ func runWorktreeUnlink(stdout, stderr io.Writer, stdin io.Reader, root string) i
 //
 // Two refusals, and both before anything is touched -- the read of the
 // topology is the only thing that happens ahead of them, and it only asks git
-// a question. The main checkout is refused by name, because a wrapper whose
-// worst outcome is deleting the repository has to say no to that one first; a
-// directory git holds no working tree at is refused because there is then
-// nothing here to remove and every candidate is somebody's data.
+// a question. The main checkout is refused first, because a wrapper whose
+// worst outcome is deleting the repository has to say no to that one before
+// anything else; a directory git holds no working tree at is refused because
+// there is then nothing here to remove and every candidate is somebody's data.
+// Both rest on os.SameFile identity and not on the spelling of the argument,
+// so no relative form, trailing separator or link path gets past them.
 //
 // This one writes to stdout, unlike worktree-link and worktree-unlink: those
 // fire at every session start and end in every project, this one is run by
@@ -210,12 +212,26 @@ func runWorktreeRemove(stdout, stderr io.Writer, target string) int {
 	command := exec.Command("git", "worktree", "remove", "--force", worktree)
 	command.Dir = topology.Main
 	// See gitenv: GIT_DIR and its relatives outrank command.Dir, so without
-	// the strip this could remove a worktree of another repository entirely.
+	// the strip the removal would be asked of whatever GIT_DIR names instead
+	// of this repository.
 	command.Env = gitenv.Environ()
 	if out, err := command.CombinedOutput(); err != nil {
 		// git's own words go through: it is the only one that knows why it
-		// refused, and the junctions are already out by now.
+		// refused. The junctions are already out by then, and nothing here
+		// puts them back -- the next session's worktree-link does that.
 		fmt.Fprintf(stderr, "ultraloom-guard worktree-remove: git: %v (%s)\n", err, out)
+		return ExitInternal
+	}
+	// git's exit code says nothing about the directory. Measured on
+	// 2026-09-07: with a junction inside it that nothing here took out -- no
+	// mirror configured -- `git worktree remove --force` exited 0, dropped the
+	// porcelain entry and left the tree standing. That is the leftover this
+	// whole subcommand exists to prevent, so it is not something to print
+	// "removed" over.
+	if _, err := os.Lstat(worktree); err == nil {
+		fmt.Fprintf(stderr,
+			"ultraloom-guard worktree-remove: git dropped its entry but %s still stands;"+
+				" something in it was not ours to remove\n", worktree)
 		return ExitInternal
 	}
 	fmt.Fprintf(stdout, "removed %s\n", worktree)

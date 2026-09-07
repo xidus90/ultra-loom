@@ -934,11 +934,11 @@ func TestCliDispatchesWorktreeLink(t *testing.T) {
 // registered answers whether git still holds `worktree` as a working tree.
 //
 // Compared as cleaned, case-folded text and not with os.SameFile, although
-// every other comparison in this package uses SameFile: the path this is asked
-// about has just been deleted, and SameFile answers false for anything absent
-// -- so the check would pass no matter what git still holds. filepath.Clean
-// puts git's forward slashes into the platform spelling; the fold is for a
-// drive letter neither side promises the case of.
+// every other filesystem-identity comparison in worktree.go does: the path
+// this is asked about has just been deleted, and SameFile answers false for
+// anything absent -- so the check would pass no matter what git still holds.
+// filepath.Clean puts git's forward slashes into the platform spelling; the
+// fold is for a drive letter neither side promises the case of.
 func registered(t *testing.T, main string, worktree string) bool {
 	t.Helper()
 	command := exec.Command("git", "worktree", "list", "--porcelain")
@@ -992,17 +992,73 @@ func TestWorktreeRemoveLeavesNothingBehind(t *testing.T) {
 func TestWorktreeRemoveRefusesTheMainCheckout(t *testing.T) {
 	main, _ := worktreeFixture(t)
 
+	// Three spellings of one directory. The refusal rests on os.SameFile and
+	// not on text, and that is what these pin: a spelling that slips past it
+	// falls through to the registration check, whose message would then be
+	// false about the main checkout -- and the porcelain lists Main, so it
+	// would not refuse at all.
+	for _, spelling := range []string{
+		main,
+		main + string(os.PathSeparator),
+		filepath.Join(main, "."),
+	} {
+		stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+		if code := runWorktreeRemove(stdout, stderr, spelling); code != ExitInternal {
+			t.Fatalf("exit = %d for %q, want ExitInternal (stderr: %s)", code, spelling, stderr)
+		}
+		if !strings.Contains(stderr.String(), "main checkout") {
+			t.Fatalf("stderr = %q for %q, want the main checkout named in it", stderr, spelling)
+		}
+		if _, err := os.Stat(main); err != nil {
+			t.Fatalf("the main checkout was touched: %v", err)
+		}
+	}
+}
+
+// git's own spelling of the path is what the removal gets, and not the
+// caller's argument: `command.Dir` is the main checkout, so a relative
+// argument would resolve there while the refusals above resolved it here. A
+// trailing separator is the cheapest spelling that differs from the porcelain
+// one and still opens the same directory.
+func TestWorktreeRemoveUsesGitsSpellingOfThePath(t *testing.T) {
+	main, worktree := worktreeFixture(t)
+
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := runWorktreeRemove(stdout, stderr, main); code != ExitInternal {
+	spelling := worktree + string(os.PathSeparator)
+	if code := runWorktreeRemove(stdout, stderr, spelling); code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout.String() != "removed "+filepath.Clean(worktree)+"\n" {
+		t.Fatalf("stdout = %q, want git's cleaned spelling of %q", stdout, worktree)
+	}
+	if registered(t, main, worktree) {
+		t.Fatal("git still holds the worktree")
+	}
+}
+
+// A junction nothing here took out -- no mirror configured, so unlink is a
+// no-op over it -- is exactly the leftover this subcommand exists to prevent,
+// and git reports success over it. Measured on 2026-09-07: exit 0, no output,
+// porcelain entry gone, directory and junction standing. So the directory is
+// checked before anything says "removed".
+func TestWorktreeRemoveDoesNotClaimSuccessOverALeftover(t *testing.T) {
+	requireWindows(t)
+	main, worktree := worktreeFixture(t)
+	mkdirAll(t, filepath.Join(main, ".tools", "godot"))
+	mklink(t, filepath.Join(worktree, ".tools"), filepath.Join(main, ".tools"))
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeRemove(stdout, stderr, worktree); code != ExitInternal {
 		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
 	}
-	// The message has to name the case: "git does not hold this as a worktree"
-	// would be false about the main checkout, which git holds first of all.
-	if !strings.Contains(stderr.String(), "main checkout") {
-		t.Fatalf("stderr = %q, want the main checkout named in it", stderr)
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want nothing claimed", stdout)
 	}
-	if _, err := os.Stat(main); err != nil {
-		t.Fatalf("the main checkout was touched: %v", err)
+	if !strings.Contains(stderr.String(), "still stands") {
+		t.Fatalf("stderr = %q, want the leftover reported", stderr)
+	}
+	if _, err := os.Lstat(worktree); err != nil {
+		t.Fatalf("the leftover the message names is not there: %v", err)
 	}
 }
 
@@ -1072,8 +1128,13 @@ func TestWorktreeRemoveReportsAPathItCannotInspect(t *testing.T) {
 // --force` on a locked tree exited 128 with "cannot remove a locked working
 // tree; use 'remove -f -f' to override or unlock first", and the directory
 // stood.
+//
+// On a linked fixture, so the state after the refusal is the one the ordering
+// produces and not an empty case: junctions out, tree still registered. That
+// is the price of asking git last, and it is paid back at the next session
+// start -- which is asserted here rather than argued.
 func TestWorktreeRemoveReportsGitsRefusal(t *testing.T) {
-	main, worktree := worktreeFixture(t)
+	main, worktree := linkedFixture(t, ".tools")
 	git(t, main, "worktree", "lock", worktree)
 
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
@@ -1085,6 +1146,16 @@ func TestWorktreeRemoveReportsGitsRefusal(t *testing.T) {
 	}
 	if _, err := os.Stat(worktree); err != nil {
 		t.Fatalf("the worktree went away although git refused: %v", err)
+	}
+	junctionPath := filepath.Join(worktree, ".tools")
+	if _, err := os.Lstat(junctionPath); !os.IsNotExist(err) {
+		t.Fatalf("the junction was not taken out before git was asked: %v", err)
+	}
+	if code := runWorktreeLink(&bytes.Buffer{}, &bytes.Buffer{}, worktree); code != ExitOK {
+		t.Fatalf("worktree-link exit = %d, want 0", code)
+	}
+	if _, err := os.Stat(filepath.Join(junctionPath, "godot")); err != nil {
+		t.Fatalf("the next session start did not put the junction back: %v", err)
 	}
 }
 
@@ -1101,5 +1172,15 @@ func TestCliDispatchesWorktreeRemove(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "usage:") {
 		t.Fatalf("stderr = %q, want a usage line", &stderr)
+	}
+	// The empty string is a path nothing can stat, so every identity check
+	// downstream answers "no" about it: it would reach the registration
+	// refusal with no path in the message instead of being turned away here.
+	stderr.Reset()
+	if code := cli([]string{"worktree-remove", ""}, strings.NewReader(""), &stderr); code != ExitInternal {
+		t.Fatalf("exit = %d on an empty path, want ExitInternal", code)
+	}
+	if !strings.Contains(stderr.String(), "usage:") {
+		t.Fatalf("stderr = %q on an empty path, want a usage line", &stderr)
 	}
 }
