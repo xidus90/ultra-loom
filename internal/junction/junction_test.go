@@ -37,10 +37,10 @@ func sameDir(a, b string) bool {
 //
 // Not `Mode()&os.ModeSymlink`, which the plan expected: measured on
 // 2026-09-07 with go1.27.0, Lstat answers `Lrw-rw-rw-` by default but
-// `?rw-rw-rw-` under `GODEBUG=winsymlink=1,winreadlinkvolume=1`, the default
-// for every `go` directive from 1.23 on. What holds under both, and what "did
-// not follow" actually means, is that Lstat sees no directory where Stat sees
-// one.
+// `?rw-rw-rw-` under `GODEBUG=winsymlink=1,winreadlinkvolume=1` -- the default
+// for every `go` directive from 1.23 on, per `Changed: 23` in the toolchain's
+// `internal/godebugs/table.go`. What holds under both, and what "did not
+// follow" actually means, is that Lstat sees no directory where Stat sees one.
 func TestACreatedJunctionLooksLikeOneAndReadsBack(t *testing.T) {
 	requireWindows(t)
 	root := t.TempDir()

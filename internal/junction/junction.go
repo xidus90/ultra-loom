@@ -24,20 +24,25 @@ var ErrUnsupported = errors.New("junctions exist only on windows")
 // scans, and neither case is a fault. Anything else is a fault and says so.
 //
 // The answer is the target as Windows stores it, `\??\C:\dir\` and not the
-// path a caller could open: normalising it here would throw away the one form
-// that says for certain which reparse point this is, and a caller that wants
-// to open it strips the prefix itself.
+// path a caller could open. Two reasons, and neither is that the prefix
+// identifies anything -- the tag does that, and this checks the tag. First,
+// the stored substitute name is what the kernel actually resolves; the print
+// name beside it in the same buffer is decoration a tool may set to anything.
+// Second, turning it into something openable means deciding what that is --
+// trailing separator, short names, volume GUID -- and that decision belongs to
+// the one caller comparing paths, in one place, not to this package.
 //
 // The reparse-point ioctl and not `os.Lstat` plus `os.Readlink`, measured on
 // 2026-09-07 with go1.27.0 windows/amd64: by default Lstat reports a junction
 // as `Lrw-rw-rw-` and Readlink answers it, but under
-// `GODEBUG=winsymlink=1,winreadlinkvolume=1` -- which is the default for every
-// `go` directive from 1.23 on -- the mode is `?rw-rw-rw-` instead:
-// ModeIrregular, no ModeSymlink. That path would answer "" for a real
-// junction, which is not an error a caller could notice; bumping this module's
-// `go 1.22` line would silently turn the sweep blind. Widening the test to
-// ModeIrregular is no answer either, since it covers every other reparse tag
-// as well and Readlink faults on those.
+// `GODEBUG=winsymlink=1,winreadlinkvolume=1` the mode is `?rw-rw-rw-`
+// instead: ModeIrregular, no ModeSymlink. Both settings carry `Changed: 23` in
+// the toolchain's own `internal/godebugs/table.go`, so that is the default for
+// every `go` directive from 1.23 on -- and that path would answer "" for a
+// real junction, which is not an error a caller could notice. Bumping this
+// module's `go 1.22` line would silently turn the sweep blind. Widening the
+// test to ModeIrregular is no answer either: the bit covers every other
+// reparse tag as well, and Readlink has no answer for most of them.
 func Target(link string) (string, error) {
 	if _, err := os.Lstat(link); err != nil {
 		if os.IsNotExist(err) {
