@@ -125,10 +125,7 @@ func TestWorktreeLinkLeavesARealDirectoryAlone(t *testing.T) {
 	mkdirAll(t, filepath.Dir(own))
 	writeFile(t, own, "mine")
 
-	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := runWorktreeLink(stdout, stderr, worktree); code != ExitOK {
-		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
-	}
+	assertSilentOK(t, worktree)
 	if _, err := os.Stat(own); err != nil {
 		t.Fatalf("the worktree's own directory was replaced: %v", err)
 	}
@@ -159,10 +156,7 @@ func TestWorktreeLinkSkipsAPathTheMainCheckoutDoesNotHave(t *testing.T) {
 	main, worktree := worktreeFixture(t)
 	writeConfig(t, main, "[worktree]\nmirror = [\".tools\"]\n")
 
-	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := runWorktreeLink(stdout, stderr, worktree); code != ExitOK {
-		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
-	}
+	assertSilentOK(t, worktree)
 	if _, err := os.Lstat(filepath.Join(worktree, ".tools")); !os.IsNotExist(err) {
 		t.Fatalf("something was created for a path that does not exist: %v", err)
 	}
@@ -175,10 +169,7 @@ func TestWorktreeLinkSkipsAPathThatIsNotADirectory(t *testing.T) {
 	writeConfig(t, main, "[worktree]\nmirror = [\".tools\"]\n")
 	writeFile(t, filepath.Join(main, ".tools"), "not a directory")
 
-	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := runWorktreeLink(stdout, stderr, worktree); code != ExitOK {
-		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
-	}
+	assertSilentOK(t, worktree)
 	if _, err := os.Lstat(filepath.Join(worktree, ".tools")); !os.IsNotExist(err) {
 		t.Fatalf("something was created for a file: %v", err)
 	}
@@ -190,13 +181,7 @@ func TestWorktreeLinkDoesNothingInTheMainCheckout(t *testing.T) {
 	writeConfig(t, main, "[worktree]\nmirror = [\".tools\"]\n")
 	mkdirAll(t, filepath.Join(main, ".tools"))
 
-	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	if code := runWorktreeLink(stdout, stderr, main); code != ExitOK {
-		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want silence", stdout)
-	}
+	assertSilentOK(t, main)
 }
 
 // The three no-op cases, exit 0 and silent. This hook fires in every project
@@ -371,6 +356,78 @@ func TestTheSweepLeavesAJunctionAtAnUnconfiguredPathAlone(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(worktree, "somewhere")); err != nil {
 		t.Fatalf("a junction at an unconfigured path was removed: %v", err)
+	}
+}
+
+// The other side of the containment check: a nested configured path whose
+// intermediate directories are real is still swept. Without this, a check
+// that skipped one component too many would stop cleaning
+// `.ultraloom/vendor` and nothing would say so.
+func TestTheSweepReachesANestedPathThroughRealDirectories(t *testing.T) {
+	requireWindows(t)
+	main, _ := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = [\".ultraloom/vendor\"]\n")
+	mkdirAll(t, filepath.Join(main, ".ultraloom", "vendor", "ultraloom"))
+
+	orphan := filepath.Join(main, ".worktrees", "gone")
+	mkdirAll(t, filepath.Join(orphan, ".ultraloom"))
+	link := filepath.Join(orphan, ".ultraloom", "vendor")
+	mklink(t, link, filepath.Join(main, ".ultraloom", "vendor"))
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeLink(stdout, stderr, main); code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("the nested orphaned junction survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(main, ".ultraloom", "vendor", "ultraloom")); err != nil {
+		t.Fatalf("the sweep reached through the junction: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+	}
+}
+
+// A candidate whose path runs through a link is not in the orphan at all, and
+// the one thing behind such a path may be the main checkout's own junction.
+//
+// Windows opens the final component of a path with
+// FILE_FLAG_OPEN_REPARSE_POINT and follows every earlier one, so
+// `<orphan>/.ultraloom/vendor` with a junction at `<orphan>/.ultraloom` reads
+// the reparse point of `<main>/.ultraloom/vendor`. Before the containment
+// check that junction satisfied all three conditions and was removed -- the
+// pinned runtime every other ultraloom hook needs, gone silently, and `link`
+// cannot put it back because IsWorktree says false about the main checkout.
+func TestTheSweepDoesNotReachThroughAnIntermediateLink(t *testing.T) {
+	requireWindows(t)
+	main, _ := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = [\".ultraloom/vendor\"]\n")
+
+	// The main checkout's own mirror path is a junction here as well, which is
+	// what makes it look like a candidate once an earlier component leads to
+	// it.
+	runtimeDir := filepath.Join(main, "runtime")
+	mkdirAll(t, runtimeDir)
+	mainVendor := filepath.Join(main, ".ultraloom", "vendor")
+	mklink(t, mainVendor, runtimeDir)
+
+	orphan := filepath.Join(main, ".worktrees", "gone")
+	mkdirAll(t, orphan)
+	mklink(t, filepath.Join(orphan, ".ultraloom"), filepath.Join(main, ".ultraloom"))
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeLink(stdout, stderr, main); code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Lstat(mainVendor); err != nil {
+		t.Fatalf("the main checkout's own junction was removed: %v", err)
+	}
+	if _, err := os.Stat(runtimeDir); err != nil {
+		t.Fatalf("what the main checkout's junction pointed at is gone: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
 	}
 }
 

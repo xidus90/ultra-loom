@@ -14,11 +14,10 @@ import (
 )
 
 // The two prefixes a stored reparse target can start with. `\??\` is the NT
-// object-manager form, and it is the only one measured here: on 2026-09-07
-// both junction.Create and `mklink /J` stored it. `\\?\` is taken off as well
-// because the two forms are written the same way round and stripping a prefix
-// that never appears costs nothing -- not because anything here was seen to
-// store it. Neither is part of a path a Go call opens, and neither identifies
+// object-manager form, it is not a path Go opens, and it is the only one
+// measured here: on 2026-09-07 both junction.Create and `mklink /J` stored
+// it. `\\?\` is taken off as well so that both forms compare alike -- and not
+// because anything here was seen to store it. Neither prefix identifies
 // anything: the reparse tag does that, and junction.Target has checked it.
 var ntPrefixes = []string{`\??\`, `\\?\`}
 
@@ -73,14 +72,14 @@ func runWorktreeLink(stdout, stderr io.Writer, root string) int {
 // checkout does not have: the first may be this tree's own build output, and
 // the second is nothing to mirror. Only an *absent* path here is ours to fill.
 //
-// An Lstat that fails for some other reason than absence is not caught: the
-// path goes on to junction.Create, and its os.Mkdir is what fails instead, so
-// such a path still ends as a reported fault and never as a silent skip.
-// Measured on 2026-09-07 for the two ways to arrange it: a configured name
-// Windows will not spell (`bad?name`) and a worktree that may not gain a
-// subdirectory both come back from that Mkdir as an error. Mkdir refusing an
-// occupied path is the same property from the other side -- it is why nothing
-// here can overwrite what already stands at the path.
+// An Lstat that fails for some other reason than absence is not caught, and
+// the property that makes that safe is where such a path ends up: it goes on
+// to junction.Create, whose os.Mkdir fails on it, so it is a reported fault
+// and never a silent skip. Measured on 2026-09-07 with a worktree that may
+// not gain a subdirectory -- os.Lstat of the absent child still answers
+// IsNotExist there, and the Mkdir inside Create is what refuses. Mkdir
+// refusing an occupied path is the same property from the other side: it is
+// why nothing here can overwrite what already stands at the path.
 func link(worktree, main string, mirror []string) error {
 	for _, relative := range mirror {
 		target := filepath.Join(main, filepath.FromSlash(relative))
@@ -126,6 +125,9 @@ func sweep(topology worktreetopo.Topology, mirror []string) error {
 	}
 	for _, orphan := range orphans {
 		for _, relative := range mirror {
+			if !standsInside(orphan, relative) {
+				continue
+			}
 			path := filepath.Join(orphan, filepath.FromSlash(relative))
 			target, err := junction.Target(path)
 			if err != nil {
@@ -144,6 +146,42 @@ func sweep(topology worktreetopo.Topology, mirror []string) error {
 		}
 	}
 	return nil
+}
+
+// standsInside says whether a configured path really lies where its spelling
+// says: every component between the orphan and the candidate itself a plain
+// directory, and none of them a link.
+//
+// Without this the sweep establishes "inside the orphan" by spelling alone,
+// and a path's spelling does not decide where it goes: an open with
+// FILE_FLAG_OPEN_REPARSE_POINT keeps the *final* component from being
+// followed and nothing else, so a junction at `<orphan>/.ultraloom` makes
+// `<orphan>/.ultraloom/vendor` read and remove the reparse point of
+// `<main>/.ultraloom/vendor` -- the pinned runtime, taken out by the very
+// mechanism that exists to put it there.
+//
+// Mode().IsDir() is the test, and it is false for a junction under both
+// GODEBUG settings this module can be built with; the measurement behind that
+// is recorded at junction.go's Target. The last component is left out because
+// junction.Target is what decides about that one, and being a link is exactly
+// what qualifies it.
+//
+// A component that cannot be stat'ed counts as not a plain directory. The safe
+// direction is to leave a candidate alone: a junction skipped costs a stale
+// directory nobody deletes, and the other way costs somebody's data.
+func standsInside(orphan, relative string) bool {
+	// mirrorcfg hands out cleaned, slash-separated paths, so this split has no
+	// empty component and no trailing one.
+	components := strings.Split(relative, "/")
+	path := orphan
+	for _, component := range components[:len(components)-1] {
+		path = filepath.Join(path, component)
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 // leadsInto says whether a link target sits inside the main checkout.
