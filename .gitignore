@@ -45,6 +45,9 @@ htmlcov/
 /guard_cover
 /cov_*.out
 
-# Local brain & wiki hook cache
-.ultra-brain/
+# Local brain state and wiki hook cache. The manifest is the exception:
+# it is versioned so that a fresh clone gets a bundle brain can place.
+# The directory itself must stay unignored, or the negation cannot apply.
+/.ultra-brain/*
+!/.ultra-brain/config.toml
 

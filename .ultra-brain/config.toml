@@ -1,0 +1,24 @@
+[area]
+scope = "project/ultraloom"
+wiki = true
+
+[layout]
+sources = "docs"
+# Repo-relative, so that the path is the same on every checkout and in every
+# linked worktree. That the bundle sits inside the sources folder is the
+# intended shape (src/brain/init.py lays it out exactly so), not a defect.
+wiki = "docs/wiki"
+
+[index]
+include = ["docs/**/*.md", "README*.md"]
+# Our own walk picks up the bundle catalogue, while the ignore list handed to
+# qmd excludes `**/index.md` across the whole area. Without this line
+# `brain status` reported exactly that difference as a permanent divergence.
+unsearched = ["docs/wiki/**/index.md"]
+
+[privacy]
+mode = "manual_cloud"
+
+[maintenance]
+on_merge = true
+merge_branch = "master"
