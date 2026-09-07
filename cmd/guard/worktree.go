@@ -98,7 +98,8 @@ func runWorktreeUnlink(stdout, stderr io.Writer, stdin io.Reader, root string) i
 	// A payload we cannot read is not a reason to remove anything: without an
 	// id there is no way to tell our own state file from somebody else's, so
 	// the count would always say "somebody else is here" -- and Forget would
-	// have nothing to remove.
+	// be worse than useless, since safeName turns an empty id into "unnamed"
+	// and that may be the collapsed name of a session that is still running.
 	if err := json.NewDecoder(stdin).Decode(&payload); err != nil || payload.SessionID == "" {
 		return ExitOK
 	}
