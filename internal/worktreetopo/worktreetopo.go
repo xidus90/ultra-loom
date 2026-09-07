@@ -26,10 +26,13 @@ import (
 // constantly and must treat it as "nothing to do" rather than as a fault.
 var ErrNoRepository = errors.New("not a git repository")
 
-// Where a worktree is put in this repository's practice. Both, because both
-// are in use here -- CLAUDE.md names `.worktrees/multi-provider-llm` and
-// `.claude/worktrees/project-history-planning-cf98dc` side by side, which is
-// exactly why the registration and not the location decides.
+// Where a worktree is put in this repository's practice. Both, because
+// CLAUDE.md names one of each -- `.worktrees/multi-provider-llm` and
+// `.claude/worktrees/project-history-planning-cf98dc` -- so the path is no
+// evidence either way and the registration has to decide. Measured on
+// 2026-09-07: both directories are there in the main checkout, and
+// `.claude/worktrees` is empty at the moment, which is why absence and
+// emptiness are both ordinary below.
 var conventionDirs = []string{
 	filepath.Join(".claude", "worktrees"),
 	".worktrees",

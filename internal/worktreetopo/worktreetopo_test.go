@@ -84,7 +84,11 @@ func TestIsWorktreeSeparatesTheMainCheckoutFromTheRest(t *testing.T) {
 func TestOrphansFindsADirectoryGitNoLongerKnows(t *testing.T) {
 	main, claudeWt, _ := fixture(t)
 	// What `git worktree remove` leaves behind when a junction is in the way:
-	// the registration is gone, the directory is not.
+	// the registration is gone, the directory is not. Measured on 2026-09-07
+	// with a junction inside a scratch worktree -- `remove --force` exited 0
+	// without a word, dropped the porcelain entry, and left the directory with
+	// the junction in it. Rebuilt here rather than junctioned, because that
+	// state and not the way into it is what Orphans has to answer about.
 	git(t, main, "worktree", "remove", "--force", claudeWt)
 	if err := os.MkdirAll(claudeWt, 0o755); err != nil {
 		t.Fatal(err)
@@ -157,9 +161,9 @@ func TestAnInheritedGitDirDoesNotRedirectTheAnswer(t *testing.T) {
 func TestReadIgnoresTheOrderOfUnrelatedPorcelainFields(t *testing.T) {
 	parsed := parse("worktree /a\nHEAD abc\nbranch refs/heads/main\n\nworktree /b\ndetached\n\n")
 	// FromSlash because parse cleans, and on Windows filepath.Clean("/a")
-	// answers "\a": the separator is part of what a cleaned path is. Task 4
-	// hands Main to a junction, where a forward-slash target would be its
-	// problem, so the cleaning stays and the expectation follows it.
+	// answers "\a": rewriting to the platform separator is Clean's last step.
+	// So the expectation follows the separator rather than the plan's literal
+	// "/a", which is not what a cleaned path looks like here.
 	want := []string{filepath.FromSlash("/a"), filepath.FromSlash("/b")}
 	if !slices.Equal(parsed, want) {
 		t.Fatalf("parse = %q, want %q", parsed, want)
@@ -167,7 +171,8 @@ func TestReadIgnoresTheOrderOfUnrelatedPorcelainFields(t *testing.T) {
 }
 
 // A directory git holds nothing about is neither the main checkout nor a
-// worktree, which is the answer Task 5 acts on before it builds a mirror.
+// worktree. Both callers act only on a true answer: `worktree-link` builds a
+// mirror there, `worktree-unlink` takes one down.
 func TestIsWorktreeSaysNoAboutADirectoryGitDoesNotHold(t *testing.T) {
 	main, _, _ := fixture(t)
 	topology, err := Read(main)
@@ -217,8 +222,8 @@ func TestOrphansIgnoresAFileBesideTheWorktrees(t *testing.T) {
 }
 
 // A search space that is there but cannot be read is a fault, unlike one that
-// is absent -- reporting it as "no orphans" would let Task 6 report a clean
-// tree it never looked at.
+// is absent -- reporting it as "no orphans" would let the sweep that takes
+// stale junctions down report a clean tree it never looked at.
 //
 // Windows only, because taking the right to list a directory away needs an
 // ACL here. Measured on 2026-09-07: the cheaper trick of putting a *file* at
