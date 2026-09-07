@@ -22,6 +22,177 @@ Unterprozess. Kein `cmd /c mklink`, kein `os.Symlink`.
 
 **Spec:** `docs/.superpowers/specs/2026-09-07-worktree-mirror-design.md`
 
+## Korrekturen nach der Umsetzung
+
+Alle acht Tasks sind umgesetzt und reviewt (Ledger:
+`.superpowers/sdd/2026-09-07-worktree-mirror/progress.md`). Jeder Punkt hier
+ist eine Stelle, an der eine Messung während der Umsetzung diesem Plan
+widersprochen hat — gesammelt, damit der Plan sie nicht weiter lehrt. Wo der
+Fehler eine Zahl oder ein einzelner Satz war, ist er unten zusätzlich an der
+Stelle selbst korrigiert und mit `Kn` markiert.
+
+**K1 — Go-Coverage-Schwelle.** „≥ 98,5 %" (Global Constraints, und noch einmal
+in Task 5, Step 4) war aus einer *Beispielzeile* der README abgelesen. Der
+konfigurierte Boden ist 98,0 (`.ultraloom/config.toml:84`,
+`hooks/coverage-check.py 98.0`). Am Ende von Task 6 stand der Baum bei 98,4 %.
+
+**K2 — `--git-dir` gegen `--git-common-dir`.** Der Plan schrieb, aus einem
+Worktree dieses Repositorys antworte Git „dasselbe Verzeichnis in zwei
+Schreibweisen" (Task 3, Paketdoku und Commit-Nachricht). Falsch, selbst
+nachgemessen am 2026-09-07: aus `.worktrees/worktree-mirror` antwortet
+`--git-dir` `…/.git/worktrees/worktree-mirror` und `--git-common-dir`
+`…/.git` — zwei verschiedene absolute Verzeichnisse. `CLAUDE.md` ist deswegen
+**nicht** falsch: seine Messung kam aus
+`.claude/worktrees/opus-5-enforcement-57de82`, einem Verzeichnis, das den Index
+*teilt* und kein Worktree ist. Dort sind die zwei Antworten wirklich ein
+Verzeichnis in zwei Schreibweisen, und ein Textvergleich liefert ein
+falsch-positives „Worktree". Das Verbot steht, nur diese Begründung war falsch.
+Die Commit-Nachricht von `de8a4eb` trägt den Satz weiter: sie ist nicht HEAD,
+und ein `--amend` löst das teure Commit-Gate aus.
+
+**K3 — `filepath.IsLocal` ist nicht „the whole test on both platforms".** Auf
+POSIX ist ein Backslash ein gewöhnliches Byte, `IsLocal("C:\absolute")` ist
+dort also *wahr*. Der Fixture-Fall gilt nur unter Windows.
+
+**K4 — TOML-Fixtures brauchen *literal strings*.** `mirror = ["C:\absolute"]`
+stirbt im Parser an `invalid escape '\a'`; der Verweigerungstest war damit aus
+dem falschen Grund grün. Mit `'…'` geschrieben prüft er, was er prüfen soll.
+
+**K5 — `x/sys` v0.18.0 trägt das Reparse-Layout doch.** Nur unexportiert:
+`symbolicLinkReparseBuffer`, `mountPointReparseBuffer` und `reparseDataBuffer`
+(`types_windows.go:1870,1879,1887`), intern benutzt in
+`syscall_windows.go:1485-1493`. „x/sys carries the tag and the ioctl but not
+the layout" ist daher zu kurz — von außen unbenutzbar ist die richtige
+Begründung fürs Selberschreiben. (Ein Review behauptete zuerst das Gegenteil,
+„kein Layout überhaupt", und lag ebenfalls falsch.)
+
+**K6 — `var _ = unsafe.Sizeof(uintptr(0))` hielt nichts honest.** Die Zeile war
+Zierde und ihr Kommentar eine falsche Behauptung über den Compiler. Zeile und
+`unsafe`-Import sind bei der Umsetzung gestrichen worden; die Escape-Hatch
+dieses Plans wurde also genommen.
+
+**K7 — `Target` über `os.Lstat` plus `os.Readlink` funktioniert nicht.** Unter
+der Voreinstellung ab `go 1.23` (`GODEBUG=winsymlink=1,winreadlinkvolume=1`)
+meldet `Lstat` für eine Junction `?rw-rw-rw-` — `ModeIrregular`, **kein**
+`ModeSymlink` —, und der Plan-Code hätte für eine echte Junction `""` ohne
+Fehler geliefert, also einen blinden Sweep. Umgestellt auf
+`GetFileAttributes` plus `FSCTL_GET_REPARSE_POINT`, Signatur unverändert.
+
+**K8 — der gespeicherte Trenner am Ende ist nicht kanonisch.** Gemessen am
+2026-09-07: `junction.Create` speichert `\??\C:\dir\` **mit** Trenner,
+`mklink /J` speichert `\??\C:\dir` **ohne**, und beides löst auf. `Create`
+wurde deshalb *nicht* angeglichen — es gibt keinen Defekt dahinter. Folge, und
+sie ist zwingend: jeder Vergleich läuft über Identität (`os.SameFile`) oder
+über `filepath.Clean` auf **beiden** Seiten, nie über Text. Ein Textvergleich
+brach genau an den von Hand gelegten Junctions, die `space` schon trägt.
+
+**K9 — `sameDir` war in Task 3 zweimal spezifiziert**, in der Implementierung
+*und* in der Testdatei desselben Pakets. So übernommen kompiliert das nicht
+(`sameDir redeclared in this block`).
+
+**K10 — `parse`-Erwartung `"/a"` ist unter Windows falsch**, weil
+`filepath.Clean` `\a` antwortet. Als echtes ROT gemessen.
+
+**K11 — der Suchraum-Lesefehler entsteht nicht über eine *Datei* namens
+`.worktrees`.** Unter Windows antwortet `os.ReadDir` darauf
+`ERROR_PATH_NOT_FOUND`, `os.IsNotExist` ist **wahr**, und `Orphans`
+überspringt sie stillschweigend. Was die Anweisung wirklich erreicht, ist ein
+per ACL unlesbares Verzeichnis; vier Kandidaten wurden dafür durchgemessen.
+
+**K12 — `stripNTPrefix` wird in Task 4 genannt und nirgends geschrieben.** Die
+Regel: ein führendes `\??\` oder `\?\` abschneiden, alles andere unverändert
+durchlassen, dann `filepath.Clean` — der Clean nimmt auch den Trenner aus K8
+weg. Der Kommentar des Plans, keines der beiden Präfixe sei „part of a path a
+Go call opens", ist für `\?\` außerdem falsch: `os` erzeugt diese Form selbst
+in `fixLongPath`.
+
+**K13 — Testhelfer sind in Tasks 4, 5 und 6 benannt und nicht ausgeschrieben**
+(`requireWindows`, `worktreeFixture`, `writeConfig`, `mkdirAll`, `writeFile`,
+`unregister`, `writeSessionState`, `registered`). Die Prosa war eindeutig
+genug; jeder Auftrag trug die Liste mit einem Satz pro Helfer nach.
+
+**K14 — `sweep` und `unlink` fehlt im Plan `standsInside`, und das ist ein
+echter Fehler.** `filepath.Join(dir, relative)` stellt „innerhalb" nur über die
+Schreibweise fest, und `FILE_FLAG_OPEN_REPARSE_POINT` bewahrt allein die
+**letzte** Komponente vor dem Verfolgen. Mit `mirror = [".ultraloom/vendor"]`,
+einer von Hand gelegten Junction an `<dir>/.ultraloom` in den Haupt-Checkout
+hinein und `main/.ultraloom/vendor` selbst als Junction lesen alle drei
+Eigentumsbedingungen als erfüllt — und der Sweep entfernt die Junction **des
+Haupt-Checkouts**, also die gepinnte Laufzeit, die jeder andere Hook braucht,
+stillschweigend; `link` kann sie dort nicht ersetzen, weil `IsWorktree(main)`
+falsch ist. Vor dem Fix reproduziert, dann behoben: jede Komponente strikt
+zwischen `dir` und dem Kandidaten muss per `os.Lstat` ein einfaches
+Verzeichnis sein. Beide Aufrufer brauchen es, `unlink` genauso wie `sweep`.
+
+**K15 — „the sweep only ever reaches directories git has already given up on"
+ist falsch.** `Orphans` heißt *unregistriert*, nicht *aufgegeben*: ein
+Verzeichnis der Art, die `CLAUDE.md` beschreibt — teilt den Haupt-Index, ist
+kein Worktree — ist lebende Arbeit und wird als Waise genannt. Der Sweep ist
+nur deshalb sicher, weil er zusätzlich einen Reparse-Point an einem
+konfigurierten Pfad mit Ziel im Haupt-Checkout verlangt. Die Folge ist gewollt
+und in `docs/flows/worktree-mirror.md` dokumentiert: so ein Verzeichnis wird
+gefegt, auch während jemand darin arbeitet, und `link` legt die Junction dort
+nicht wieder an. Verloren ist eine Junction, nie Daten.
+
+**K16 — drei Zweige aus Task 4 sind unerreichbar** und bei der Umsetzung
+gestrichen oder ersetzt worden: `!errors.Is(ErrNoRepository)`, weil
+`worktreetopo.Read` das Sentinel um **beide** Fehlerrückgaben wickelt;
+`!os.IsNotExist` nach `Lstat` in `link`, weil der Stat des Ziels auf demselben
+relativen Pfad davor steht (so ein Pfad scheitert jetzt laut an `Create`s
+`Mkdir`); und der Sweep-Test des Plans prüfte nichts, weil
+`git worktree remove --force` untracked files löscht, solange kein
+Reparse-Point es blockiert — die Datei muss **nach** `unregister` geschrieben
+werden.
+
+**K17 — `sessionStale` steht auf 24 h, nicht auf 12 h.** Die Asymmetrie ist
+nicht knapp: lang zu irren lässt eine Junction stehen, die keinen Platz
+kostet, die `link` als vorhanden überspringt und die `sweep` mitnimmt, wenn der
+Worktree geht; kurz zu irren zieht sie einer laufenden Sitzung oder einem
+offenen Godot-Editor weg, der 4,2 GB dadurch liest. Dazu: die Begründung des
+Plans zählte die Schreiber falsch. Es sind vier —
+`session_start.py:59`, `stop.py:250` und `:283`, und
+`subagent_start.py:38`, letzterer bedingungslos bei **jedem** Subagentenstart.
+Und keine Zahl schließt das Loch: der eigentliche Fix ist ein Schreibvorgang
+auf der lebenden Seite. Folgearbeit, nicht gebaut.
+
+**K18 — `safeName` darf nicht ASCII-only sein.** `state.py`s Regel ist
+`char.isalnum()`, und das ist Unicode: in CPython über alle 0x110000
+Codepunkte durchgezählt ist `isalnum()` genau für die Kategorien L* und N*
+wahr, also genau `unicode.IsLetter || unicode.IsNumber`. Eine ASCII-Variante
+suchte `unnamed.json`, wo Python den Buchstaben geschrieben hat.
+
+**K19 — `bash rm -rf` bleibt nicht an dem Rest hängen.** Der Plan behauptet an
+drei Stellen, `rm -rf` weigere sich, das Übriggebliebene wegzuräumen. Das
+reproduziert nicht; siehe die gleiche Korrektur in der Spec. Die tragende
+Messung — `git worktree remove --force` lässt Verzeichnis und Junction stehen
+und meldet Exit 0 — ist bestätigt, inzwischen viermal.
+
+**K20 — `runWorktreeRemove` aus Task 6 hat drei Defekte.** Erstens verweigert
+`IsWorktree(target)` den Haupt-Checkout zwar, aber mit der Meldung „git does
+not hold %s as a worktree", und die ist falsch über den Pfad, den Git in
+seinem eigenen Porcelain zuerst nennt: der Haupt-Checkout braucht eine eigene
+Verweigerung davor. Zweitens wird mit `command.Dir = topology.Main` ein
+relatives Argument in *einem* Verzeichnis geprüft und in einem *anderen*
+gelöscht — weitergegeben wird deshalb Gits eigene Schreibweise aus dem
+Porcelain. Drittens druckt der Plan `removed %s` auf Gits Exit 0, ohne
+nachzusehen: bei einer Junction, die die Konfiguration nicht nennt, bleibt das
+Verzeichnis stehen und das Kommando meldete Erfolg über genau dem Müll, den es
+verhindern soll. Ein `os.Lstat` davor macht daraus einen gemeldeten Fehler.
+Ein Test hat den Wert der Identitätsvergleiche dabei bewiesen: mit einem
+Textvergleich statt `sameDir` rutscht `main` plus Pfadtrenner an **beiden**
+Verweigerungen vorbei.
+
+**K21 — Task 7 schreibt `~/.claude/settings.json` nicht.** Die Datei liegt in
+einem eigenen Repository außerhalb dieses Projekts; die zwei Hook-Einträge
+gehen als Vorschlag an ihren Eigentümer und stehen in
+`docs/flows/worktree-mirror.md`. Damit ist auch **nicht** gemessen, ob ein
+`SessionEnd`-Ereignis hier tatsächlich ankommt (Step 2 dieses Tasks ist
+ausgefallen). Kommt es nicht an, verliert `worktree-unlink` seinen Aufhänger,
+und der Sweep in `worktree-link` sowie `worktree-remove` bleiben die zwei
+Aufräumwege.
+
+---
+
 ## Global Constraints
 
 - **Sprache:** Kommentare, Docstrings, Fehlermeldungen, Commit-Nachrichten
@@ -30,7 +201,8 @@ Unterprozess. Kein `cmd /c mklink`, kein `os.Symlink`.
 - **Commits:** Nutzer als Author und Committer, kein `Co-Authored-By` für
   Modell oder Agent.
 - **Gate:** `uv run ultraloom check all` muss grün sein. Python-Coverage 100 %,
-  Go-Coverage ≥ 98,5 % (heute 98,7 %). Jeder Ausschluss mit Begründung.
+  Go-Coverage ≥ 98,0 % (`.ultraloom/config.toml:84`; heute 98,4 %, K1).
+  Jeder Ausschluss mit Begründung.
 - **Arbeitsverzeichnis:** Worktree `.worktrees/worktree-mirror`, Zweig
   `claude/worktree-mirror`, HEAD beim Start `1ddc70c`.
 - **Vor dem ersten Gate-Lauf im Worktree:** `go build -o ulinit.exe ./cmd/init`
@@ -143,9 +315,12 @@ func TestTheThreeNoOpCases(t *testing.T) {
 
 // A path that climbs out of the project would junction something outside it.
 func TestMirrorRefusesAPathThatLeavesTheProject(t *testing.T) {
+	// TOML *literal* strings, or the parser dies at `invalid escape '\a'`
+	// before Mirror is ever called and the refusal is green for the wrong
+	// reason (K4). `C:\absolute` only leaves the project on Windows (K3).
 	for _, entry := range []string{"../elsewhere", "/absolute", "C:\\absolute", ".tools/../.."} {
 		root := t.TempDir()
-		write(t, root, "[worktree]\nmirror = [\""+entry+"\"]\n")
+		write(t, root, "[worktree]\nmirror = ['"+entry+"']\n")
 		if _, err := Mirror(root); err == nil {
 			t.Fatalf("%q was accepted", entry)
 		}
@@ -247,9 +422,11 @@ func Mirror(root string) ([]string, error) {
 //
 // Checked here rather than at the call site: this is the one entry a project
 // controls, and the thing built from it is a link into another directory.
-// `filepath.IsLocal` is the whole test on both platforms -- it rejects an
-// absolute path, a rooted one, a `..` segment and a Windows device name, and
-// it is what the standard library uses for exactly this question.
+// `filepath.IsLocal` is the only test applied. Everywhere it rejects an empty
+// path, an absolute or rooted one and any `..` segment; only on Windows does
+// it also reject a device name and read a backslash as a separator. On POSIX a
+// backslash is an ordinary byte, so `C:\absolute` is one legal filename there
+// and passes -- see K3.
 func inside(entry string) (string, error) {
 	if entry == "" {
 		return "", fmt.Errorf("an empty path names nothing")
@@ -595,8 +772,10 @@ import (
 
 // The header size of the buffer below: the 8-byte REPARSE_DATA_BUFFER head
 // plus four uint16 -- SubstituteNameOffset, SubstituteNameLength,
-// PrintNameOffset, PrintNameLength. Spelled out because x/sys carries the tag
-// and the ioctl but not the layout.
+// PrintNameOffset, PrintNameLength. Spelled out because x/sys v0.18.0 carries
+// the tag and the ioctl, and the layout only unexported --
+// `mountPointReparseBuffer` and its two siblings at
+// types_windows.go:1870,1879,1887, unusable from outside (K5).
 const mountPointHeaderSize = 8 + 8
 
 // Create makes `link` a junction pointing at `target`.
@@ -730,10 +909,20 @@ falsch und **nicht** der Test: in diesem Fall `Target` auf
 gemessenen Grund in den Docstring schreiben. Der Rest des Plans hängt nur an
 der Signatur, nicht am Weg.
 
+**Korrigiert (K7):** Diese Escape-Hatch wurde genommen. Unter der
+Voreinstellung ab `go 1.23` meldet `Lstat` für eine Junction
+`?rw-rw-rw-` — `ModeIrregular`, kein `ModeSymlink` —, der Plan-Code hätte
+also `""` ohne Fehler geliefert. `Target` läuft jetzt über
+`GetFileAttributes` plus `FSCTL_GET_REPARSE_POINT`, Signatur unverändert.
+Und zum Zielpfad selbst siehe K8: der Trenner am Ende ist nicht kanonisch.
+
 Die Prüfung, dass `unsafe` wirklich gebraucht wird, ist Kür: ist die
 `var _ = unsafe.Sizeof(...)`-Zeile nur Zierde, streiche sie samt Import — ein
 Kommentar, der etwas behauptet, was der Code nicht tut, ist der häufigste
 Befund in diesem Repo.
+
+**Korrigiert (K6):** Genau das war der Fall. Die Zeile hielt nichts honest,
+und sie ist samt `unsafe`-Import bei der Umsetzung gestrichen worden.
 
 - [ ] **Step 5: `x/sys` von indirekt auf direkt setzen**
 
@@ -954,6 +1143,11 @@ func TestReadIgnoresTheOrderOfUnrelatedPorcelainFields(t *testing.T) {
 Testdatei — zwei Pakete, zwei Kopien einer sechszeiligen Testhilfe ist billiger
 als ein geteiltes Testpaket, das beide importieren müssten.
 
+**Korrigiert (K9):** aber nur *einmal* pro Paket. Dieser Plan schreibt
+`sameDir` sowohl hier als auch in Step 3 unten aus, und das kompiliert nicht
+(`sameDir redeclared in this block`). Es gehört in die Implementierung, wo
+`IsWorktree` es braucht; der Test benutzt es von dort.
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/worktreetopo/`
@@ -967,10 +1161,13 @@ Expected: FAIL — `undefined: Read`, `undefined: ErrNoRepository`, `undefined: 
 //
 // One git call for both answers, and that call is `git worktree list
 // --porcelain`. Not a comparison of `--git-dir` against `--git-common-dir`:
-// from a worktree of this repository git answers
+// those two are not comparable as text. CLAUDE.md records a directory under
+// `.claude/worktrees/` that shared the main index, where git answered
 // `C:/Users/micro/Documents/#GIT/ultraloom/.git` for the first and
-// `../../../.git` for the second -- the same directory written two ways, and
-// as text they differ. CLAUDE.md carries that measurement and the prohibition.
+// `../../../.git` for the second -- one directory in two spellings, which as
+// text differ, so the comparison called a shared-index directory a worktree.
+// From a real worktree the two answers are different absolute directories:
+// see K2, where this plan's first phrasing had it wrong.
 package worktreetopo
 
 import (
@@ -1125,9 +1322,12 @@ Run: `go test ./internal/worktreetopo/ -cover`
 Expected: PASS. Bleibt die Coverage unter 100 %, fehlen die Fehlerpfade — für
 `Orphans` einen nicht lesbaren Elternpfad, für `Read` ein Verzeichnis ohne
 Repository; beides ist in den Tests oben schon angelegt bis auf den
-Lesefehler, der auf Windows am einfachsten über eine *Datei* namens
-`.worktrees` entsteht. Dann `TestOrphansReportsAnUnreadableSearchSpace`
-ergänzen.
+Lesefehler. Dann `TestOrphansReportsAnUnreadableSearchSpace` ergänzen.
+
+**Korrigiert (K11):** eine *Datei* namens `.worktrees` erreicht diesen Pfad
+**nicht**. Unter Windows antwortet `os.ReadDir` darauf `ERROR_PATH_NOT_FOUND`,
+`os.IsNotExist` ist wahr, und `Orphans` überspringt sie still. Was ihn
+erreicht, ist ein per ACL unlesbares Verzeichnis.
 
 - [ ] **Step 5: Commit**
 
@@ -1145,9 +1345,11 @@ One `git worktree list --porcelain` call answers both questions the mirror
 needs: where the main checkout is, which is what every junction points into,
 and whether the directory we stand in is a worktree of it.
 
-Not a comparison of --git-dir against --git-common-dir. From a worktree here
-git answers the same directory in two spellings, and as text they differ --
-CLAUDE.md carries the measurement and the prohibition.
+Not a comparison of --git-dir against --git-common-dir: the two are not
+comparable as text. CLAUDE.md's measurement comes from a directory that
+shares the main index and is no worktree, where the two answers are one
+directory in two spellings -- so the comparison names such a directory a
+worktree. From a real worktree they are different absolute directories.
 
 Orphans have to be scanned for, because being unregistered is what makes them
 orphans: `git worktree remove` leaves the directory behind when a junction is
@@ -1365,6 +1567,12 @@ Die Helfer `requireWindows`, `worktreeFixture`, `writeConfig`, `mkdirAll`,
 `git worktree remove --force` und legt das Verzeichnis danach wieder an —
 genau das, was Git auf einer echten Junction hinterlässt.
 
+**Korrigiert (K13):** ausgeschrieben ist keiner dieser Helfer, hier so wenig
+wie in Task 5 und 6. Die Prosa reichte, aber der Plan hätte sie zeigen
+müssen. Und **K16**: der Sweep-Test unten prüft nichts, solange seine Datei
+vor `unregister` geschrieben wird — `git worktree remove --force` löscht
+untracked files, solange kein Reparse-Point es blockiert.
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./cmd/guard/ -run Worktree`
@@ -1466,8 +1674,12 @@ func link(worktree, main string, mirror []string) error {
 // would be a second state that can drift, and after a `Remove-Item -Recurse`
 // on a worktree it would be wrong immediately. The price is that the
 // hand-made junctions in this repository's worktrees are adopted, which is
-// right: they are indistinguishable from ours by target and place, and the
-// sweep only ever reaches directories git has already given up on.
+// right: they are indistinguishable from ours by target and place, and they
+// were made for the same reason. What is NOT true is that the sweep only
+// reaches directories git has given up on: `Orphans` means unregistered, and
+// a shared-index directory of the kind CLAUDE.md describes is live work. See
+// K15. And this loop is missing `standsInside` -- see K14, which is a real
+// bug and not a wording defect.
 func sweep(topology worktreetopo.Topology, mirror []string) error {
 	orphans, err := topology.Orphans()
 	if err != nil {
@@ -1516,6 +1728,13 @@ func leadsInto(target, main string) bool {
 
 `stripNTPrefix` und `sameDir` gehören daneben; `sameDir` ist dieselbe
 `os.SameFile`-Hilfe wie in den beiden Paketen davor.
+
+**Korrigiert (K12):** `stripNTPrefix` wird hier genannt und nirgends
+geschrieben. Die Regel ist: ein führendes `\??\` oder `\?\` abschneiden,
+alles andere unverändert durchlassen, dann `filepath.Clean` — der nimmt auch
+den Trenner am Ende weg, den K8 beschreibt. Der Satz oben, der gespeicherte
+Zielpfad sei „not a path any Go call opens directly", gilt übrigens nur für
+`\??\`: die Form `\?\` erzeugt `os` selbst in `fixLongPath`.
 
 Dispatch in `cmd/guard/main.go`, hinter dem `post-edit`-Block und im selben
 Muster:
@@ -1877,15 +2096,18 @@ func Forget(root, sessionID string) error {
 }
 
 // safeName is state.py's rule, spelled in Go: the id comes from outside, so
-// it may not decide where the file lands. Anything but a letter, a digit, a
+// it may not decide where the file lands. Anything but a letter, a number, a
 // dash or an underscore is dropped, and an id that leaves nothing becomes
 // "unnamed" rather than the directory itself.
+//
+// Letter and number in the UNICODE sense, because state.py's own test is
+// `char.isalnum()`, which is true for exactly the L* and N* categories. An
+// ASCII-only rule -- which is what this plan first wrote -- would look for
+// unnamed.json where Python wrote the letter. See K18.
 func safeName(sessionID string) string {
 	var builder strings.Builder
 	for _, char := range sessionID {
-		switch {
-		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z',
-			char >= '0' && char <= '9', char == '-', char == '_':
+		if unicode.IsLetter(char) || unicode.IsNumber(char) || char == '-' || char == '_' {
 			builder.WriteRune(char)
 		}
 	}
@@ -1899,10 +2121,14 @@ func safeName(sessionID string) string {
 In `cmd/guard/worktree.go`:
 
 ```go
-// How long a session's state file counts for. Twelve hours, because nothing
-// deletes these files today and a session that has not written in half a day
-// is not the running Godot editor this count protects.
-const sessionStale = 12 * time.Hour
+// How long a session's state file counts for. A day: nothing deletes these
+// files, so the mtime is the only liveness there is, and erring long leaves a
+// junction that costs nothing while erring short takes one out from under a
+// live session or an open Godot editor reading 4.2 GB through it. Four writers
+// keep the file young -- session_start.py:59, stop.py:250 and :283, and
+// subagent_start.py:38 on every subagent dispatch. See K17: this plan first
+// said twelve hours and named the writers wrong.
+const sessionStale = 24 * time.Hour
 
 // runWorktreeUnlink takes the junctions back out -- but only if this was the
 // last session on the tree.
@@ -1969,6 +2195,10 @@ func runWorktreeUnlink(stdout, stderr io.Writer, stdin io.Reader, root string) i
 // The target is checked as well -- a junction pointing somewhere else is
 // somebody's own arrangement, and removing it would be the same overreach as
 // removing a real directory.
+//
+// Missing here, and required: `standsInside(worktree, relative)` before
+// junction.Target, exactly as in `sweep`. Same exposure, same reason -- see
+// K14.
 func unlink(worktree, main string, mirror []string) error {
 	for _, relative := range mirror {
 		path := filepath.Join(worktree, filepath.FromSlash(relative))
@@ -2004,7 +2234,7 @@ Dispatch in `cmd/guard/main.go`, im Muster der anderen, mit `stdin`:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/sessions/ ./cmd/guard/ -cover`
-Expected: PASS, beide Pakete ≥ 98,5 %.
+Expected: PASS, beide Pakete ≥ 98,0 % (K1).
 
 - [ ] **Step 5: Commit**
 
@@ -2054,8 +2284,10 @@ somebody is still here.
 
 ```go
 // The measured reason this command exists: `git worktree remove --force`
-// leaves the junction behind and reports success (2026-09-07). Then
-// `bash rm -rf` stumbles over the leftover for ever.
+// leaves the junction behind and reports success (2026-09-07). What it leaves
+// is a directory git no longer knows with a link into the main checkout in
+// it. The claim that `bash rm -rf` then stumbles over that leftover does not
+// reproduce -- see K19.
 func TestWorktreeRemoveLeavesNothingBehind(t *testing.T) {
 	requireWindows(t)
 	main, worktree := worktreeFixture(t)
@@ -2121,14 +2353,16 @@ Expected: FAIL — `undefined: runWorktreeRemove`.
 // runWorktreeRemove is the safe way to get rid of a worktree.
 //
 // `git worktree remove --force` deregisters the tree, leaves the junction
-// standing and exits 0 -- measured on 2026-09-07. The directory then looks
-// like a worktree to nobody and like rubbish to everybody, and `bash rm -rf`
-// refuses to finish it off. So the junctions come out first, and git is asked
-// afterwards.
+// standing and exits 0 -- measured on 2026-09-07 and three times since. The
+// directory then looks like a worktree to nobody and like rubbish to
+// everybody. So the junctions come out first, and git is asked afterwards.
+// (That `bash rm -rf` refuses to finish it off does not reproduce -- K19.)
 //
-// Refuses the main checkout by name. A wrapper whose worst outcome is
-// deleting the repository has to say no to that one before it does anything
-// else.
+// Refuses the main checkout. The code below does NOT do that correctly --
+// see K20 for all three of its defects, and cmd/guard/worktree.go for what
+// landed instead: a separate identity refusal for the main checkout, git's
+// own spelling passed on to the removal, and an os.Lstat before the success
+// is printed.
 func runWorktreeRemove(stdout, stderr io.Writer, target string) int {
 	topology, err := worktreetopo.Read(target)
 	if err != nil {
@@ -2194,9 +2428,9 @@ Nachricht:
 Remove a worktree without leaving the junction behind
 
 Measured on 2026-09-07: `git worktree remove --force` deregisters the tree,
-leaves the junction standing and exits 0. The directory is then rubbish that
-`bash rm -rf` refuses to finish off. So this takes the junctions out first and
-asks git afterwards.
+leaves the junction standing and exits 0. The directory is then a tree git no
+longer knows with a link into the main checkout still in it. So this takes
+the junctions out first and asks git afterwards.
 
 The main checkout is refused by name. A wrapper whose worst outcome is
 deleting the repository says no to that one before it does anything else.

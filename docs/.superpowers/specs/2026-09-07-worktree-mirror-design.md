@@ -139,11 +139,24 @@ Wegwerf-Fixtures, echte Junction, Git und PowerShell 7 dieser Maschine,
 |---|---|---|
 | `git worktree remove --force` | intakt | `.tools`-Junction bleibt liegen, Exit 0 |
 | `Remove-Item -Recurse -Force` | intakt | alles weg |
-| `bash rm -rf` | intakt | `.tools`, `.git`, `.gitignore` bleiben |
+| `bash rm -rf` auf dem vollen Worktree | intakt | alles weg |
+| `bash rm -rf` auf dem Rest nach `git worktree remove` | intakt | alles weg |
 
 Kein Weg löscht durch die Junction hindurch. Das Destroy löst also Müll, nicht
 Gefahr — und `git worktree remove` ist der Weg, der Müll erzeugt und dabei
 Erfolg meldet. Genau deshalb gibt es den Wrapper.
+
+**Korrigiert am Ende von Task 6.** Die `bash rm -rf`-Zeile stand hier zuerst
+als „`.tools`, `.git` und `.gitignore` bleiben". Das **reproduziert nicht**:
+dreimal hintereinander mit frischen Fixtures nachgemessen räumt `rm -rf` in
+beiden Lagen alles weg, das Ziel jedes Mal intakt. Warum die erste Messung
+etwas anderes zeigte, ist **nicht** geklärt — die naheliegende Erklärung, ein
+falsch geschriebener `/c`-Pfad, ist ausgeschlossen, denn in dieser Bash gibt es
+`/c/Users` und `/C/Users` beide. Es steht hier also nur, was reproduziert, und
+keine erfundene Ursache. Sicherheitsrelevant war die Zeile nie: die Aussage,
+dass kein Löschweg durch die Junction hindurchgreift, hat in jeder Messung
+gehalten, und die Begründung des Wrappers hängt an der Git-Zeile, die inzwischen
+viermal bestätigt ist.
 
 ## Vorbedingung, beim Schreiben dieser Spec erledigt
 
