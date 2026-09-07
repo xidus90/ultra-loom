@@ -65,9 +65,19 @@ func Mirror(root string) ([]string, error) {
 //
 // Checked here rather than at the call site: this is the one entry a project
 // controls, and the thing built from it is a link into another directory.
-// `filepath.IsLocal` is the whole test on both platforms -- it rejects an
-// absolute path, a rooted one, a `..` segment and a Windows device name, and
-// it is what the standard library uses for exactly this question.
+//
+// `filepath.IsLocal` is the only test applied, and it is the platform's own
+// answer to this question -- but what it guarantees is not the same
+// everywhere. On every platform it rejects an empty path, an absolute or
+// rooted one, and any `..` segment. Only on Windows does it also reject a
+// reserved device name and read a backslash as a separator: on POSIX a
+// backslash is an ordinary byte, so `C:\absolute` is one legal filename there
+// and passes. A project that writes Windows paths into a config read by a
+// Linux worktree therefore gets a directory with an odd name, not a refusal.
+//
+// The empty-path branch below is not a gap in `IsLocal`, which rejects ""
+// already; it exists so the message names the cause instead of quoting an
+// empty string back at the reader.
 func inside(entry string) (string, error) {
 	if entry == "" {
 		return "", fmt.Errorf("an empty path names nothing")

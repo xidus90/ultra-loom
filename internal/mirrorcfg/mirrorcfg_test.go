@@ -3,6 +3,7 @@ package mirrorcfg
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -63,8 +64,20 @@ func TestTheThreeNoOpCases(t *testing.T) {
 // The entries go into TOML literal strings on purpose: in a basic string
 // `C:\absolute` is an invalid escape, so the parser would reject the line and
 // the test would pass without the path check ever running.
+//
+// `C:\absolute` is guarded rather than merely annotated as Windows-specific:
+// on POSIX `filepath.IsLocal` reads the backslash as an ordinary byte, so the
+// entry is one legal filename there and `Mirror` accepts it. Unguarded, the
+// case would not record a platform difference -- it would fail.
+//
+// The empty entry belongs here for the same reason the others do -- it is
+// refused -- even though nothing about it climbs anywhere.
 func TestMirrorRefusesAPathThatLeavesTheProject(t *testing.T) {
-	for _, entry := range []string{"../elsewhere", "/absolute", "C:\\absolute", ".tools/../..", ""} {
+	entries := []string{"../elsewhere", "/absolute", ".tools/../..", ""}
+	if runtime.GOOS == "windows" {
+		entries = append(entries, "C:\\absolute")
+	}
+	for _, entry := range entries {
 		root := t.TempDir()
 		write(t, root, "[worktree]\nmirror = ['"+entry+"']\n")
 		if _, err := Mirror(root); err == nil {
