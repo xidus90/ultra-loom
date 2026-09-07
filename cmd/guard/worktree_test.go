@@ -557,9 +557,10 @@ func TestLeadsIntoReadsEverySpellingOfAStoredTarget(t *testing.T) {
 	}
 }
 
-// writeSessionState puts down what the Python hooks write, in the shape
-// state.py's `write` writes it. The directory comes from the constant and not
-// from a second literal, which is the drift that constant exists to prevent.
+// writeSessionState puts a session's file where the Python hooks put theirs.
+// Only the place matters -- nothing on the Go side reads the body -- and the
+// directory comes from the constant rather than from a second literal, which
+// is the drift that constant exists to prevent.
 func writeSessionState(t *testing.T, worktree string, id string) string {
 	t.Helper()
 	dir := filepath.Join(worktree, filepath.FromSlash(sessions.StateDir))
@@ -615,7 +616,10 @@ func TestWorktreeUnlinkKeepsTheJunctionWhileAnotherSessionHoldsIt(t *testing.T) 
 func TestWorktreeUnlinkIgnoresAStaleSessionFile(t *testing.T) {
 	_, worktree := linkedFixture(t, ".tools")
 	ancient := writeSessionState(t, worktree, "ancient")
-	when := time.Now().Add(-48 * time.Hour)
+	// Derived from the constant and not a number of its own: the point is
+	// "past the cutoff, whatever the cutoff is", and a literal here would go
+	// quietly wrong the next time the cutoff moves.
+	when := time.Now().Add(-2 * sessionStale)
 	if err := os.Chtimes(ancient, when, when); err != nil {
 		t.Fatal(err)
 	}
@@ -853,8 +857,10 @@ func TestUnlinkReportsAStateFileItCannotRemove(t *testing.T) {
 	if code != ExitInternal {
 		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
 	}
-	if stderr.Len() == 0 {
-		t.Fatal("a failure said nothing")
+	// Forget's own prefix, so the test cannot pass on a failure from the count
+	// that runs after it.
+	if !strings.Contains(stderr.String(), "removing ") {
+		t.Fatalf("stderr = %q, want Forget's error in it", stderr)
 	}
 }
 
@@ -872,8 +878,11 @@ func TestUnlinkReportsAStateDirectoryItCannotRead(t *testing.T) {
 	if code != ExitInternal {
 		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
 	}
-	if stderr.Len() == 0 {
-		t.Fatal("a failure said nothing")
+	// Others' own prefix. Under this deny Forget fails at nothing, but it
+	// stands earlier in the same function and would produce the same exit code
+	// and the same non-empty stderr, so the message is what tells them apart.
+	if !strings.Contains(stderr.String(), "reading ") {
+		t.Fatalf("stderr = %q, want the count's error in it", stderr)
 	}
 }
 

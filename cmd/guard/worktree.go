@@ -70,16 +70,26 @@ func runWorktreeLink(stdout, stderr io.Writer, root string) int {
 }
 
 // How long a session's state file counts for. Nothing deletes these files, so
-// the mtime is the only liveness there is to read, and it is only as good as
-// the writes: session_start.py writes the file at session start and stop.py
-// rewrites it on every block and every pass, so in a project with the stop
-// gate switched on the file is as young as the last turn that ended, and in
-// one without it as old as the session itself.
+// the mtime is the only liveness there is to read, and it is as good as the
+// writes: session_start.py writes at session start (:59), stop.py on every
+// block and every pass (:250, :283), and subagent_start.py on every subagent
+// dispatch (:38) -- the last of those gated on the payload alone and on no
+// configuration at all. So the file is as young as the last turn that ended,
+// or the last subagent dispatched, and only a session that does neither ages
+// past its start.
 //
-// Twelve hours is the trade that follows. Shorter would take a junction out
-// from under a long session in a project without the stop gate; longer would
-// let yesterday's abandoned session keep one for another day.
-const sessionStale = 12 * time.Hour
+// A day, because the two errors are not the same size. Too long leaves a
+// junction standing, and that costs nothing: it occupies no disk, `link` skips
+// it at the next session start as already there, and `sweep` takes it out once
+// the worktree is gone -- the same state `link` deliberately creates. Too
+// short takes it out from under a live session or an open Godot editor reading
+// 4.2 GB through it. A working day is also the unit in which a human answers
+// "is that session still mine?".
+//
+// No number closes this hole, and this one does not either: the fix is a write
+// on the live side -- worktree-link touching the file at session start, or a
+// write from the SessionEnd side -- which is follow-up work and not this.
+const sessionStale = 24 * time.Hour
 
 // runWorktreeUnlink takes the junctions back out -- but only if this was the
 // last session on the tree.
@@ -260,14 +270,15 @@ func sweep(topology worktreetopo.Topology, mirror []string) error {
 }
 
 // standsInside says whether a configured path really lies where its spelling
-// says: every component between the orphan and the candidate itself a plain
-// directory, and none of them a link.
+// says: every component between `dir` and the candidate itself a plain
+// directory, and none of them a link. Both callers need it -- the sweep about
+// an orphaned worktree directory, unlink about a live one.
 //
-// Without this the sweep establishes "inside the orphan" by spelling alone,
-// and a path's spelling does not decide where it goes: an open with
+// Without it a caller establishes "inside `dir`" by spelling alone, and a
+// path's spelling does not decide where it goes: an open with
 // FILE_FLAG_OPEN_REPARSE_POINT keeps the *final* component from being
-// followed and nothing else, so a junction at `<orphan>/.ultraloom` makes
-// `<orphan>/.ultraloom/vendor` read and remove the reparse point of
+// followed and nothing else, so a junction at `<dir>/.ultraloom` makes
+// `<dir>/.ultraloom/vendor` read and remove the reparse point of
 // `<main>/.ultraloom/vendor` -- the pinned runtime, taken out by the very
 // mechanism that exists to put it there.
 //
@@ -280,11 +291,11 @@ func sweep(topology worktreetopo.Topology, mirror []string) error {
 // A component that cannot be stat'ed counts as not a plain directory. The safe
 // direction is to leave a candidate alone: a junction skipped costs a stale
 // directory nobody deletes, and the other way costs somebody's data.
-func standsInside(orphan, relative string) bool {
+func standsInside(dir, relative string) bool {
 	// mirrorcfg hands out cleaned, slash-separated paths, so this split has no
 	// empty component and no trailing one.
 	components := strings.Split(relative, "/")
-	path := orphan
+	path := dir
 	for _, component := range components[:len(components)-1] {
 		path = filepath.Join(path, component)
 		info, err := os.Lstat(path)

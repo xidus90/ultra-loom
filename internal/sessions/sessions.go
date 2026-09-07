@@ -1,8 +1,9 @@
 // Package sessions counts the agent sessions standing on one working tree.
 //
 // One file per session under `.ultraloom/hooks/`, which is what the Python
-// hooks already write: `session_start.py` puts one down at session start and
-// `stop.py` rewrites it on every block and every pass. Read here rather than
+// hooks already write: `session_start.py` puts one down at session start,
+// `stop.py` rewrites it on every block and every pass, and
+// `subagent_start.py` on every subagent dispatch. Read here rather than
 // through them, because the reader is a Go binary that must run in a worktree
 // where the Python runtime is exactly what is still missing.
 package sessions
@@ -23,10 +24,11 @@ const StateDir = ".ultraloom/hooks"
 
 // Others counts the sessions on `root` that are not `sessionID`.
 //
-// Nothing deletes these files today (checked on 2026-09-07: no removal
-// anywhere in src/ultraloom/hooks), so a file older than `stale` is not
-// counted. Without that, one abandoned session would hold a junction for
-// ever, and the fix for the case this whole count exists for -- a second
+// Nothing that writes these files deletes one (checked on 2026-09-07: no
+// removal anywhere in src/ultraloom/hooks; `Forget` below is the first, and it
+// reaches only the sessions that run through it), so a file older than `stale`
+// is not counted. Without that, one abandoned session would hold a junction
+// for ever, and the fix for the case this whole count exists for -- a second
 // session in the same tree -- would have broken the ordinary case instead.
 func Others(root, sessionID string, stale time.Duration) (int, error) {
 	dir := filepath.Join(root, filepath.FromSlash(StateDir))
