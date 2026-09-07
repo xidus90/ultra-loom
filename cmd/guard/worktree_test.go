@@ -8,8 +8,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xidus90/ultra-loom/internal/gitenv"
+	"github.com/xidus90/ultra-loom/internal/sessions"
 )
 
 func requireWindows(t *testing.T) {
@@ -552,6 +554,358 @@ func TestLeadsIntoReadsEverySpellingOfAStoredTarget(t *testing.T) {
 	}
 	if leadsInto(inside, filepath.Join(main, "not-there")) {
 		t.Fatal("a main checkout that is not there was accepted")
+	}
+}
+
+// writeSessionState puts down what the Python hooks write, in the shape
+// state.py's `write` writes it. The directory comes from the constant and not
+// from a second literal, which is the drift that constant exists to prevent.
+func writeSessionState(t *testing.T, worktree string, id string) string {
+	t.Helper()
+	dir := filepath.Join(worktree, filepath.FromSlash(sessions.StateDir))
+	mkdirAll(t, dir)
+	path := filepath.Join(dir, id+".json")
+	writeFile(t, path, `{"blocks":0,"snapshots":{}}`)
+	return path
+}
+
+// unlinkAs runs the subcommand the way the SessionEnd hook does: one payload on
+// stdin, and nothing else to go on.
+func unlinkAs(t *testing.T, root string, id string) (stdout, stderr *bytes.Buffer, code int) {
+	t.Helper()
+	stdout, stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	payload := bytes.NewBufferString(`{"session_id":"` + id + `"}`)
+	return stdout, stderr, runWorktreeUnlink(stdout, stderr, payload, root)
+}
+
+// linkedFixture is the state a session ends in: the configured directories put
+// in place by the same code that will take them out again.
+func linkedFixture(t *testing.T, mirror string) (main, worktree string) {
+	t.Helper()
+	requireWindows(t)
+	main, worktree = worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = ['"+mirror+"']\n")
+	mkdirAll(t, filepath.Join(main, filepath.FromSlash(mirror), "godot"))
+	if code := runWorktreeLink(&bytes.Buffer{}, &bytes.Buffer{}, worktree); code != ExitOK {
+		t.Fatal("the fixture's own link was not created")
+	}
+	return main, worktree
+}
+
+// The reason unlink counts first: CLAUDE.md documents sessions that share a
+// checkout, and .tools must not vanish under a running Godot editor.
+func TestWorktreeUnlinkKeepsTheJunctionWhileAnotherSessionHoldsIt(t *testing.T) {
+	_, worktree := linkedFixture(t, ".tools")
+	writeSessionState(t, worktree, "other")
+
+	stdout, stderr, code := unlinkAs(t, worktree, "mine")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, ".tools", "godot")); err != nil {
+		t.Fatalf("the junction was removed while another session held it: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+	}
+}
+
+// A file from a session that has long since ended must not hold the junction
+// for ever: nothing deletes those files, so the age is all there is to go on.
+func TestWorktreeUnlinkIgnoresAStaleSessionFile(t *testing.T) {
+	_, worktree := linkedFixture(t, ".tools")
+	ancient := writeSessionState(t, worktree, "ancient")
+	when := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(ancient, when, when); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := unlinkAs(t, worktree, "mine")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Lstat(filepath.Join(worktree, ".tools")); !os.IsNotExist(err) {
+		t.Fatalf("an abandoned session's file held the junction: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+	}
+}
+
+func TestWorktreeUnlinkTakesTheJunctionWhenItWasTheLastSession(t *testing.T) {
+	main, worktree := linkedFixture(t, ".tools")
+	mine := writeSessionState(t, worktree, "mine")
+
+	stdout, stderr, code := unlinkAs(t, worktree, "mine")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Lstat(filepath.Join(worktree, ".tools")); !os.IsNotExist(err) {
+		t.Fatalf("the junction survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(main, ".tools", "godot")); err != nil {
+		t.Fatalf("unlink reached through the junction: %v", err)
+	}
+	if _, err := os.Stat(mine); !os.IsNotExist(err) {
+		t.Fatalf("this session's own state file is still there: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+	}
+}
+
+// A payload without an id is not a reason to unlink somebody else's link.
+func TestWorktreeUnlinkWithoutASessionIdDoesNothing(t *testing.T) {
+	_, worktree := linkedFixture(t, ".tools")
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeUnlink(stdout, stderr, bytes.NewBufferString("{}"), worktree); code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, ".tools", "godot")); err != nil {
+		t.Fatalf("the junction was removed without an id to go on: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+	}
+}
+
+// And neither is a payload that is not a payload.
+func TestWorktreeUnlinkWithoutAReadablePayloadDoesNothing(t *testing.T) {
+	_, worktree := linkedFixture(t, ".tools")
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeUnlink(stdout, stderr, bytes.NewBufferString("not json"), worktree); code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, ".tools", "godot")); err != nil {
+		t.Fatalf("the junction was removed over an unreadable payload: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+	}
+}
+
+func TestWorktreeUnlinkInTheMainCheckoutDoesNothing(t *testing.T) {
+	main, _ := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = ['.tools']\n")
+	mkdirAll(t, filepath.Join(main, ".tools", "godot"))
+
+	stdout, stderr, code := unlinkAs(t, main, "mine")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(main, ".tools", "godot")); err != nil {
+		t.Fatalf("the main checkout's own directory was touched: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+	}
+}
+
+// The no-op cases, exit 0 and silent. This one fires at every session end in
+// every project on the machine, and a session ends in plenty of directories
+// that have nothing to do with any of this.
+func TestTheUnlinkNoOpCasesAreSilentAndSuccessful(t *testing.T) {
+	t.Run("no repository", func(t *testing.T) {
+		assertUnlinkSilentOK(t, t.TempDir())
+	})
+	t.Run("no config", func(t *testing.T) {
+		_, worktree := worktreeFixture(t)
+		assertUnlinkSilentOK(t, worktree)
+	})
+	t.Run("config without the section", func(t *testing.T) {
+		main, worktree := worktreeFixture(t)
+		writeConfig(t, main, "[verify]\nlint = \"ruff check .\"\n")
+		assertUnlinkSilentOK(t, worktree)
+	})
+}
+
+func assertUnlinkSilentOK(t *testing.T, root string) {
+	t.Helper()
+	stdout, stderr, code := unlinkAs(t, root, "mine")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+	}
+}
+
+// A real directory at a configured path was never ours: it may be this tree's
+// own build output, and `link` leaves such a path alone for the same reason.
+func TestUnlinkLeavesARealDirectoryAlone(t *testing.T) {
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = ['.tools']\n")
+	mkdirAll(t, filepath.Join(main, ".tools"))
+	own := filepath.Join(worktree, ".tools", "mine.txt")
+	mkdirAll(t, filepath.Dir(own))
+	writeFile(t, own, "mine")
+	writeSessionState(t, worktree, "mine")
+
+	assertUnlinkSilentOK(t, worktree)
+	if _, err := os.Stat(own); err != nil {
+		t.Fatalf("unlink removed a real directory: %v", err)
+	}
+}
+
+// A junction pointing somewhere else is somebody's own arrangement, exactly as
+// it is for the sweep. Being a reparse point at a configured path is not
+// enough to make it ours.
+func TestUnlinkLeavesAJunctionPointingElsewhereAlone(t *testing.T) {
+	requireWindows(t)
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = ['.tools']\n")
+	mkdirAll(t, filepath.Join(main, ".tools"))
+	mklink(t, filepath.Join(worktree, ".tools"), t.TempDir())
+	writeSessionState(t, worktree, "mine")
+
+	assertUnlinkSilentOK(t, worktree)
+	if _, err := os.Lstat(filepath.Join(worktree, ".tools")); err != nil {
+		t.Fatalf("a junction into another directory was removed: %v", err)
+	}
+}
+
+// The other side of the containment check: a nested configured path whose
+// intermediate directories are real is still unlinked. Without this, a check
+// that skipped one component too many would stop taking `.ultraloom/vendor`
+// out and nothing would say so.
+func TestUnlinkReachesANestedPathThroughRealDirectories(t *testing.T) {
+	requireWindows(t)
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = ['.ultraloom/vendor']\n")
+	mkdirAll(t, filepath.Join(main, ".ultraloom", "vendor", "ultraloom"))
+	// A real directory, so that the junction lands in the worktree and the
+	// state file below it does too.
+	mkdirAll(t, filepath.Join(worktree, ".ultraloom"))
+	if code := runWorktreeLink(&bytes.Buffer{}, &bytes.Buffer{}, worktree); code != ExitOK {
+		t.Fatal("the fixture's own link was not created")
+	}
+	writeSessionState(t, worktree, "mine")
+
+	assertUnlinkSilentOK(t, worktree)
+	if _, err := os.Lstat(filepath.Join(worktree, ".ultraloom", "vendor")); !os.IsNotExist(err) {
+		t.Fatalf("the nested junction survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(main, ".ultraloom", "vendor", "ultraloom")); err != nil {
+		t.Fatalf("unlink reached through the junction: %v", err)
+	}
+}
+
+// The same exposure the sweep had: Windows opens the final component of a path
+// with FILE_FLAG_OPEN_REPARSE_POINT and follows every earlier one, so
+// `<worktree>/.ultraloom/vendor` with a junction at `<worktree>/.ultraloom`
+// reads the reparse point of `<main>/.ultraloom/vendor`. Without the
+// containment check that junction satisfies both conditions unlink asks about
+// -- a link leading into the main checkout -- and session end would take the
+// pinned runtime every other ultraloom hook needs out of the main checkout.
+//
+// No state file here: writing one would land in the main checkout's hooks
+// directory through that very junction.
+func TestUnlinkDoesNotReachThroughAnIntermediateLink(t *testing.T) {
+	requireWindows(t)
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = ['.ultraloom/vendor']\n")
+
+	// The main checkout's own mirror path is a junction here as well, which is
+	// what makes it look like a candidate once an earlier component leads to it.
+	runtimeDir := filepath.Join(main, "runtime")
+	mkdirAll(t, runtimeDir)
+	mainVendor := filepath.Join(main, ".ultraloom", "vendor")
+	mklink(t, mainVendor, runtimeDir)
+	mklink(t, filepath.Join(worktree, ".ultraloom"), filepath.Join(main, ".ultraloom"))
+
+	assertUnlinkSilentOK(t, worktree)
+	if _, err := os.Lstat(mainVendor); err != nil {
+		t.Fatalf("the main checkout's own junction was removed: %v", err)
+	}
+	if _, err := os.Stat(runtimeDir); err != nil {
+		t.Fatalf("what the main checkout's junction pointed at is gone: %v", err)
+	}
+}
+
+// Damage is a failure here too: read as "nothing to mirror", a broken config
+// would switch the mechanism off without a word.
+func TestUnlinkReportsABrokenConfig(t *testing.T) {
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree\n")
+
+	_, stderr, code := unlinkAs(t, worktree, "mine")
+	if code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "worktree-unlink") {
+		t.Fatalf("stderr = %q, want the subcommand's name in it", stderr)
+	}
+}
+
+// A state file that is there and will not go must not read as "nobody else is
+// here": the file would then count as somebody else's on the next run, and the
+// junction would stay for ever. A directory with something in it is the
+// portable way to make os.Remove refuse.
+func TestUnlinkReportsAStateFileItCannotRemove(t *testing.T) {
+	_, worktree := linkedFixture(t, ".tools")
+	busy := filepath.Join(worktree, filepath.FromSlash(sessions.StateDir), "mine.json")
+	mkdirAll(t, busy)
+	writeFile(t, filepath.Join(busy, "inside"), "x")
+
+	_, stderr, code := unlinkAs(t, worktree, "mine")
+	if code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("a failure said nothing")
+	}
+}
+
+// A count that could not be taken is not a count of zero. Measured on
+// 2026-09-07: under this deny os.Remove of an absent child still answers
+// IsNotExist -- so Forget passes -- and os.ReadDir answers access denied.
+func TestUnlinkReportsAStateDirectoryItCannotRead(t *testing.T) {
+	_, worktree := linkedFixture(t, ".tools")
+	hooks := filepath.Join(worktree, filepath.FromSlash(sessions.StateDir))
+	mkdirAll(t, hooks)
+	// RD: reading the entries of the directory the count walks.
+	denyRight(t, hooks, "RD")
+
+	_, stderr, code := unlinkAs(t, worktree, "mine")
+	if code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("a failure said nothing")
+	}
+}
+
+// A candidate unlink cannot even look at is a failure and not a skip, for the
+// sweep's reason: it must not go quiet about a path it could not decide. `?` is
+// legal in a configured path and illegal in a Windows filename.
+func TestUnlinkReportsAPathItCannotInspect(t *testing.T) {
+	requireWindows(t)
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = ['bad?name']\n")
+	writeSessionState(t, worktree, "mine")
+
+	_, stderr, code := unlinkAs(t, worktree, "mine")
+	if code != ExitInternal {
+		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("a failure said nothing")
+	}
+}
+
+func TestCliDispatchesWorktreeUnlink(t *testing.T) {
+	var stderr bytes.Buffer
+	payload := strings.NewReader(`{"session_id":"mine"}`)
+	if code := cli([]string{"worktree-unlink", "--root", t.TempDir()}, payload, &stderr); code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want silence", &stderr)
+	}
+	if code := cli([]string{"worktree-unlink", "--invalid-flag"}, payload, &stderr); code != ExitInternal {
+		t.Fatalf("exit = %d on an invalid flag, want ExitInternal", code)
 	}
 }
 

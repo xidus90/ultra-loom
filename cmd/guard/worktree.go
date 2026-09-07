@@ -2,14 +2,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/xidus90/ultra-loom/internal/junction"
 	"github.com/xidus90/ultra-loom/internal/mirrorcfg"
+	"github.com/xidus90/ultra-loom/internal/sessions"
 	"github.com/xidus90/ultra-loom/internal/worktreetopo"
 )
 
@@ -64,6 +67,113 @@ func runWorktreeLink(stdout, stderr io.Writer, root string) int {
 		code = ExitInternal
 	}
 	return code
+}
+
+// How long a session's state file counts for. Nothing deletes these files, so
+// the mtime is the only liveness there is to read, and it is only as good as
+// the writes: session_start.py writes the file at session start and stop.py
+// rewrites it on every block and every pass, so in a project with the stop
+// gate switched on the file is as young as the last turn that ended, and in
+// one without it as old as the session itself.
+//
+// Twelve hours is the trade that follows. Shorter would take a junction out
+// from under a long session in a project without the stop gate; longer would
+// let yesterday's abandoned session keep one for another day.
+const sessionStale = 12 * time.Hour
+
+// runWorktreeUnlink takes the junctions back out -- but only if this was the
+// last session on the tree.
+//
+// CLAUDE.md documents sessions that share a checkout. Unlinking
+// unconditionally would pull `.tools` out from under a session still running,
+// or under an open Godot editor, and the 4.2 GB behind it is exactly what that
+// editor is reading from.
+//
+// stdout is taken and not written to, for worktree-link's reason: every answer
+// this subcommand has is either silence or a fault.
+func runWorktreeUnlink(stdout, stderr io.Writer, stdin io.Reader, root string) int {
+	var payload struct {
+		SessionID string `json:"session_id"`
+	}
+	// A payload we cannot read is not a reason to remove anything: without an
+	// id there is no way to tell our own state file from somebody else's, so
+	// the count would always say "somebody else is here" -- and Forget would
+	// have nothing to remove.
+	if err := json.NewDecoder(stdin).Decode(&payload); err != nil || payload.SessionID == "" {
+		return ExitOK
+	}
+
+	topology, err := worktreetopo.Read(root)
+	if err != nil {
+		// Nothing to do, and the same collapse worktree-link makes: Read wraps
+		// ErrNoRepository around each of its two error returns, so telling them
+		// apart here would be a branch nothing can enter.
+		return ExitOK
+	}
+	if !topology.IsWorktree(root) {
+		return ExitOK
+	}
+	mirror, err := mirrorcfg.Mirror(topology.Main)
+	if err != nil {
+		fmt.Fprintf(stderr, "ultraloom-guard worktree-unlink: %v\n", err)
+		return ExitInternal
+	}
+	if len(mirror) == 0 {
+		return ExitOK
+	}
+
+	// Our own file goes before the count and before the early return below: it
+	// has to be gone whether or not this was the last session, or the next run
+	// finds it and reads a session that has ended as one still standing.
+	if err := sessions.Forget(root, payload.SessionID); err != nil {
+		fmt.Fprintf(stderr, "ultraloom-guard worktree-unlink: %v\n", err)
+		return ExitInternal
+	}
+	others, err := sessions.Others(root, payload.SessionID, sessionStale)
+	if err != nil {
+		fmt.Fprintf(stderr, "ultraloom-guard worktree-unlink: %v\n", err)
+		return ExitInternal
+	}
+	if others > 0 {
+		return ExitOK
+	}
+	if err := unlink(root, topology.Main, mirror); err != nil {
+		fmt.Fprintf(stderr, "ultraloom-guard worktree-unlink: %v\n", err)
+		return ExitInternal
+	}
+	return ExitOK
+}
+
+// unlink removes the configured junctions from one worktree.
+//
+// A configured path that is a real directory is left alone: it was never ours.
+// The target is checked as well -- a junction pointing somewhere else is
+// somebody's own arrangement, and removing it would be the same overreach as
+// removing a real directory.
+//
+// standsInside first, for the reason written at that function: without it the
+// candidate is inside the worktree by spelling only, and a junction at
+// `<worktree>/.ultraloom` would make this remove the main checkout's own
+// `.ultraloom/vendor` -- the pinned runtime every other hook needs, taken out
+// at session end by the mechanism that exists to put it there.
+func unlink(worktree, main string, mirror []string) error {
+	for _, relative := range mirror {
+		if !standsInside(worktree, relative) {
+			continue
+		}
+		path := filepath.Join(worktree, filepath.FromSlash(relative))
+		target, err := junction.Target(path)
+		if err != nil {
+			return err
+		}
+		if target == "" || !leadsInto(target, main) {
+			continue
+		}
+		if err := junction.Remove(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // link makes every configured path in `worktree` lead into `main`.

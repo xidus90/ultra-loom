@@ -42,6 +42,16 @@ func cli(args []string, stdin io.Reader, stderr io.Writer) int {
 		return runWorktreeLink(os.Stdout, stderr, *root)
 	}
 
+	if len(args) > 0 && args[0] == "worktree-unlink" {
+		flags := flag.NewFlagSet("ultraloom-guard worktree-unlink", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		root := flags.String("root", ".", "path to the project root")
+		if err := flags.Parse(args[1:]); err != nil {
+			return ExitInternal
+		}
+		return runWorktreeUnlink(os.Stdout, stderr, stdin, *root)
+	}
+
 	flags := flag.NewFlagSet("ultraloom-guard", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	root := flags.String("root", ".", "path to the project root")
