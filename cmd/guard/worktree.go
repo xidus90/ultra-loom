@@ -14,10 +14,12 @@ import (
 )
 
 // The two prefixes a stored reparse target can start with. `\??\` is the NT
-// object-manager form every junction here carries; `\\?\` is the
-// extended-length form a tool may store instead. Neither is part of the path a
-// Go call opens, and neither identifies anything -- the reparse tag does that,
-// and junction.Target has already checked it.
+// object-manager form, and it is the only one measured here: on 2026-09-07
+// both junction.Create and `mklink /J` stored it. `\\?\` is taken off as well
+// because the two forms are written the same way round and stripping a prefix
+// that never appears costs nothing -- not because anything here was seen to
+// store it. Neither is part of a path a Go call opens, and neither identifies
+// anything: the reparse tag does that, and junction.Target has checked it.
 var ntPrefixes = []string{`\??\`, `\\?\`}
 
 // runWorktreeLink puts the configured directories in place and sweeps what is
