@@ -59,6 +59,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TypeGuard, cast
 
+from ultraloom.gitenv import without_location
+
 # The whole budget for everything that happens after the command's own time is
 # up: killing the tree, reaping the child, and letting the readers finish. One
 # deadline shared by all of them, not one grace period each -- what a caller is
@@ -312,8 +314,17 @@ def child_env(
     On Windows, known toolchain install directories (like Go) are appended to
     PATH if present on disk and not already in PATH, so that gates running in
     subshells with minimal PATH can still reach installed compilers.
+
+    Git's repository pointers are removed for the same kind of reason as the
+    encoding is forced: an inherited value here is not a preference but a
+    mistake waiting to happen. Every check ultraloom runs may be started from
+    `.githooks/pre-commit`, and git hands a hook GIT_DIR -- so a check that
+    builds a scratch repository would be answered about the repository being
+    committed. Measured on 2026-09-07, out of a worktree, where GIT_DIR is
+    absolute: three tests in cmd/init failed inside the hook and passed
+    outside it. See `ultraloom.gitenv`.
     """
-    env = {**parent, "PYTHONIOENCODING": "utf-8"}
+    env = without_location(parent) | {"PYTHONIOENCODING": "utf-8"}
     if platform == "win32":
         path_var = env.get("PATH", "")
         existing = {os.path.normcase(p.strip()) for p in path_var.split(os.pathsep) if p.strip()}

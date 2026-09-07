@@ -18,6 +18,8 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/xidus90/ultra-loom/internal/gitenv"
+
 	"github.com/xidus90/ultra-loom/internal/detect"
 )
 
@@ -166,9 +168,15 @@ func gather(root string, run detect.Runner) (detect.Facts, error) {
 //
 // An exit status of 1 with nothing printed is git's way of saying a setting is
 // unset; that is an answer, not a failure, and it becomes an empty string.
+//
+// `dir` is not enough to say which repository the answer is about: GIT_DIR and
+// its relatives outrank it, and git exports them to every hook it runs -- so
+// this program run from a hook would report facts about the repository being
+// committed rather than about the project it was pointed at. See gitenv.
 func git(dir string, argv ...string) (string, error) {
 	command := exec.Command(argv[0], argv[1:]...)
 	command.Dir = dir
+	command.Env = gitenv.Environ()
 	out, err := command.Output()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == 1 && len(out) == 0 {

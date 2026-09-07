@@ -12,8 +12,11 @@ flows, exit codes or runs, so `ultraloom check` may import it (spec 15.2).
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+
+from ultraloom.gitenv import without_location
 
 # Where a run keeps its journal and its marker. Defined here and not in the CLI
 # that writes them: this module has to know what to leave out of its answer, and
@@ -150,12 +153,26 @@ def head_commit(root: Path) -> str:
     return _git(root, "rev-parse", "HEAD").strip()
 
 
+def _git_env() -> dict[str, str]:
+    """The environment a git call here runs in: ours, minus git's own pointers.
+
+    `cwd` is not the last word on which repository git answers about --
+    GIT_DIR and its relatives outrank it, and git exports them to every hook
+    it runs. So a gate started from `.githooks/pre-commit` would be answered
+    about the repository being committed, whatever `root` says. That arrives
+    as a perfectly successful call with the wrong content, which is the one
+    shape of wrongness this module is built to refuse.
+    """
+    return without_location(os.environ)
+
+
 def _run(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     """One git call below `root`, for the callers that read the return code."""
     try:
         return subprocess.run(
             ("git", *arguments),
             cwd=root,
+            env=_git_env(),
             capture_output=True,
             text=True,
             encoding="utf-8",

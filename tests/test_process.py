@@ -786,6 +786,58 @@ def test_child_env_ignores_missing_windows_toolchains(tmp_path: Path) -> None:
     assert env["PATH"] == r"C:\Windows\System32"
 
 
+def test_child_env_drops_gits_repository_pointers() -> None:
+    """Measured on 2026-09-07: git's own variables reached `go test` and broke it.
+
+    Git exports GIT_DIR and its relatives to every hook it runs, and they name
+    the repository whose hook is running -- not the directory a child is told
+    to work in. `.githooks/pre-commit` therefore handed `go test` a pointer to
+    the repository being committed, and three tests in cmd/init that build a
+    scratch repository with `git init` in a temp directory saw that one
+    instead: `git rev-parse --absurd-flag` came back as a success, and reading
+    an unset setting answered `.githooks`.
+
+    In the main checkout GIT_DIR is the relative `.git`, which resolves inside
+    the scratch repository by luck and hides the whole effect. Out of a
+    worktree it is absolute, and the luck runs out.
+    """
+    env = child_env(
+        {
+            "PATH": "/usr/bin",
+            "GIT_DIR": "/repo/.git/worktrees/feature",
+            "GIT_WORK_TREE": "/repo",
+            "GIT_INDEX_FILE": "/repo/.git/index",
+            "GIT_COMMON_DIR": "/repo/.git",
+            "GIT_PREFIX": "sub/dir/",
+            "GIT_OBJECT_DIRECTORY": "/repo/.git/objects",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": "/other/.git/objects",
+        },
+        platform="linux",
+    )
+    assert env["PATH"] == "/usr/bin"
+    for name in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_PREFIX",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        assert name not in env, name
+
+
+def test_child_env_keeps_gits_other_variables() -> None:
+    """Only what redirects git at a repository goes; the rest is the user's."""
+    env = child_env(
+        {"GIT_AUTHOR_NAME": "Someone", "GIT_EDITOR": "vi", "GIT_TERMINAL_PROMPT": "0"},
+        platform="linux",
+    )
+    assert env["GIT_AUTHOR_NAME"] == "Someone"
+    assert env["GIT_EDITOR"] == "vi"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+
 def test_a_child_may_print_a_character_the_locale_cannot(tmp_path: Path) -> None:
     """The measured failure: ruff wrote an umlaut and died on the console codec."""
     completed = run(_python("print('✓ für')"), cwd=tmp_path, timeout=30)

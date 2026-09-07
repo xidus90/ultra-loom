@@ -376,3 +376,29 @@ def test_changed_since_refuses_a_base_git_does_not_know(tmp_path: Path) -> None:
 
     with pytest.raises(WorktreeError):
         changed_since(repo, "0" * 40)
+
+
+def test_an_inherited_git_dir_does_not_redirect_the_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git's own variables outrank `cwd`, and a hook hands them down.
+
+    Measured on 2026-09-07: `.githooks/pre-commit` runs the gates with GIT_DIR
+    set, so every git call below here would answer about the repository being
+    committed rather than about `root`. Read as "nothing changed", that is the
+    one answer this module exists to refuse -- and it would arrive with no
+    error at all.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    subprocess.run(("git", "init", "-q"), cwd=elsewhere, check=True)
+
+    root = tmp_path / "root"
+    root.mkdir()
+    subprocess.run(("git", "init", "-q"), cwd=root, check=True)
+    (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(elsewhere))
+
+    assert changed_files(root) == ("a.py",)

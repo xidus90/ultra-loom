@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/xidus90/ultra-loom/internal/detect"
+	"github.com/xidus90/ultra-loom/internal/gitenv"
 )
 
 // The version is the one thing a user can ask for before anything is
@@ -172,10 +173,15 @@ func requireGit(t *testing.T) {
 	}
 }
 
+// run3 builds the fixtures, so it needs the same clean environment the code
+// under test uses: a leaked GIT_DIR would send `git init` and `git config`
+// into the repository whose hook is running, and the test would then measure
+// against a scratch repository nothing was ever written to.
 func run3(t *testing.T, dir string, argv ...string) {
 	t.Helper()
 	command := exec.Command(argv[0], argv[1:]...)
 	command.Dir = dir
+	command.Env = gitenv.Environ()
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("%s: %v (%s)", strings.Join(argv, " "), err, out)
 	}
@@ -343,5 +349,33 @@ func TestGatherWithWikiMode(t *testing.T) {
 	}
 	if facts.WikiMode != "brain" {
 		t.Fatalf("expected WikiMode=brain, got %q", facts.WikiMode)
+	}
+}
+
+// The measured failure of 2026-09-07: three tests above passed outside
+// `.githooks/pre-commit` and failed inside it, out of a worktree. Git exports
+// GIT_DIR to every hook, absolute in a worktree, and it outranks the working
+// directory -- so a scratch repository built in a temp directory was answered
+// about the repository being committed. Here the variable is set on purpose,
+// so the case is checked rather than depending on where the suite is run.
+func TestAnInheritedGitDirDoesNotRedirectTheAnswer(t *testing.T) {
+	requireGit(t)
+	elsewhere := t.TempDir()
+	run3(t, elsewhere, "git", "init")
+	run3(t, elsewhere, "git", "config", "core.hooksPath", ".elsewhere-hooks")
+
+	root := t.TempDir()
+	run3(t, root, "git", "init")
+	run3(t, root, "git", "config", "core.hooksPath", ".githooks")
+
+	t.Setenv("GIT_DIR", filepath.Join(elsewhere, ".git"))
+	t.Setenv("GIT_WORK_TREE", elsewhere)
+
+	got, err := git(root, "git", "config", "--get", "core.hooksPath")
+	if err != nil {
+		t.Fatalf("git: %v", err)
+	}
+	if strings.TrimSpace(got) != ".githooks" {
+		t.Fatalf("hooks path = %q, want .githooks", strings.TrimSpace(got))
 	}
 }
