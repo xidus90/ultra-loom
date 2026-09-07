@@ -35,7 +35,7 @@ und verwaiste Junctions einsammelt.
 
 Semantisch spricht für `ulinit`, dass eine Laufzeit in Position zu bringen
 Installationsarbeit ist (`internal/vendoring`). Operativ spricht dagegen, dass
-`cmd/init/main.go:35` nur `args[0] == "check"` abzweigt und **alles andere in
+`cmd/init/main.go:37` nur `args[0] == "check"` abzweigt und **alles andere in
 den interaktiven Installer** fallen lässt (`internal/interview`, `x/term`). Ein
 Binary, dessen Standardpfad ein Interview ist, darf nicht an einem globalen
 `SessionStart` hängen: ein Tippfehler im Hook-Eintrag hängt dann jeden
@@ -66,8 +66,14 @@ dieselbe Auskunft und nützte außerhalb von Claude Code nichts.
 
 `.ultraloom/vendor` ist Vorgabe und nicht Kür: ohne diesen Eintrag läuft in
 einem frischen Worktree kein ultraloom-Hook, und kein Python-Hook könnte sich
-diesen Zustand selbst herausbootstrappen. Fehlt der Abschnitt, ist jedes
-Kommando ein No-op mit Exit 0.
+diesen Zustand selbst herausbootstrappen.
+
+Drei Fälle enden mit Exit 0 und ohne Ausgabe, und alle drei muss der globale
+SessionStart treffen: `.ultraloom/config.toml` fehlt, sie ist da und hat keinen
+`[worktree]`-Abschnitt, oder das Verzeichnis liegt in keinem Git-Repository.
+Ein Hook, der in jedem fremden Projekt feuert, darf keinen davon als Fehler
+melden — was ein Fehler ist, ist eine Junction, die angelegt werden sollte und
+nicht angelegt werden konnte.
 
 Der Python-Loader stört nicht: `load_config` liest ausschließlich `[verify]`,
 `[agent]` und `[exec]` (`src/ultraloom/config.py:140-142`) und ignoriert eine
