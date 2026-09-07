@@ -2353,7 +2353,7 @@ Expected: FAIL — `undefined: runWorktreeRemove`.
 // runWorktreeRemove is the safe way to get rid of a worktree.
 //
 // `git worktree remove --force` deregisters the tree, leaves the junction
-// standing and exits 0 -- measured on 2026-09-07 and three times since. The
+// standing and exits 0 -- measured four times on 2026-09-07. The
 // directory then looks like a worktree to nobody and like rubbish to
 // everybody. So the junctions come out first, and git is asked afterwards.
 // (That `bash rm -rf` refuses to finish it off does not reproduce -- K19.)

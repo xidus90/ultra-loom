@@ -118,11 +118,10 @@ alles Gitignorierte fehlt. Eine zweite Datei oder ein Schlüssel in
 `.claude/settings.json` wäre eine zweite Quelle für dieselbe Auskunft, müsste
 selbst gespiegelt werden und nützte allem, was nicht Claude Code ist, nichts.
 
-Dass sie aus dem *Haupt-Checkout* gelesen wird und nicht aus dem
-Arbeitsverzeichnis, folgt aus demselben Argument: die Kopie im frischen
-Worktree ist da, aber die Erklärung ist eine Eigenschaft des Projekts, und der
-Haupt-Checkout ist das eine Verzeichnis, das alle drei Subkommandos ohnehin
-kennen müssen.
+Alle drei Subkommandos lesen sie aus dem *Haupt-Checkout* und nicht aus dem
+Arbeitsverzeichnis — jeweils `mirrorcfg.Mirror(topology.Main)`. Die Kopie im
+frischen Worktree liegt auch da; welche der beiden gefragt wird, begründet der
+Code an keiner Stelle.
 
 Drei Arten, nichts zu tun zu haben, enden alle mit Exit 0 und ohne Ausgabe:
 keine `config.toml`, eine ohne `[worktree]`, und eine mit leerem `mirror`
@@ -180,9 +179,9 @@ hineinliefe.
 
 ## Warum `git worktree remove` einen Wrapper braucht
 
-Viermal gemessen am 2026-09-07 — zweimal von Hand in Wegwerf-Fixtures, zweimal
-aus einem Test in Task 3 und Task 6 — tut `git worktree remove --force` auf
-einem Worktree mit Junction darin Folgendes:
+Viermal gemessen am 2026-09-07, jeder Lauf im Ledger dieses Zweigs
+festgehalten, tut `git worktree remove --force` auf einem Worktree mit
+Junction darin Folgendes:
 
 - Exit 0,
 - keine Ausgabe,
@@ -347,9 +346,10 @@ Vorschlag, der an dessen Eigentümer geht:
 
 Zwei Dinge daran sind ungemessen und als offen zu lesen. Erstens ist **nicht**
 beobachtet, dass ein `SessionEnd`-Ereignis hier tatsächlich bei
-`worktree-unlink` ankommt. Das Ereignis existiert — die Zeichenkette steht im
-gebündelten `claude.exe` neben `SessionStart` und `SubagentStop` —, was zeigt,
-dass es existiert, und nicht, dass es ankommt. Kommt es nicht an, ist
+`worktree-unlink` ankommt. Der Name steckt im Produkt — im gebündelten
+`claude.exe` am 2026-09-08 ausgezählt kommt die Zeichenkette 36-mal vor, neben
+`SessionStart` mit 95 und `SubagentStop` mit 55 —, was zeigt, dass es das
+Ereignis gibt, und nicht, dass es hier ankommt. Kommt es nicht an, ist
 `worktree-unlink` nicht wertlos, aber es verliert seinen Aufhänger, und der
 Sweep in `worktree-link` sowie `worktree-remove` sind dann die einzigen zwei
 Aufräumwege. Zweitens ist das Timeout von 20 s geraten: die Zeiten in
@@ -357,6 +357,7 @@ Aufräumwege. Zweitens ist das Timeout von 20 s geraten: die Zeiten in
 
 Was später zu einem dieser Ereignisse hinzukommt, gehört in **denselben**
 Eintrag, wo es Zustand teilt: mehrere Einträge zu einem Ereignis starten
-gleichzeitig und nicht hintereinander. Keines dieser Subkommandos führt einen
-Zähler, das ist also eine Warnung für die nächste Ergänzung und kein aktuelles
-Problem.
+gleichzeitig und nicht hintereinander. Was diese Gleichzeitigkeit für den
+eigenen Python-`SessionStart`-Hook eines Projekts bedeutet, der das
+`.ultraloom/vendor` braucht, das `worktree-link` gerade erst anlegt, ist
+ungemessen.

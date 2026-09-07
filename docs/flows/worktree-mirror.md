@@ -115,10 +115,10 @@ missing. A second file, or a key in `.claude/settings.json`, would be a second
 source for the same answer, would have to be mirrored itself, and would be
 useless to anything that is not Claude Code.
 
-Reading it out of the *main checkout* rather than out of the working directory
-follows from the same argument: the copy in a fresh worktree is there, but the
-declaration is a property of the project, and the main checkout is the one
-directory all three subcommands already have to know.
+All three subcommands read it out of the *main checkout* and not out of the
+working directory — `mirrorcfg.Mirror(topology.Main)` in each. The copy in a
+fresh worktree is there too; which of the two is asked is not a question the
+code answers in a comment.
 
 Three ways of having nothing to do are all exit 0 and silent — no
 `config.toml`, one without `[worktree]`, and one whose `mirror` is empty
@@ -176,9 +176,8 @@ the point, and the second is the call that would walk into somebody else's
 
 ## Why `git worktree remove` needs a wrapper
 
-Measured four times on 2026-09-07 — by hand in throwaway fixtures and from
-`t.TempDir()` tests during Tasks 3 and 6 — `git worktree remove --force` on a
-worktree holding a junction
+Measured four times on 2026-09-07, each run recorded in the branch's ledger:
+`git worktree remove --force` on a worktree holding a junction
 
 - exits 0,
 - prints nothing,
@@ -337,14 +336,16 @@ to its owner:
 
 Two things about this are unmeasured and should be read as open. First, that a
 `SessionEnd` event actually reaches `worktree-unlink` here has **not** been
-observed. The event exists — the string sits in the bundled `claude.exe` beside
-`SessionStart` and `SubagentStop` — which shows that it exists and not that it
-arrives. If it does not, `worktree-unlink` is not worthless, but it loses its
+observed. The name is in the product — counted in the bundled `claude.exe` on
+2026-09-08, the string occurs 36 times, beside `SessionStart` at 95 and
+`SubagentStop` at 55 — which shows the event exists and not that it arrives
+here. If it does not, `worktree-unlink` is not worthless, but it loses its
 trigger, and the sweep inside `worktree-link` plus `worktree-remove` are then
 the only two cleanup paths. Second, the 20 s timeout is a guess: the durations
 in `session-hooks.md` were measured, these two were not.
 
 Whatever gets added to one of these events later belongs in the **same** entry
 where it shares state: several entries for one event start concurrently, not
-one after another. Neither of these subcommands keeps a counter, so that is a
-caution for the next addition rather than a live problem.
+one after another. What that concurrency means for a project's own Python
+`SessionStart` hook, which needs the `.ultraloom/vendor` that `worktree-link`
+is at that moment creating, is unmeasured.
