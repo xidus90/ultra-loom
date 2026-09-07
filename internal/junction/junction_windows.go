@@ -50,9 +50,13 @@ func Create(link, target string) error {
 }
 
 func setMountPoint(link, target string) error {
-	// The NT form, which is what a reparse point stores: `\??\C:\dir`. The
-	// trailing separator matters to some consumers of a mount point, and
-	// costs nothing here.
+	// The NT form, which is what a reparse point stores -- with the trailing
+	// separator, so `\??\C:\dir\`. Windows itself does not insist: measured on
+	// 2026-09-07, `mklink /J` stores `\??\C:\dir` without one and that resolves
+	// too, so this is a choice and not a requirement. It is kept because the
+	// round-trip test proves this form works and because a stored target that
+	// ends in a separator cannot be mistaken for a file; `Target` says in turn
+	// that no caller may compare on it.
 	substitute, err := windows.UTF16FromString(`\??\` + target + `\`)
 	if err != nil {
 		return fmt.Errorf("encoding the target %s: %w", target, err)
@@ -116,10 +120,17 @@ func setMountPoint(link, target string) error {
 // reparseTarget reads back what `setMountPoint` wrote, and answers "" for
 // everything that is not a mount point.
 //
-// The symmetry with the write side is the reason this parses the buffer by
-// hand: x/sys carries a `MountPointReparseBuffer` type, but reaching it from a
-// byte slice needs an `unsafe` cast, and one set of offsets that must agree
-// with the kernel is easier to keep honest than two spellings of them.
+// The buffer is parsed by hand because x/sys gives no way not to. Checked in
+// v0.18.0, the version this module pins: it carries the tag and the ioctl, and
+// it does carry the layout -- `mountPointReparseBuffer` and
+// `reparseDataBuffer` in `windows/types_windows.go` -- but all of it
+// unexported, so none of it can be named from here. Writing and reading the
+// same offsets in one file is then the next best thing: the two sides move
+// together or not at all.
+//
+// Those types do confirm the arithmetic, which is worth more than reusing them
+// would have been: tag, length and reserved make 8, the four name fields
+// another 8, and `PathBuffer` follows -- the 16 of `mountPointHeaderSize`.
 func reparseTarget(link string) (string, error) {
 	path, err := windows.UTF16PtrFromString(link)
 	if err != nil {

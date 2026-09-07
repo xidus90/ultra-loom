@@ -23,16 +23,22 @@ var ErrUnsupported = errors.New("junctions exist only on windows")
 // empty answer with no error: the sweep asks this about every candidate it
 // scans, and neither case is a fault. Anything else is a fault and says so.
 //
-// The answer is the target as Windows stores it, `\??\C:\dir\` and not the
-// path a caller could open. Two reasons, and neither is that the prefix
-// identifies anything -- the tag does that, and this checks the tag. First,
-// the stored substitute name is what the kernel actually resolves; the print
-// name beside it in the same buffer is decoration a tool may set to anything.
-// Second, turning it into something openable means deciding what that is --
-// trailing separator, short names, volume GUID -- and that decision belongs to
-// the one caller comparing paths, in one place, not to this package.
+// The answer is the target as Windows stores it, `\??\C:\dir` or `\??\C:\dir\`
+// -- and not the path a caller could open. Two reasons, and neither is that
+// the prefix identifies anything: the tag does that, and this checks the tag.
+// First, the stored substitute name is what the kernel actually resolves; the
+// print name beside it in the same buffer is decoration a tool may set to
+// anything. Second, turning it into something openable means deciding what
+// that is, and that decision belongs to the one caller comparing paths, in one
+// place, not to this package.
 //
-// The reparse-point ioctl and not `os.Lstat` plus `os.Readlink`, measured on
+// Whether a trailing separator is there depends on who made the junction, so a
+// caller must not compare on it. Measured on 2026-09-07: `mklink /J` stores
+// `\??\C:\dir` without one, `Create` below stores `\??\C:\dir\` with one, and
+// both resolve. The hand-made links this package inherits came from the former.
+//
+// The ioctl below and not Lstat's mode bits plus `os.Readlink` -- the Lstat
+// call kept here answers only "is there anything at all". Measured on
 // 2026-09-07 with go1.27.0 windows/amd64: by default Lstat reports a junction
 // as `Lrw-rw-rw-` and Readlink answers it, but under
 // `GODEBUG=winsymlink=1,winreadlinkvolume=1` the mode is `?rw-rw-rw-`
@@ -42,7 +48,8 @@ var ErrUnsupported = errors.New("junctions exist only on windows")
 // real junction, which is not an error a caller could notice. Bumping this
 // module's `go 1.22` line would silently turn the sweep blind. Widening the
 // test to ModeIrregular is no answer either: the bit covers every other
-// reparse tag as well, and Readlink has no answer for most of them.
+// reparse tag as well, and what Readlink makes of those was not measured here
+// -- which is reason enough not to route the sweep through it.
 func Target(link string) (string, error) {
 	if _, err := os.Lstat(link); err != nil {
 		if os.IsNotExist(err) {
