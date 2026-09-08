@@ -55,7 +55,7 @@ flowchart TD
     cfg -->|"absent, or no mirror"| silent
     cfg -->|"unreadable or broken"| loud["exit 1, named on stderr"]
     cfg --> wt{"does git hold DIR<br/>as a worktree?"}
-    wt -->|"yes"| link["for each configured path:<br/>a directory in MAIN,<br/>nothing here yet<br/>-> junction"]
+    wt -->|"yes"| link["for each configured path:<br/>a directory in MAIN,<br/>nothing here yet,<br/>no link on the way<br/>-> junction"]
     wt -->|"no, DIR is the main checkout"| sweep
     link --> sweep["sweep: in each directory git<br/>no longer holds as a worktree,<br/>remove the junctions that are ours"]
     sweep --> verdict{"did either step fail?"}
@@ -195,7 +195,7 @@ Haupt-Checkout darin, als Erfolg gemeldet.
 
 `worktree-remove` ist diese Reihenfolge richtiggestellt — erst lösen, dann Git
 fragen — plus zwei Verweigerungen davor und eine Prüfung danach
-(`cmd/guard/worktree.go:181-239`):
+(`cmd/guard/worktree.go:181-244`):
 
 1. Der **Haupt-Checkout** wird als Erstes und aus eigenem Recht verweigert. Ein
    Wrapper, dessen schlimmster Ausgang das Löschen des Repositorys ist, sagt zu
@@ -282,7 +282,7 @@ hängt daran, wer die Junction gelegt hat. Gemessen am 2026-09-07: das
 `junction.Create` dieses Projekts speichert `\??\C:\dir\` **mit** abschließendem
 Trenner, `mklink /J` speichert `\??\C:\dir` **ohne**, und beides löst auf
 (`internal/junction/junction.go:35-38`,
-`internal/junction/junction_windows.go:52-59`). Windows verlangt keine der
+`internal/junction/junction_windows.go:55-62`). Windows verlangt keine der
 beiden Formen, der Trenner hier ist also eine Wahl und keine Vorschrift — und
 er wird absichtlich nicht an `mklink` angeglichen, denn die von Hand gelegten
 Links, die dieser Mechanismus erbt, kommen von `mklink`, und beide Formen
@@ -291,7 +291,7 @@ müssen ohnehin gelesen werden.
 Darum vergleicht dieser Code überall über Identität — zweimal `os.Stat` und
 `os.SameFile` — oder über Pfade, die auf **beiden** Seiten durch
 `filepath.Clean` gelaufen sind, und nie als Text. `sameDir`, `leadsInto` und
-`stripNTPrefix` (`cmd/guard/worktree.go:413-466`) sind die drei Stellen, die
+`stripNTPrefix` (`cmd/guard/worktree.go:474-527`) sind die drei Stellen, die
 diese Linie halten, und `worktreetopo` hält sie für Gits eigene Pfade, die aus
 dem Porcelain unter Windows mit Vorwärtsschrägstrichen kommen.
 
@@ -312,16 +312,28 @@ herausgenommen von dem Mechanismus, der sie hinlegen soll. `sweep` und `unlink`
 rufen darum beide `standsInside`, bevor sie überhaupt fragen, ob ein Pfad eine
 Junction ist: jede Komponente strikt zwischen dem Baum und dem Kandidaten muss
 ein einfaches Verzeichnis sein, und eine Komponente, die sich nicht statten
-lässt, gilt als keines (`cmd/guard/worktree.go:376-411`).
+lässt, gilt als keines (`cmd/guard/worktree.go:392-429`).
+
+`link` braucht denselben Schutz und eine schwächere Regel, denn es darf
+fehlende Elternverzeichnisse anlegen: jede Komponente strikt zwischen dem
+Worktree und dem Kandidaten muss ein einfaches Verzeichnis **oder abwesend**
+sein (`parentsPlainOrAbsent`, `cmd/guard/worktree.go:431-472`). Ohne das ließ
+eine Junction an `<worktree>/.tools` das Lstat von `<worktree>/.tools/godot`
+nach dem Ziel dieser Junction fragen, „abwesend" dort las sich als „unser zum
+Anlegen", und das folgende `MkdirAll` samt `junction.Create` schrieb
+*außerhalb* des Worktrees, an eine Stelle, die kein Sweep von uns je ansieht.
+Gemessen am 2026-09-08 vor der Korrektur: Exit 0, keine Ausgabe, eine Junction
+an `<main>/elsewhere/godot`.
 
 ## Exit-Codes
 
     0  in Ordnung, oder absichtlich nichts zu tun
     1  ein Fehler, auf stderr benannt
 
-Ein dritter Code gibt es nicht: `cmd/guard/guard.go:17-18` definiert
-`ExitOK = 0` und `ExitInternal = 1`, und diese drei Subkommandos benutzen nur
-diese. Keines von ihnen kann einen Zug anhalten, und keines soll es — einer
+Einen dritten Code gibt es hier nicht: `cmd/guard/guard.go:17-19` definiert
+`ExitOK = 0`, `ExitInternal = 1` und `ExitDenied = 2`, und diese drei
+Subkommandos benutzen nur die ersten beiden — `ExitDenied` gehört dem
+Policy-Guard. Keines von ihnen kann einen Zug anhalten, und keines soll es — einer
 Sitzung, deren Spiegelung nicht angelegt werden konnte, sagt man das, statt sie
 zu stoppen.
 

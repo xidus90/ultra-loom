@@ -100,11 +100,14 @@ brach genau an den von Hand gelegten Junctions, die `space` schon trägt.
 per ACL unlesbares Verzeichnis; vier Kandidaten wurden dafür durchgemessen.
 
 **K12 — `stripNTPrefix` wird in Task 4 genannt und nirgends geschrieben.** Die
-Regel: ein führendes `\??\` oder `\?\` abschneiden, alles andere unverändert
+Regel: ein führendes `\??\` oder `\\?\` abschneiden, alles andere unverändert
 durchlassen, dann `filepath.Clean` — der Clean nimmt auch den Trenner aus K8
 weg. Der Kommentar des Plans, keines der beiden Präfixe sei „part of a path a
-Go call opens", ist für `\?\` außerdem falsch: `os` erzeugt diese Form selbst
-in `fixLongPath`.
+Go call opens", ist für `\\?\` außerdem falsch: `os` erzeugt diese Form selbst
+(`addExtendedPrefix`, `os/path_windows.go:107`, aufgerufen von
+`fixLongPath`). Dieser Eintrag schrieb das zweite Präfix bis zum 2026-09-08
+selbst als `\?\`; der Code nimmt `\\?\` weg (`cmd/guard/worktree.go:27`),
+und das ist auch das echte Win32-Langpfad-Präfix.
 
 **K13 — Testhelfer sind in Tasks 4, 5 und 6 benannt und nicht ausgeschrieben**
 (`requireWindows`, `worktreeFixture`, `writeConfig`, `mkdirAll`, `writeFile`,
@@ -123,6 +126,13 @@ stillschweigend; `link` kann sie dort nicht ersetzen, weil `IsWorktree(main)`
 falsch ist. Vor dem Fix reproduziert, dann behoben: jede Komponente strikt
 zwischen `dir` und dem Kandidaten muss per `os.Lstat` ein einfaches
 Verzeichnis sein. Beide Aufrufer brauchen es, `unlink` genauso wie `sweep`.
+Nachtrag vom 2026-09-08: `link` fehlte derselbe Schutz und hat ihn jetzt als
+`parentsPlainOrAbsent` (`cmd/guard/worktree.go:431-472`) — mit einer
+schwächeren Regel, denn `link` darf fehlende Elternverzeichnisse anlegen, also
+ist „abwesend" dort erlaubt und hier nicht. Reproduziert vor dem Fix: Junction
+an `<worktree>/.tools`, `mirror = [".tools/godot"]`, und `link` legte
+`<main>/elsewhere/godot` an — Exit 0, ohne ein Wort, an einer Stelle, die kein
+Sweep ansieht.
 
 **K15 — „the sweep only ever reaches directories git has already given up on"
 ist falsch.** `Orphans` heißt *unregistriert*, nicht *aufgegeben*: ein
@@ -137,9 +147,16 @@ nicht wieder an. Verloren ist eine Junction, nie Daten.
 **K16 — drei Zweige aus Task 4 sind unerreichbar** und bei der Umsetzung
 gestrichen oder ersetzt worden: `!errors.Is(ErrNoRepository)`, weil
 `worktreetopo.Read` das Sentinel um **beide** Fehlerrückgaben wickelt;
-`!os.IsNotExist` nach `Lstat` in `link`, weil der Stat des Ziels auf demselben
-relativen Pfad davor steht (so ein Pfad scheitert jetzt laut an `Create`s
-`Mkdir`); und der Sweep-Test des Plans prüfte nichts, weil
+`!os.IsNotExist` nach `Lstat` in `link`, weil der Fehler dort nicht
+unterschieden wird: der Kommentar am Code (`cmd/guard/worktree.go:299-318`)
+gibt die belastbare Fassung — so ein Pfad geht weiter an `junction.Create`,
+dessen `os.Mkdir` daran scheitert, gemessen am 2026-09-07, also ein
+gemeldeter Fehler und nie ein stilles Überspringen. Die frühere Begründung
+dieses Eintrags („der Stat des Ziels auf demselben relativen Pfad steht
+davor") trug nicht: der eine Stat fragt nach einem Pfad unter `main`, der
+andere nach einem unter dem *Worktree* (Zeile 311 und 315 im Stand vor dem
+2026-09-08; die Zeilen sind seither verschoben), und ein Rechtefehler an dem
+einen sagt nichts über den anderen; und der Sweep-Test des Plans prüfte nichts, weil
 `git worktree remove --force` untracked files löscht, solange kein
 Reparse-Point es blockiert — die Datei muss **nach** `unregister` geschrieben
 werden.
@@ -190,6 +207,18 @@ gehen als Vorschlag an ihren Eigentümer und stehen in
 ausgefallen). Kommt es nicht an, verliert `worktree-unlink` seinen Aufhänger,
 und der Sweep in `worktree-link` sowie `worktree-remove` bleiben die zwei
 Aufräumwege.
+
+**K22 — die Spec-Zusage „`ulinit` bekommt nur, was seiner Rolle entspricht:
+die Hook-Einträge in `settings.json` schreiben" ist nie gebaut worden.**
+(`docs/.superpowers/specs/2026-09-07-worktree-mirror-design.md:50-51`.)
+`ulinit` schreibt Hook-Einträge, aber nur in die `.claude/settings.json` des
+Projekts (`cmd/init/run.go:37,739-780`), und keiner der drei
+`worktree-*`-Einträge steht in dieser Liste. Die Einträge dieses Mechanismus
+gehören in die *globale* `~/.claude/settings.json`, die `ulinit` nirgends
+anfasst; gemacht werden sie von Hand, als Vorschlag in
+`docs/flows/worktree-mirror.md`. K21 erklärt, warum Task 7 diese Datei nicht
+schreibt — das ist ein anderes Versprechen als dieses. Dieses hier ist
+zurückgezogen, nicht erfüllt.
 
 ---
 
@@ -1730,11 +1759,12 @@ func leadsInto(target, main string) bool {
 `os.SameFile`-Hilfe wie in den beiden Paketen davor.
 
 **Korrigiert (K12):** `stripNTPrefix` wird hier genannt und nirgends
-geschrieben. Die Regel ist: ein führendes `\??\` oder `\?\` abschneiden,
+geschrieben. Die Regel ist: ein führendes `\??\` oder `\\?\` abschneiden,
 alles andere unverändert durchlassen, dann `filepath.Clean` — der nimmt auch
 den Trenner am Ende weg, den K8 beschreibt. Der Satz oben, der gespeicherte
 Zielpfad sei „not a path any Go call opens directly", gilt übrigens nur für
-`\??\`: die Form `\?\` erzeugt `os` selbst in `fixLongPath`.
+`\??\`: die Form `\\?\` erzeugt `os` selbst (`addExtendedPrefix`,
+`os/path_windows.go:107`).
 
 Dispatch in `cmd/guard/main.go`, hinter dem `post-edit`-Block und im selben
 Muster:

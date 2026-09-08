@@ -54,7 +54,7 @@ flowchart TD
     cfg -->|"absent, or no mirror"| silent
     cfg -->|"unreadable or broken"| loud["exit 1, named on stderr"]
     cfg --> wt{"does git hold DIR<br/>as a worktree?"}
-    wt -->|"yes"| link["for each configured path:<br/>a directory in MAIN,<br/>nothing here yet<br/>-> junction"]
+    wt -->|"yes"| link["for each configured path:<br/>a directory in MAIN,<br/>nothing here yet,<br/>no link on the way<br/>-> junction"]
     wt -->|"no, DIR is the main checkout"| sweep
     link --> sweep["sweep: in each directory git<br/>no longer holds as a worktree,<br/>remove the junctions that are ours"]
     sweep --> verdict{"did either step fail?"}
@@ -191,7 +191,7 @@ still in it, reported as a success.
 
 `worktree-remove` is that order put right — unlink first, then ask git — plus
 two refusals ahead of everything and one check afterwards
-(`cmd/guard/worktree.go:181-239`):
+(`cmd/guard/worktree.go:181-244`):
 
 1. The **main checkout** is refused in its own right, before anything else. A
    wrapper whose worst outcome is deleting the repository says no to that one
@@ -274,7 +274,7 @@ made the junction. Measured on 2026-09-07: this project's `junction.Create`
 stores `\??\C:\dir\` **with** a trailing separator, `mklink /J` stores
 `\??\C:\dir` **without** one, and both resolve
 (`internal/junction/junction.go:35-38`,
-`internal/junction/junction_windows.go:52-59`). Windows does not insist either
+`internal/junction/junction_windows.go:55-62`). Windows does not insist either
 way, so the trailing separator here is a choice and not a requirement — and it
 is deliberately not changed to match `mklink`, because the hand-made links this
 mechanism inherits came from `mklink` and both forms have to be read anyway.
@@ -282,7 +282,7 @@ mechanism inherits came from `mklink` and both forms have to be read anyway.
 Therefore every comparison in this code is by identity — `os.Stat` twice and
 `os.SameFile` — or on paths run through `filepath.Clean` on **both** sides, and
 never on text. `sameDir`, `leadsInto` and `stripNTPrefix`
-(`cmd/guard/worktree.go:413-466`) are the three places that hold that line, and
+(`cmd/guard/worktree.go:474-527`) are the three places that hold that line, and
 `worktreetopo` holds it for git's own paths, which come out of the porcelain
 with forward slashes on Windows.
 
@@ -303,15 +303,26 @@ that exists to put it there. Both `sweep` and `unlink` therefore call
 `standsInside` before they ask whether a path is a junction at all: every
 component strictly between the tree and the candidate must be a plain
 directory, and a component that cannot be stat'ed counts as not one
-(`cmd/guard/worktree.go:376-411`).
+(`cmd/guard/worktree.go:392-429`).
+
+`link` needs the same guard and a weaker rule, because it is allowed to create
+missing parents: every component strictly between the worktree and the
+candidate must be a plain directory **or absent**
+(`parentsPlainOrAbsent`, `cmd/guard/worktree.go:431-472`). Without it a
+junction at `<worktree>/.tools` made the Lstat of `<worktree>/.tools/godot`
+ask about the junction's target, absent there read as "ours to fill", and the
+`MkdirAll` and `junction.Create` that followed wrote *outside* the worktree, at
+a path no sweep of ours ever looks at. Measured on 2026-09-08 before the fix:
+exit 0, no output, a junction standing at `<main>/elsewhere/godot`.
 
 ## Exit codes
 
     0  in order, or deliberately nothing to do
     1  a fault, named on stderr
 
-There is no third code: `cmd/guard/guard.go:17-18` defines `ExitOK = 0` and
-`ExitInternal = 1`, and these three subcommands use only those. None of them
+There is no third code here: `cmd/guard/guard.go:17-19` defines `ExitOK = 0`,
+`ExitInternal = 1` and `ExitDenied = 2`, and these three subcommands use only
+the first two — `ExitDenied` belongs to the policy guard. None of them
 can hold a turn, and none is meant to — a session whose mirror could not be
 made should be told so, not stopped.
 
