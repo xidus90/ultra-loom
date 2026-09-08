@@ -13,8 +13,11 @@ import (
 
 // The header size of the buffer below: the 8-byte REPARSE_DATA_BUFFER head
 // plus four uint16 -- SubstituteNameOffset, SubstituteNameLength,
-// PrintNameOffset, PrintNameLength. Spelled out because x/sys carries the tag
-// and the ioctl but not the layout.
+// PrintNameOffset, PrintNameLength. Spelled out because x/sys keeps its own
+// layout types unexported -- `mountPointReparseBuffer` and `reparseDataBuffer`
+// in `windows/types_windows.go:1879,1887` of the pinned v0.18.0 -- so they
+// cannot be named from here. The full reasoning is at reparseTarget, which
+// reads back what this writes.
 const mountPointHeaderSize = 8 + 8
 
 // Create makes `link` a junction pointing at `target`.
