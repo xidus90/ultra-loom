@@ -805,9 +805,9 @@ func TestARunWithoutARuntimeSaysWhatTheHooksWillCall(t *testing.T) {
 }
 
 // The one precondition this installer cannot write into a file: the hooks call
-// `ultraloom` by name, so on a machine without one all four of them do
-// nothing. A vendored copy is no excuse -- it is not what they call, so the
-// note has to fire in both cases. Before the hooks moved to PATH the second
+// `ultraloom` by name, so on a machine without one they do nothing. A
+// vendored copy is no excuse -- it is not what they call, so the note has to
+// fire in both cases. Before the hooks moved to PATH the second
 // case was the silent one: vendorPresent saw a runtime, said nothing, and the
 // hooks ran a name that does not resolve.
 func TestAMissingUltraloomOnPathIsReported(t *testing.T) {

@@ -281,11 +281,12 @@ func run(opts Options) (int, string) {
 	// The one precondition this installer cannot write into a file. Asked
 	// whether or not a copy stands in the project, because the hooks do not
 	// call that copy: a populated vendor directory on a machine without the
-	// binary used to be the silent case, four hooks running a name that does
-	// not resolve while vendorPresent reported a runtime.
+	// binary used to be the silent case, the hooks running a name that does
+	// not resolve while vendorPresent reported a runtime. How many of them
+	// there are is a question for hookEntries -- without git it writes one.
 	if _, err := look("ultraloom"); err != nil {
 		notes = append(notes, "no ultraloom on PATH: the generated hooks call "+
-			"it by name, and until one is installed all four of them do nothing")
+			"it by name, and until one is installed they do nothing")
 	}
 
 	// The list names what init owns in this project, not what this one run
