@@ -150,6 +150,11 @@ func run(opts Options) (int, string) {
 	}
 
 	look := tooling.LookPathFunc(opts.Look)
+	if look == nil {
+		// The fallback CheckTools would make on its own, hoisted here because
+		// the check for the ultraloom below calls this one directly.
+		look = tooling.DefaultLookPath
+	}
 	_, missing := tooling.CheckTools(facts.Stacks, look)
 	if opts.ToolPaths != "" {
 		explicitPaths := make(map[string]string)
@@ -264,13 +269,23 @@ func run(opts Options) (int, string) {
 		}
 	}
 	if opts.VendorURL == "" && !usable {
-		// Said, not filled in from a default url: a plain init would then
-		// reach the network on a machine that may have none, and this tool has
-		// no version of itself it can honestly pin a stranger's project to.
-		notes = append(notes, "no runtime is vendored: the generated hooks "+
-			"call the ultraloom on PATH, so this project relies on the one "+
-			"installed there -- pass --vendor-url and --vendor-ref to put a "+
-			"copy in "+vendoring.VendorDir+" as well")
+		// What the run left behind, not a warning: nothing generated here
+		// calls that directory, so an empty one costs the project nothing.
+		// --vendor-url and --vendor-ref are deliberately not offered as a way
+		// out -- a copy nothing calls is no remedy for a missing PATH entry.
+		notes = append(notes, "no runtime is vendored: nothing that could run "+
+			"stands in "+vendoring.VendorDir+", which no generated hook "+
+			"minds -- they call the ultraloom on PATH")
+	}
+
+	// The one precondition this installer cannot write into a file. Asked
+	// whether or not a copy stands in the project, because the hooks do not
+	// call that copy: a populated vendor directory on a machine without the
+	// binary used to be the silent case, four hooks running a name that does
+	// not resolve while vendorPresent reported a runtime.
+	if _, err := look("ultraloom"); err != nil {
+		notes = append(notes, "no ultraloom on PATH: the generated hooks call "+
+			"it by name, and until one is installed all four of them do nothing")
 	}
 
 	// The list names what init owns in this project, not what this one run
@@ -918,9 +933,10 @@ func discardClone(root string, cause error) string {
 // file, a directory, a link pointing nowhere. That is the C1 rule: git refuses
 // an occupied destination, and whatever stands there is not ours to clear.
 //
-// usable is "can a hook run through this?" and wants a directory. A file under
-// that name is not a vendored runtime, and reading it as one silenced the very
-// note that would have told somebody why their hooks fail.
+// usable is "is a runtime standing here?" and wants a directory. A file under
+// that name is not a vendored runtime, and reading it as one silenced the note
+// that says what this run left behind. It no longer decides whether the hooks
+// work -- they call the ultraloom on PATH, which is checked on its own.
 //
 // Lstat rather than Stat, for internal/write's reason: a symlink pointing
 // nowhere is still somebody's property, and following it would report a free

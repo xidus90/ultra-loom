@@ -47,6 +47,19 @@ The tables below summarize the latest performance measurements across all 5 benc
 
 ## Chronological Benchmark Log
 
+### 2026-09-08 15:05 CEST — Session Hooks: the Python Entry Point Against the Go Binary Beside It
+
+* **Repository:** `ultraloom` on branch `claude/hooks-global-runtime`, the global `ultraloom` at `~/.local/bin/ultraloom` and `ulguard.exe` from this checkout.
+* **Objective:** The four session hooks stopped calling `.ultraloom/vendor/ultraloom` and now call the `ultraloom` on PATH (`cmd/init/run.go:727`). Two questions came with that: does dropping the `uv run --project` wrapper buy anything, and is the Go binary still visibly cheaper than the Python entry point — the second one is the claim `docs/flows/worktree-mirror.md` makes about why the mirror is `ulguard` and not a hook.
+* **Method:** Crude on purpose, and to be read as an order of magnitude rather than a number: `date +%s%N` around each call in Git Bash, the Claude Code payload piped in on stdin, five runs for the two Python cases and three for the Go one, warm only. Shell and pipe overhead is inside every figure, so the cases are comparable with each other and not with the `Stopwatch` measurements above. The corrected `hyperfine`-grade measurement is still owed.
+* **Findings:**
+  * `ultraloom hook session-start --root .` with nothing pending: **197 / 219 / 253 / 304 / 341 ms** — median ~253 ms.
+  * The same through the wrapper, `uv run --project . ultraloom hook session-start`: **232 / 233 / 258 ms**. **No measurable gain from dropping it.** The expected saving is not there; what the change buys is a runtime that exists in a fresh worktree, not speed.
+  * `ulguard worktree-link --root .` in the same shell: **105 / 115 / 190 ms**. Roughly **half** the Python start, and consistent with the `136 / 156 / 148 ms` measured for the same command on 2026-09-08 00:30 with a better harness.
+* **Correction to the entry below:** the 00:30 entry calls `.ultraloom/vendor` "the pinned Python runtime every hook needs". That was true when it was written and is not any more — the four hooks `ulinit` generates call the binary on PATH. `space/.tools` at 4.2 GB remains the reason the mirror exists.
+
+---
+
 ### 2026-09-08 00:30:54 CEST — Worktree Mirror: What `ulguard worktree-link` Costs at Every Session Start
 
 * **Repository:** `space` (Godot / GDScript), measured with `ulguard` built from `ultraloom` branch `claude/worktree-mirror` at `43ece6f` (Go 1.27.0, windows/amd64).

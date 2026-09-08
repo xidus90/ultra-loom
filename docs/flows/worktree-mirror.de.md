@@ -143,22 +143,29 @@ es also, bevor er anfängt. Die vier Hooks, die `ulinit` erzeugt, laufen nicht
 mehr so: `cmd/init/run.go:727` baut sie als blankes `ultraloom` über PATH, für
 sie ist der Kreis damit aufgebrochen.
 
-Was bleibt, ist die schwächere Form desselben Punkts, und sie entscheidet die
-Frage weiterhin: dieser Hook feuert in jedem Projekt bei jedem Sitzungsstart,
-bevor irgendetwas Gespiegeltes steht, darf also von nichts im Baum abhängen,
-den er reparieren soll — und `space/.tools` mit 4,2 GB kann kein Hook
-irgendeiner Sprache dorthin holen. Ein Hook, den ein Projekt selbst über einen
-gespiegelten Interpreter verdrahtet, hat das Zirkelproblem in voller Höhe.
-`ulguard` ist ein Go-Binary und hat keines von beidem.
+„Hängt von nichts im Baum ab, den er reparieren soll" unterscheidet nicht mehr:
+ein `ultraloom` über PATH erfüllt das genauso — genau das sind diese vier
+Hooks jetzt. Es entscheiden noch zwei andere Dinge, und keines davon ist die
+Sprache:
 
-`ulguard` und nicht `ulinit`, obwohl eine Laufzeit in Position zu bringen
-Installationsarbeit ist: `cmd/init/main.go:37` zweigt `args[0] == "check"` ab
-und sonst nichts — jeder andere Aufruf fällt in das Flagset des Installers und
-weiter in `run(Options{... Interactive: terminal(stdin), ...})` (`:41-80`). Ein
-Binary, dessen Standardpfad der Installer ist, gehört nicht an einen Hook, der
-in jedem Projekt bei jedem Sitzungsstart feuert. `ulguard` ist die Gegenseite:
-es verteilt schon echte Subkommandos, sein `--root`-Vertrag ist etabliert, und
-es liest bereits eine TOML-Datei unter `.ultraloom/`.
+* **`ulinit` kann es nicht sein.** `cmd/init/main.go:37` zweigt
+  `args[0] == "check"` ab und sonst nichts; jeder andere Aufruf fällt in das
+  Flagset des Installers und weiter in
+  `run(Options{... Interactive: terminal(stdin), ...})` (`:41-80`). Ein
+  Binary, dessen Standardpfad Fragen stellt, darf nie an einem
+  `SessionStart`-Hook hängen. `ulguard` ist die Gegenseite: es verteilt schon
+  echte Subkommandos, sein `--root`-Vertrag ist etabliert, und es liest
+  bereits eine TOML-Datei unter `.ultraloom/`.
+* **Den Preis zahlt jedes Projekt der Maschine bei jedem Sitzungsstart.**
+  `worktree-link` kostet im Haupt-Checkout ohne etwas zu tun
+  136 / 156 / 148 ms (`docs/benchmarks.md`, 2026-09-08). So schnell startet
+  der Python-Einsprungpunkt nicht: am selben Tag warm gemessen brauchte das
+  ganze `ultraloom hook session-start` ohne offene Gates 197-341 ms über
+  fünf Läufe, gegen 105-190 ms für `ulguard worktree-link` über drei. Grobe
+  Zahlen aus einer Shell, aber der Faktor ist nicht knapp.
+
+Ein Hook, den ein Projekt selbst über einen *gespiegelten* Interpreter
+verdrahtet, hat das alte Zirkelproblem weiterhin in voller Höhe.
 
 Beide Hook-Subkommandos sind im Erfolgsfall still und schreiben nur Fehler,
 diese auf stderr. `worktree-remove` ist die Ausnahme und schreibt den

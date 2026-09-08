@@ -47,6 +47,19 @@ Die folgenden Tabellen fassen die aktuellsten Performance-Messungen über alle 5
 
 ## Chronologisches Benchmark-Protokoll
 
+### 08.09.2026 15:05 MESZ — Sitzungs-Hooks: der Python-Einsprungpunkt gegen das Go-Binary daneben
+
+* **Repository:** `ultraloom` auf Zweig `claude/hooks-global-runtime`, das globale `ultraloom` unter `~/.local/bin/ultraloom` und `ulguard.exe` aus diesem Checkout.
+* **Ziel:** Die vier Sitzungs-Hooks rufen nicht mehr `.ultraloom/vendor/ultraloom`, sondern das `ultraloom` über PATH (`cmd/init/run.go:727`). Damit kamen zwei Fragen: bringt der Wegfall der Verpackung `uv run --project` etwas, und ist das Go-Binary weiterhin sichtbar billiger als der Python-Einsprungpunkt — Letzteres ist die Behauptung, mit der `docs/flows/worktree-mirror.de.md` begründet, warum der Spiegel `ulguard` ist und kein Hook.
+* **Methode:** Absichtlich grob und als Größenordnung zu lesen, nicht als Zahl: `date +%s%N` um jeden Aufruf in der Git-Bash, die Nutzlast von Claude Code über stdin hineingepipet, fünf Läufe für die zwei Python-Fälle und drei für den Go-Fall, nur warm. Shell- und Pipe-Aufwand steckt in jeder Zahl, die Fälle sind also untereinander vergleichbar und nicht mit den `Stopwatch`-Messungen weiter oben. Eine Messung in `hyperfine`-Güte steht weiter aus.
+* **Ergebnisse:**
+  * `ultraloom hook session-start --root .` ohne offene Gates: **197 / 219 / 253 / 304 / 341 ms** — Median ~253 ms.
+  * Dasselbe durch die Verpackung, `uv run --project . ultraloom hook session-start`: **232 / 233 / 258 ms**. **Kein messbarer Gewinn durch den Wegfall.** Die erwartete Ersparnis gibt es nicht; was die Änderung bringt, ist eine Laufzeit, die in einem frischen Worktree existiert, keine Geschwindigkeit.
+  * `ulguard worktree-link --root .` in derselben Shell: **105 / 115 / 190 ms**. Etwa die **Hälfte** des Python-Starts, und stimmig mit den `136 / 156 / 148 ms`, die am 08.09.2026 00:30 mit besserem Messrahmen für denselben Aufruf gemessen wurden.
+* **Korrektur zum Eintrag darunter:** der Eintrag von 00:30 nennt `.ultraloom/vendor` „die festgenagelte Python-Laufzeit, die jeder Hook braucht". Das war beim Schreiben wahr und ist es nicht mehr — die vier Hooks, die `ulinit` erzeugt, rufen das Binary über PATH. `space/.tools` mit 4,2 GB bleibt der Grund, aus dem es den Spiegel gibt.
+
+---
+
 ### 08.09.2026 00:30:54 MESZ — Worktree-Spiegel: Was `ulguard worktree-link` an jedem Sitzungsstart kostet
 
 * **Repository:** `space` (Godot / GDScript), gemessen mit einem `ulguard` aus dem `ultraloom`-Zweig `claude/worktree-mirror` bei `43ece6f` (Go 1.27.0, windows/amd64).

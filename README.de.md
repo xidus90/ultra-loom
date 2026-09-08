@@ -646,7 +646,7 @@ Als Claude-Code-Hook, in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom policy hook",
+            "command": "ultraloom policy hook",
             "timeout": 10
           }
         ]

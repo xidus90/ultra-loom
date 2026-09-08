@@ -786,18 +786,52 @@ func TestAnUnreadableVendorNameIsReported(t *testing.T) {
 	}
 }
 
-// A plain run clones nothing, so what the project ends up depending on is the
-// ultraloom installed on PATH. The run says which of the two it left behind,
-// and names the flags that would put a copy in the project as well.
+// A plain run clones nothing, and says so together with what the hooks will
+// call instead. Not the two vendoring flags as a way out: no generated hook
+// calls the copy they would clone, so it is no remedy for anything here.
 func TestARunWithoutARuntimeSaysWhatTheHooksWillCall(t *testing.T) {
 	report := mustRun(t, answered(t.TempDir()))
 	if !strings.Contains(report, "no runtime is vendored") {
 		t.Fatalf("the missing runtime was not reported:\n%s", report)
 	}
+	if !strings.Contains(report, "on PATH") {
+		t.Fatalf("the note does not say what the hooks call instead:\n%s", report)
+	}
 	for _, flag := range []string{"--vendor-url", "--vendor-ref"} {
-		if !strings.Contains(report, flag) {
-			t.Fatalf("%s was not named as the way out:\n%s", flag, report)
+		if strings.Contains(report, flag) {
+			t.Fatalf("%s is offered as a remedy it is not:\n%s", flag, report)
 		}
+	}
+}
+
+// The one precondition this installer cannot write into a file: the hooks call
+// `ultraloom` by name, so on a machine without one all four of them do
+// nothing. A vendored copy is no excuse -- it is not what they call, so the
+// note has to fire in both cases. Before the hooks moved to PATH the second
+// case was the silent one: vendorPresent saw a runtime, said nothing, and the
+// hooks ran a name that does not resolve.
+func TestAMissingUltraloomOnPathIsReported(t *testing.T) {
+	for _, vendored := range []string{"", ".ultraloom/vendor/ultraloom/pyproject.toml"} {
+		root := t.TempDir()
+		if vendored != "" {
+			makeFile(t, root, vendored, "")
+		}
+		o := answered(root)
+		o.Look = notOnPath
+		report := mustRun(t, o)
+		if !strings.Contains(report, "no ultraloom on PATH") {
+			t.Fatalf("a missing binary was not reported (vendored copy %q):\n%s",
+				vendored, report)
+		}
+	}
+}
+
+// And it says nothing when one is there: a note that always fires is noise.
+func TestAnUltraloomOnPathIsNotReported(t *testing.T) {
+	o := answered(t.TempDir())
+	o.Look = onPathAt
+	if report := mustRun(t, o); strings.Contains(report, "no ultraloom on PATH") {
+		t.Fatalf("a machine with the binary was told it has none:\n%s", report)
 	}
 }
 
