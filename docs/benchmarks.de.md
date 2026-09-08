@@ -47,6 +47,28 @@ Die folgenden Tabellen fassen die aktuellsten Performance-Messungen über alle 5
 
 ## Chronologisches Benchmark-Protokoll
 
+### 08.09.2026 00:30:54 MESZ — Worktree-Spiegel: Was `ulguard worktree-link` an jedem Sitzungsstart kostet
+
+* **Repository:** `space` (Godot / GDScript), gemessen mit einem `ulguard` aus dem `ultraloom`-Zweig `claude/worktree-mirror` bei `43ece6f` (Go 1.27.0, windows/amd64).
+* **Ziel:** Die erste Messung des Worktree-Spiegels an einem echten Projekt statt an einer Attrappe im Temp-Verzeichnis. `space/.tools` sind 4,2 GB (`du -sh`, vorher und nachher gemessen: beide Male `4.2G`), `.ultraloom/vendor` ist die festgenagelte Python-Laufzeit, die jeder Hook braucht; git kennt keines von beiden, ein frischer Worktree hat also keines. Die wichtige Zahl ist der Haupt-Checkout ohne etwas zu tun — die steht an jedem Sitzungsstart in jedem Projekt dieser Maschine auf der Rechnung.
+* **Methode:** `hyperfine` ist auf dieser Maschine nicht installiert. Jeder Aufruf wurde mit einer .NET-`[Diagnostics.Stopwatch]` um einen direkten Aufruf des Binaries aus PowerShell 7 gemessen, 30 Läufe je Fall, drei Durchgänge. Ein erster Messrahmen, der jeden Aufruf in `Start-Process -Wait` verpackte, wurde verworfen: er maß in jedem Fall glatte ~1.004 ms, auch im Nichtstun-Fall — das ist die Verpackung und nicht das Binary. **Kalt** ist der erste Lauf eines nie ausgeführten Abbilds — je Fall ein frisches `go build -o cold<N>.exe`, damit die 5,6 MB noch nicht im Speicher stehen; die Repository-Metadaten lagen bereits im Cache des Betriebssystems und lassen sich ohne Administratorrechte nicht verwerfen, kalt isoliert hier also allein das Laden des Abbilds. **Warm** sind die Läufe danach. Für den Fall der fehlenden Verzeichnisse wurden beide Junctions vor jedem Lauf mit `cmd /c rmdir` wieder entfernt.
+* **Ergebnisse:**
+  * Der Haupt-Checkout ohne etwas zu tun kostet **136 / 156 / 148 ms** (Median je Durchgang). Gegen eine Grundlinie von `worktree-link` auf ein Verzeichnis, das kein Repository ist — Prozessstart plus ein fehlschlagender `git`-Aufruf, `105 / 117 / 162 ms` — liegt der Sweep über neun Kandidatenverzeichnisse im Rauschen der Messung.
+  * Das Anlegen der beiden Junctions ist nicht der teure Teil: der Fall mit fehlenden Verzeichnissen ist nicht langsamer als der Nichtstun-Fall. Es dominieren in jedem Fall der Prozessstart und ein `git worktree list --porcelain`.
+  * Kalt kostet etwa das **Zwei- bis Dreifache** des warmen Medians, also ~150–200 ms zusätzlich für das erste Laden des Abbilds.
+  * Durchgang 1 lief unter Last — eine zweite Sitzung committete währenddessen in `space` —, daher sein Median von 1.042 ms und die Maxima von 3,5 s. Die Durchgänge 2 und 3 liefen ruhig. Unten stehen alle drei und nicht der beste.
+
+| Fall | Kalt (frisches Abbild, 1 Lauf) | Warm-Median (Durchgang 1 / 2 / 3) | Warm-Minimum (1 / 2 / 3) | Warm-Maximum (1 / 2 / 3) |
+| :--- | :---: | :---: | :---: | :---: |
+| Grundlinie: `--root` auf ein Verzeichnis ohne Repository | 319 ms | 105 / 117 / 162 ms | 90 / 84 / 97 ms | 308 / 237 / 588 ms |
+| **Haupt-Checkout, nichts zu verlinken (nur Sweep)** | 284 ms | **136 / 156 / 148 ms** | 106 / 104 / 95 ms | 1.640 / 313 / 275 ms |
+| Worktree, beide Verzeichnisse fehlen (zwei Junctions angelegt) | 318 ms | 1.042 / 137 / 100 ms | 110 / 105 / 88 ms | 3.463 / 201 / 166 ms |
+| Worktree, beide Verzeichnisse schon vorhanden | 301 ms | 203 / 113 / 100 ms | 123 / 90 / 90 ms | 3.562 / 179 / 144 ms |
+
+*n = 30 je Fall und Durchgang. Die Worktree-Lage von `space` während der Messung: Haupt-Checkout plus sechs registrierte Worktrees — die fünf des Projekts und der Sondier-Worktree dieser Messung — und neun Verzeichnisse unter den beiden üblichen Elternverzeichnissen, die der Sweep abgeht; an dreien davon hält git keinen Arbeitsbaum.*
+
+---
+
 ### 31.08.2026 19:35:00 MESZ — UltraBrain Core-Migration: Python vs. Natives Go
 
 * **Repository:** `ultra-brain` (Branch `feature/go-brain-core` in `feature/ultra-brain-project-folder` gemergt)

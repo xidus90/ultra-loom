@@ -31,6 +31,14 @@ func at(dir, text string) command { return command{dir: dir, text: text} }
 
 func root(text string) command { return command{text: text} }
 
+// The one child in this program that keeps the inherited environment: no
+// gitenv.Environ here, and on purpose. A PostToolUse hook is not a git hook,
+// so nothing git exported is in this environment to begin with, and the
+// commands built above are linters and compilers -- ruff, gdlint, go vet,
+// npx, cmake -- none of which asks git about a repository. The strip belongs
+// where a git question is asked out of an inherited environment: worktree.go
+// for this program's own git calls, and `without_location` in
+// `src/ultraloom/process.py` for the children the Python check lane spawns.
 func defaultCommandRunner(dir, command string) (string, error) {
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {

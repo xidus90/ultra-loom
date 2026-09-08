@@ -47,6 +47,28 @@ The tables below summarize the latest performance measurements across all 5 benc
 
 ## Chronological Benchmark Log
 
+### 2026-09-08 00:30:54 CEST — Worktree Mirror: What `ulguard worktree-link` Costs at Every Session Start
+
+* **Repository:** `space` (Godot / GDScript), measured with `ulguard` built from `ultraloom` branch `claude/worktree-mirror` at `43ece6f` (Go 1.27.0, windows/amd64).
+* **Objective:** First measurement of the worktree mirror against a real project rather than a temp-directory fixture. `space/.tools` is 4.2 GB (`du -sh`, measured before and after: `4.2G` both times) and `.ultraloom/vendor` is the pinned Python runtime every hook needs; neither is tracked by git, so a fresh worktree has neither. The number that matters is the main checkout with nothing to do — that one is on the bill at every session start in every project on the machine.
+* **Method:** `hyperfine` is not installed on this machine. Each invocation was timed with a .NET `[Diagnostics.Stopwatch]` around a direct call-operator invocation of the binary from PowerShell 7, 30 runs per case, three passes. A first harness that wrapped each call in `Start-Process -Wait` was discarded: it measured a flat ~1,004 ms in every case including the no-op, which is the wrapper and not the binary. **Cold** is the first run of a never-executed binary image — a fresh `go build -o cold<N>.exe` per case, so the 5.6 MB image has not been paged in; the repository metadata was already in the OS cache and cannot be dropped without administrator rights, so cold here isolates image load only. **Warm** is the runs that follow. For the missing-directory case both junctions were removed again with `cmd /c rmdir` before every run.
+* **Findings:**
+  * The main checkout with nothing to do costs **136 / 156 / 148 ms** (median per pass). Against a baseline of `worktree-link` pointed at a directory that is not a repository — process start plus one failed `git` call, `105 / 117 / 162 ms` — the sweep over nine candidate directories is inside the measurement noise.
+  * Creating the two junctions is not the expensive part: the missing-directory case is no slower than the no-op. The dominant cost in every case is process start plus one `git worktree list --porcelain`.
+  * Cold costs roughly **2 to 3 times** the warm median, i.e. ~150-200 ms extra for the first load of the image.
+  * Pass 1 was contended — a second session committed in `space` while it ran — which is where its 1,042 ms median and 3.5 s maxima come from. Passes 2 and 3 ran quiet. All three are given below rather than the best one.
+
+| Case | Cold (fresh image, 1 run) | Warm median (pass 1 / 2 / 3) | Warm min (pass 1 / 2 / 3) | Warm max (pass 1 / 2 / 3) |
+| :--- | :---: | :---: | :---: | :---: |
+| Baseline: `--root` on a directory that is not a repository | 319 ms | 105 / 117 / 162 ms | 90 / 84 / 97 ms | 308 / 237 / 588 ms |
+| **Main checkout, nothing to link (sweep only)** | 284 ms | **136 / 156 / 148 ms** | 106 / 104 / 95 ms | 1,640 / 313 / 275 ms |
+| Worktree, both directories missing (two junctions created) | 318 ms | 1,042 / 137 / 100 ms | 110 / 105 / 88 ms | 3,463 / 201 / 166 ms |
+| Worktree, both directories already in place | 301 ms | 203 / 113 / 100 ms | 123 / 90 / 90 ms | 3,562 / 179 / 144 ms |
+
+*n = 30 per case per pass. The `space` worktree topology during the measurement: main checkout plus six registered worktrees -- the project's five plus the probe this measurement created -- and nine directories under the two conventional parents that the sweep walks, three of which git holds no working tree at.*
+
+---
+
 ### 2026-08-31 19:35:00 CEST — UltraBrain Core Migration: Python vs. Go Native
 
 * **Repository:** `ultra-brain` (Branch: `feature/go-brain-core` merged into `feature/ultra-brain-project-folder`)
