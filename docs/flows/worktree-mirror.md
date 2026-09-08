@@ -292,7 +292,7 @@ of `worktree-remove`'s refusals and reaches `git worktree remove --force`
 aimed at the main checkout, after which only git's own "is a main working
 tree" refusal stands between the wrapper and the repository.
 `TestWorktreeRemoveRefusesTheMainCheckout`
-(`cmd/guard/worktree_test.go:992-1015`) pins all three spellings.
+(`cmd/guard/worktree_test.go:1078-1102`) pins all three spellings.
 
 The related trap is that a path's spelling does not decide where it *goes*
 either. An open with `FILE_FLAG_OPEN_REPARSE_POINT` keeps only the **final**

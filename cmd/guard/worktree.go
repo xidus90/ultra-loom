@@ -303,9 +303,11 @@ func unlink(worktree, main string, mirror []string) error {
 // the second is nothing to mirror. Only an *absent* path here is ours to fill.
 //
 // An Lstat that fails for some other reason than absence is not caught, and
-// the property that makes that safe is where such a path ends up: it goes on
-// to junction.Create, whose os.Mkdir fails on it, so it is a reported fault
-// and never a silent skip. Measured on 2026-09-07 with a worktree that may
+// the property that makes that safe is that such a path always ends in a
+// reported fault rather than a silent skip -- by one of two routes since
+// parentsPlainOrAbsent arrived, not one: that function refuses the path when
+// the unreadable component is an intermediate, and junction.Create's os.Mkdir
+// refuses it when it is the candidate itself. Measured on 2026-09-07 with a worktree that may
 // not gain a subdirectory -- os.Lstat of the absent child still answers
 // IsNotExist there, and the Mkdir inside Create is what refuses. Mkdir
 // refusing an occupied path is the same property from the other side: it is

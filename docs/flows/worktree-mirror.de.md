@@ -301,7 +301,7 @@ Das ist tragend, und ein Test beweist es: mit einem Textvergleich anstelle von
 `git worktree remove --force` mit dem Haupt-Checkout als Ziel — danach steht
 nur noch Gits eigenes „is a main working tree" zwischen dem Wrapper und dem
 Repository. `TestWorktreeRemoveRefusesTheMainCheckout`
-(`cmd/guard/worktree_test.go:992-1015`) nagelt alle drei Schreibweisen fest.
+(`cmd/guard/worktree_test.go:1078-1102`) nagelt alle drei Schreibweisen fest.
 
 Die verwandte Falle ist, dass die Schreibweise eines Pfades auch nicht
 entscheidet, *wohin* er führt. Ein Open mit `FILE_FLAG_OPEN_REPARSE_POINT`
