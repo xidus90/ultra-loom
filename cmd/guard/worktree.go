@@ -228,10 +228,15 @@ func runWorktreeRemove(stdout, stderr io.Writer, target string) int {
 	// porcelain entry and left the tree standing. That is the leftover this
 	// whole subcommand exists to prevent, so it is not something to print
 	// "removed" over.
+	//
+	// The message says what was observed and nothing about the cause: a
+	// junction none of ours, an open handle, an ACL and a virus scanner all
+	// leave exactly this behind, and os.Lstat tells the four apart in no way
+	// at all. The operator is the one who can look.
 	if _, err := os.Lstat(worktree); err == nil {
 		fmt.Fprintf(stderr,
 			"ultraloom-guard worktree-remove: git dropped its entry but %s still stands;"+
-				" something in it was not ours to remove\n", worktree)
+				" nothing here removed it\n", worktree)
 		return ExitInternal
 	}
 	fmt.Fprintf(stdout, "removed %s\n", worktree)
@@ -305,6 +310,12 @@ func unlink(worktree, main string, mirror []string) error {
 // IsNotExist there, and the Mkdir inside Create is what refuses. Mkdir
 // refusing an occupied path is the same property from the other side: it is
 // why nothing here can overwrite what already stands at the path.
+//
+// parentsPlainOrAbsent before the create, for the reason written at that
+// function: without it "inside the worktree" is spelling only, and this is
+// the create side of what standsInside does for the two remove sides. The
+// refusal is loud and not a skip, because a mirror that was needed and could
+// not be made is the one thing this subcommand reports.
 func link(worktree, main string, mirror []string) error {
 	for _, relative := range mirror {
 		target := filepath.Join(main, filepath.FromSlash(relative))
@@ -314,6 +325,11 @@ func link(worktree, main string, mirror []string) error {
 		path := filepath.Join(worktree, filepath.FromSlash(relative))
 		if _, err := os.Lstat(path); err == nil {
 			continue
+		}
+		if blocker, ok := parentsPlainOrAbsent(worktree, relative); !ok {
+			return fmt.Errorf(
+				"not making %s: %s is not a plain directory as far as Lstat can see",
+				path, blocker)
 		}
 		// The parent may be missing: a configured path can be more than one
 		// level deep, and only its first level is necessarily something git
@@ -375,8 +391,10 @@ func sweep(topology worktreetopo.Topology, mirror []string) error {
 
 // standsInside says whether a configured path really lies where its spelling
 // says: every component between `dir` and the candidate itself a plain
-// directory, and none of them a link. Both callers need it -- the sweep about
-// an orphaned worktree directory, unlink about a live one.
+// directory, and none of them a link. Both *removing* callers need it -- the
+// sweep about an orphaned worktree directory, unlink about a live one. The
+// create side has a rule of its own, at parentsPlainOrAbsent, because a
+// missing component is nothing for link to refuse.
 //
 // Without it a caller establishes "inside `dir`" by spelling alone, and a
 // path's spelling does not decide where it goes: an open with
@@ -408,6 +426,49 @@ func standsInside(dir, relative string) bool {
 		}
 	}
 	return true
+}
+
+// parentsPlainOrAbsent says whether every component between `dir` and the
+// candidate itself is either a plain directory or not there at all, and names
+// the first one that is neither.
+//
+// This is what the create side needs, and standsInside is not it: standsInside
+// wants each of those components to *exist* as a plain directory, while link
+// legitimately fills missing ones in -- a configured path can be more than one
+// level deep, and only its first level is necessarily something git brought
+// along. Absent is therefore allowed here and refused there.
+//
+// What may not stand between the two is a link. Windows follows every
+// component of a path but the last, so with a junction at `<worktree>/.tools`
+// the Lstat of `<worktree>/.tools/godot` asks about the junction's target:
+// absent there reads as "ours to fill", and the MkdirAll and junction.Create
+// that follow write into whatever the junction points at -- outside the
+// worktree, and at a path no sweep of ours ever looks at. Measured on
+// 2026-09-08 without this check: exit 0, no output, and a junction standing at
+// `<main>/elsewhere/godot`.
+//
+// Mode().IsDir() is the test, for the reason and the measurement written at
+// standsInside. A component Lstat cannot read at all is refused with the same
+// statement -- it is not *shown* to be a plain directory, and the message
+// says no more than that.
+func parentsPlainOrAbsent(dir, relative string) (string, bool) {
+	// mirrorcfg hands out cleaned, slash-separated paths, so this split has no
+	// empty component and no trailing one.
+	components := strings.Split(relative, "/")
+	path := dir
+	for _, component := range components[:len(components)-1] {
+		path = filepath.Join(path, component)
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			// Nothing below an absent component exists either, so there is no
+			// further component to look at.
+			return "", true
+		}
+		if err != nil || !info.Mode().IsDir() {
+			return path, false
+		}
+	}
+	return "", true
 }
 
 // leadsInto says whether a link target sits inside the main checkout.

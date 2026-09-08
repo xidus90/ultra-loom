@@ -231,21 +231,107 @@ func TestBrokenConfigIsAFailure(t *testing.T) {
 
 // A configured path that cannot be made is the one thing this reports, because
 // the directory behind it may be the pinned runtime every other hook needs.
-// Here the worktree holds `.tools` as a file, so there is no room for
-// `.tools/sub` -- measured on 2026-09-07: Lstat of the child under a file
-// answers IsNotExist, and the MkdirAll of the parent is what fails.
+// Here the worktree's own `.tools` is a plain directory that may not gain a
+// subdirectory, so `.tools/sub` cannot be made and `.tools/sub/deep` has
+// nowhere to go: the MkdirAll of the parent is what fails.
+//
+// A *file* at `.tools` used to be this fixture and no longer reaches MkdirAll:
+// parentsPlainOrAbsent refuses it one step earlier, and
+// TestWorktreeLinkDoesNotCreateThroughAnIntermediateLink pins that.
 func TestWorktreeLinkReportsAPathItCannotMakeRoomFor(t *testing.T) {
 	main, worktree := worktreeFixture(t)
-	writeConfig(t, main, "[worktree]\nmirror = [\".tools/sub\"]\n")
-	mkdirAll(t, filepath.Join(main, ".tools", "sub"))
-	writeFile(t, filepath.Join(worktree, ".tools"), "not a directory")
+	writeConfig(t, main, "[worktree]\nmirror = [\".tools/sub/deep\"]\n")
+	mkdirAll(t, filepath.Join(main, ".tools", "sub", "deep"))
+	mkdirAll(t, filepath.Join(worktree, ".tools"))
+	denyRight(t, filepath.Join(worktree, ".tools"), "AD")
 
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	if code := runWorktreeLink(stdout, stderr, worktree); code != ExitInternal {
 		t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
 	}
-	if !strings.Contains(stderr.String(), "worktree-link") {
-		t.Fatalf("stderr = %q, want the subcommand's name in it", stderr)
+	if !strings.Contains(stderr.String(), "making room for") {
+		t.Fatalf("stderr = %q, want the MkdirAll branch reported", stderr)
+	}
+}
+
+// The create side of the containment check: a configured path whose parent is
+// a link is not inside the worktree at all, and creating it there writes into
+// whatever that link points at.
+//
+// Windows follows every component of a path but the last, so with a junction
+// at `<worktree>/.tools` the Lstat of `<worktree>/.tools/godot` asks about
+// `<elsewhere>/godot` -- absent, so before the guard link took that for "ours
+// to fill", and the MkdirAll and junction.Create that followed landed under
+// the main checkout, at a path no sweep of ours ever looks at. It creates and
+// never deletes.
+//
+// The file case is the same guard from the other side: it, too, is a component
+// that is not a plain directory, and refusing it keeps link from writing
+// anywhere the spelling did not promise.
+func TestWorktreeLinkDoesNotCreateThroughAnIntermediateLink(t *testing.T) {
+	t.Run("a junction at an intermediate component", func(t *testing.T) {
+		requireWindows(t)
+		main, worktree := worktreeFixture(t)
+		writeConfig(t, main, "[worktree]\nmirror = [\".tools/godot\"]\n")
+		mkdirAll(t, filepath.Join(main, ".tools", "godot"))
+		elsewhere := filepath.Join(main, "elsewhere")
+		mkdirAll(t, elsewhere)
+		mklink(t, filepath.Join(worktree, ".tools"), elsewhere)
+
+		stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+		code := runWorktreeLink(stdout, stderr, worktree)
+		escaped := filepath.Join(elsewhere, "godot")
+		if _, err := os.Lstat(escaped); !os.IsNotExist(err) {
+			t.Fatalf("%s was created outside the worktree: %v", escaped, err)
+		}
+		if code != ExitInternal {
+			t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("stdout = %q, want silence", stdout)
+		}
+		if !strings.Contains(stderr.String(), "worktree-link") {
+			t.Fatalf("stderr = %q, want the subcommand's name in it", stderr)
+		}
+	})
+
+	t.Run("a file at an intermediate component", func(t *testing.T) {
+		main, worktree := worktreeFixture(t)
+		writeConfig(t, main, "[worktree]\nmirror = [\".tools/godot\"]\n")
+		mkdirAll(t, filepath.Join(main, ".tools", "godot"))
+		writeFile(t, filepath.Join(worktree, ".tools"), "not a directory")
+
+		stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+		if code := runWorktreeLink(stdout, stderr, worktree); code != ExitInternal {
+			t.Fatalf("exit = %d, want ExitInternal (stderr: %s)", code, stderr)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("stdout = %q, want silence", stdout)
+		}
+	})
+}
+
+// The other side of the same check, and the one that has to keep working: a
+// configured path whose parents are merely *missing* is exactly what link is
+// for. Two levels, so an off-by-one that stopped one component short would
+// show here -- twice on this branch a containment check has silently disabled
+// the feature in this direction, and both times the second test caught it.
+func TestWorktreeLinkCreatesAPathWhoseParentsAreMissing(t *testing.T) {
+	requireWindows(t)
+	main, worktree := worktreeFixture(t)
+	writeConfig(t, main, "[worktree]\nmirror = [\"space/.tools/godot\"]\n")
+	mkdirAll(t, filepath.Join(main, "space", ".tools", "godot", "bin"))
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := runWorktreeLink(stdout, stderr, worktree); code != ExitOK {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	linked := filepath.Join(worktree, "space", ".tools", "godot")
+	if _, err := os.Stat(filepath.Join(linked, "bin")); err != nil {
+		t.Fatalf("the mirrored path is not reachable from the worktree: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want silence", stdout, stderr)
 	}
 }
 
@@ -1054,8 +1140,8 @@ func TestWorktreeRemoveDoesNotClaimSuccessOverALeftover(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want nothing claimed", stdout)
 	}
-	if !strings.Contains(stderr.String(), "still stands") {
-		t.Fatalf("stderr = %q, want the leftover reported", stderr)
+	if !strings.Contains(stderr.String(), "still stands; nothing here removed it") {
+		t.Fatalf("stderr = %q, want the leftover reported and no cause claimed", stderr)
 	}
 	if _, err := os.Lstat(worktree); err != nil {
 		t.Fatalf("the leftover the message names is not there: %v", err)
