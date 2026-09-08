@@ -8,9 +8,10 @@ Git kennt, also fehlt darin jedes gitignorierte Verzeichnis. In diesem Umfeld
 sind das genau die Verzeichnisse, ohne die nichts läuft — die Entwurfsspec
 nennt `space/.tools` mit 4,2 GB Godot-Editor, JDK, Android-SDK und dotnet, und
 `.ultraloom/vendor`, eine gepinnte Python-Laufzeit, die die erzeugten Hooks
-früher aufgerufen haben. Sie tun es nicht mehr: `cmd/init/run.go:727` baut sie
-als blankes `ultraloom` über PATH, und das hat ein frischer Worktree. Ohne
-`.tools` kann ein Worktree also nicht arbeiten; der Vendor-Eintrag ist ein
+früher aufgerufen haben. Sie tun es nicht mehr: `hookCommand`
+(`cmd/init/run.go`, heute bei `:742`) baut sie als blankes `ultraloom` über
+PATH, und das hat ein frischer Worktree. Ohne `.tools` kann ein Worktree also
+nicht arbeiten; der Vendor-Eintrag ist ein
 Pfad, den `space/.ultraloom/config.toml` weiterhin aufführt.
 
 Die Reparatur ist eine Windows-Junction pro konfiguriertem Pfad, die auf den
@@ -140,8 +141,8 @@ Bis zum 2026-09-08 war das Argument kurz und zirkulär: jeder ultraloom-Hook
 ist Python, jeder von ihnen lief über `.ultraloom/vendor` — genau das
 Verzeichnis, das fehlt —, ein Python-Hook, der das reparieren soll, bräuchte
 es also, bevor er anfängt. Die vier Hooks, die `ulinit` erzeugt, laufen nicht
-mehr so: `cmd/init/run.go:727` baut sie als blankes `ultraloom` über PATH, für
-sie ist der Kreis damit aufgebrochen.
+mehr so: `hookCommand` (`cmd/init/run.go`, heute bei `:742`) baut sie als
+blankes `ultraloom` über PATH, für sie ist der Kreis damit aufgebrochen.
 
 „Hängt von nichts im Baum ab, den er reparieren soll" unterscheidet nicht mehr:
 ein `ultraloom` über PATH erfüllt das genauso — genau das sind diese vier
@@ -157,12 +158,15 @@ Sprache:
   echte Subkommandos, sein `--root`-Vertrag ist etabliert, und es liest
   bereits eine TOML-Datei unter `.ultraloom/`.
 * **Den Preis zahlt jedes Projekt der Maschine bei jedem Sitzungsstart.**
-  `worktree-link` kostet im Haupt-Checkout ohne etwas zu tun
-  136 / 156 / 148 ms (`docs/benchmarks.md`, 2026-09-08). So schnell startet
-  der Python-Einsprungpunkt nicht: am selben Tag warm gemessen brauchte das
-  ganze `ultraloom hook session-start` ohne offene Gates 197-341 ms über
-  fünf Läufe, gegen 105-190 ms für `ulguard worktree-link` über drei. Grobe
-  Zahlen aus einer Shell, aber der Faktor ist nicht knapp.
+  Am 08.09.2026 warm in einer Shell gemessen, je fünf Läufe, brauchte das
+  ganze `ultraloom hook session-start` ohne offene Gates 197-341 ms gegen
+  97-147 ms für `ulguard worktree-link` — die Hälfte bis zwei Drittel
+  (`docs/benchmarks.de.md`, Eintrag 15:05). Dieser `ulguard`-Fall ist der
+  stille frühe Ausgang, weil `ultraloom` keine `[worktree]`-Tabelle
+  deklariert; der Sweep über neun Kandidatenverzeichnisse, in `space` mit
+  besserem Messrahmen gemessen, kostet 136 / 156 / 148 ms (Eintrag 00:30).
+  Keine der Zahlen ist die Arbeit der anderen, und einig sind sie sich darin,
+  dass in beiden der Prozessstart dominiert.
 
 Ein Hook, den ein Projekt selbst über einen *gespiegelten* Interpreter
 verdrahtet, hat das alte Zirkelproblem weiterhin in voller Höhe.

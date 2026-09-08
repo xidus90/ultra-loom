@@ -8,10 +8,10 @@ gitignored directory is missing in it. In this environment those are the
 directories without which nothing runs — the design spec records
 `space/.tools` at 4.2 GB of Godot editor, JDK, Android SDK and dotnet, and
 `.ultraloom/vendor`, a pinned Python runtime the generated hooks used to call.
-They no longer do: `cmd/init/run.go:727` builds them as a bare `ultraloom`
-looked up on PATH, which a fresh worktree has. So `.tools` is what a worktree
-cannot do without; the vendor entry is a path `space/.ultraloom/config.toml`
-still lists.
+They no longer do: `hookCommand` (`cmd/init/run.go`, at `:742`) builds them
+as a bare `ultraloom` looked up on PATH, which a fresh worktree has. So
+`.tools` is what a worktree cannot do without; the vendor entry is a path
+`space/.ultraloom/config.toml` still lists.
 
 The repair is a Windows junction per configured path, pointing at the main
 checkout, made at session start and taken back out when the last session on
@@ -137,8 +137,8 @@ Until 2026-09-08 the argument was circular and short: every ultraloom hook is
 Python, every one of them ran through `.ultraloom/vendor` — precisely the
 directory that is missing — so a Python hook asked to repair it would need
 it to exist already. The four hooks `ulinit` generates no longer run that way:
-`cmd/init/run.go:727` builds them as a bare `ultraloom` on PATH, so the circle
-is broken for them.
+`hookCommand` (`cmd/init/run.go`, at `:742`) builds them as a bare
+`ultraloom` on PATH, so the circle is broken for them.
 
 "Nothing inside the tree it repairs" is no longer the discriminator, because
 an `ultraloom` on PATH satisfies that as well — that is exactly what those
@@ -154,12 +154,14 @@ the language:
   its `--root` contract is established, and it already reads a TOML file under
   `.ultraloom/`.
 * **The price is paid in every project on the machine, on every session
-  start.** `worktree-link` in the main checkout with nothing to do costs
-  136 / 156 / 148 ms (`docs/benchmarks.md`, 2026-09-08). The Python entry
-  point does not start that fast: measured warm the same day, the whole
-  `ultraloom hook session-start` with nothing pending took 197-341 ms over
-  five runs, against 105-190 ms for `ulguard worktree-link` over three. Rough
-  numbers from one shell, but the factor is not marginal.
+  start.** Measured warm on 2026-09-08 in one shell, five runs each, the
+  whole `ultraloom hook session-start` with nothing pending took 197-341 ms
+  against 97-147 ms for `ulguard worktree-link` — half to two thirds
+  (`docs/benchmarks.md`, entry 15:05). That `ulguard` case is the silent early
+  exit, because `ultraloom` declares no `[worktree]` table; the sweep over
+  nine candidate directories, measured in `space` with a better harness, costs
+  136 / 156 / 148 ms (entry 00:30). Neither number is the other's workload,
+  and what they agree on is that process start dominates both.
 
 A hook that a project wires through a *mirrored* interpreter of its own still
 has the old circular problem in full.
