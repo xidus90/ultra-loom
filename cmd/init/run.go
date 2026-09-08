@@ -720,8 +720,8 @@ func mergeSettings(opts Options, facts detect.Facts, filled answers.Answers, wik
 
 // hookCommand builds what a generated hook runs: a bare name, looked up on
 // PATH, exactly as the ulguard and brain entries in the same list are written.
-// A name travels with the committed file the way no path does -- and the path
-// this used to carry, `.ultraloom/vendor/ultraloom`, is not in git, so a fresh
+// A name has no directory that a working tree could be missing. The one this
+// used to carry, `.ultraloom/vendor/ultraloom`, is not in git, so a fresh
 // `git worktree` had no runtime and these four hooks did nothing there.
 func hookCommand(argv string) string {
 	return `ultraloom ` + argv + ` --root "${CLAUDE_PROJECT_DIR}"`

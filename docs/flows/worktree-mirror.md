@@ -10,7 +10,8 @@ directories without which nothing runs — the design spec records
 `.ultraloom/vendor`, a pinned Python runtime the generated hooks used to call.
 They no longer do: `cmd/init/run.go:727` builds them as a bare `ultraloom`
 looked up on PATH, which a fresh worktree has. So `.tools` is what a worktree
-cannot do without, and the vendor entry is a path `space` still lists.
+cannot do without; the vendor entry is a path `space/.ultraloom/config.toml`
+still lists.
 
 The repair is a Windows junction per configured path, pointing at the main
 checkout, made at session start and taken back out when the last session on

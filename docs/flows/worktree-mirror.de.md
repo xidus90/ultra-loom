@@ -10,8 +10,8 @@ nennt `space/.tools` mit 4,2 GB Godot-Editor, JDK, Android-SDK und dotnet, und
 `.ultraloom/vendor`, eine gepinnte Python-Laufzeit, die die erzeugten Hooks
 früher aufgerufen haben. Sie tun es nicht mehr: `cmd/init/run.go:727` baut sie
 als blankes `ultraloom` über PATH, und das hat ein frischer Worktree. Ohne
-`.tools` kann ein Worktree also nicht arbeiten, und der Vendor-Eintrag ist ein
-Pfad, den `space` weiterhin aufführt.
+`.tools` kann ein Worktree also nicht arbeiten; der Vendor-Eintrag ist ein
+Pfad, den `space/.ultraloom/config.toml` weiterhin aufführt.
 
 Die Reparatur ist eine Windows-Junction pro konfiguriertem Pfad, die auf den
 Haupt-Checkout zeigt, beim Sitzungsstart angelegt und wieder entfernt, wenn die
