@@ -447,8 +447,38 @@ das mit eigenen Worten.
 
 ## Policy
 
-    ultraloom policy check <art> <wert>   # von Hand oder aus einem Skript
-    ultraloom policy hook                 # liest Claude Codes Payload von stdin
+    ulguard --root .                      # Payload von stdin (PreToolUse-Hook)
+
+**Gemessen am 2026-09-08 gegen `f0bddb3`: der Abschnitt unten ist älter als der
+Code, den er beschreibt.** Durchgesetzt wird die Policy von der Go-Binärdatei
+`ulguard` (`cmd/guard/`); ein Unterbefehl `ultraloom policy` existiert nicht —
+`src/ultraloom/cli.py` registriert `run`, `show`, `resume`, `replay`, `check`,
+`hook` und `commit-msg`, sonst nichts. Die Form für die Hand, die hier einmal
+dokumentiert war, ist überhaupt nie gebaut worden; siehe *Eine Entscheidung von
+Hand* weiter unten.
+
+Was `ulguard` liest und durchsetzt, weicht in fünf Punkten von der Regelprosa
+unten ab, jeder davon am selben Tag gemessen. `loadPolicy` liest
+`.ultraloom/policy.toml`, das `ulinit` aus `.ultraloom/answers.toml` erzeugt
+(`internal/render/templates/policy.toml.tmpl`); die `[policy.*]`-Abschnitte in
+`.ultraloom/config.toml` liest nichts. Im `PolicyFile`-Struct gibt es nur die
+Arten `paths` und `commands` — kein `content`, kein `mode`, kein `defaults`,
+keinen `tools`-Filter — und `match` wie `regex` nehmen je eine einzelne
+Zeichenkette, weshalb die Liste `match = [...]` im Beispiel unten die Datei
+unlesbar macht, und das ist Exit 2 bei jedem gehookten Werkzeugaufruf. Gos
+`regexp` ist RE2 und kennt keinen Lookahead, und der Fehler von
+`regexp.MatchString` wird verworfen: ein Muster mit `(?!...)` — die Form, die
+dieser Abschnitt empfiehlt und die `ulinit` schreibt — kompiliert also nie, und
+die Regel greift stillschweigend nicht. Die eigene `pip install`-Regel dieses
+Repositorys antwortet mit Exit 0. Es gibt eine eingebaute Kommandoregel, für
+`git push`, wo die Prosa unten von keiner spricht. Und die eingebauten
+Pfadmuster werden gegen den Basisnamen geprüft, weshalb `vendor/uv.lock`
+abgelehnt wird, obwohl unten steht, die Lock-Muster gälten nur in der Wurzel.
+Die Eingebauten sind `builtinPathRules` und `builtinCommandRules` in
+`cmd/guard/guard.go`, keine Konstante in einem Modul `ultraloom.policy.config`
+— ein solches Modul gibt es nicht. Welche Seite maßgeblich ist, der Abschnitt
+unten, geschrieben für den Python-Wächter, den diese Binärdatei ersetzt hat,
+oder die Go-Teilmenge, die läuft, ist hier nicht entschieden.
 
 Regeln darüber, was ein Agent nicht anfassen darf, stehen üblicherweise als
 Prosa in einer CLAUDE.md oder als handgeschriebenes Hook-Skript in einem
@@ -646,10 +676,11 @@ Als Claude-Code-Hook, in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "ultraloom policy hook",
+            "command": "ulguard --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 10
           }
-        ]
+        ],
+        "ultraLoomOwned": true
       }
     ]
   }
@@ -675,10 +706,25 @@ ergeben beide ihr `command`, eine Regel der Art `commands` deckt also beide
 Shells ab — eine `git push`-Regel, die nur `Bash` kannte, war unter Windows
 gar keine Regel.
 
-`policy check` ist dieselbe Entscheidung ohne Payload darum herum, für Hand und
-Skript: `ultraloom policy check commands "git push origin master"`. `--tool`
-sagt, welchen Werkzeugnamen ein `tools`-Filter sehen soll; voreingestellt ist
-`Write`.
+### Eine Entscheidung von Hand
+
+**Die Form für die Hand existiert nicht.** Dieser Abschnitt dokumentierte
+`ultraloom policy check <art> <wert>` als „dieselbe Entscheidung ohne Payload
+darum herum, für Hand und Skript“, mit einem `--tool`, das auf `Write`
+voreingestellt sei. Gemessen am 2026-09-08 gegen `f0bddb3`: `ulguard check
+commands "git push origin master"` ist kein Unterbefehl — `cmd/guard/main.go`
+kennt `status`, `explain`, `doctor`, `post-edit`, `worktree-link`,
+`worktree-unlink` und `worktree-remove`, alles andere fällt in den Payload-Leser
+durch, und der antwortet mit Exit 1 und `failed to read hook payload`. `status`,
+`explain` und `doctor` fahren alle drei dieselbe Prüfung von
+`.claude/settings.json` und entscheiden über keinen Wert. Das `--tool` gehörte
+zu dem Befehl, der nie gebaut wurde, und ist mit ihm weg.
+
+Von Hand funktioniert der Hook selbst, mit einer hineingegebenen Payload:
+
+    echo '{"tool_name":"Bash","tool_input":{"command":"git push origin master"}}' | ulguard --root .
+
+Das antwortet mit Exit 2 und legt jede Begründung auf stderr.
 
 Die Entscheidung ist gezeichnet in `docs/flows/policy.de.md`.
 
@@ -1088,7 +1134,7 @@ Hooks beantworten, was sie nicht sieht: ob die eben geschriebene Datei in
 Ordnung ist, ob die Arbeit dieses Zuges grün ist, bevor der Zug endet, ob ein
 pausierter Lauf noch auf eine Antwort wartet, und was ein Subagent getan hat,
 das sein Bericht verschweigt. Jeder liest die Payload von Claude Code über
-stdin, genau wie `ultraloom policy hook`.
+stdin, genau wie `ulguard`.
 
 | Ereignis | Hook | Was er tut |
 | -------- | ---- | ---------- |
