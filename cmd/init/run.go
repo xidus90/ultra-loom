@@ -264,16 +264,13 @@ func run(opts Options) (int, string) {
 		}
 	}
 	if opts.VendorURL == "" && !usable {
-		// Every generated hook points at the vendored runtime, and there is no
-		// second road: a project without one has a settings.json whose
-		// PreToolUse hook fails on every Write, Edit and Bash. Reported rather
-		// than filled in from a default url -- a plain init would then reach
-		// the network on a machine that may have none, and this tool has no
-		// version of itself it can honestly pin a stranger's project to.
-		notes = append(notes, "no runtime is vendored: every generated hook "+
-			"runs the ultraloom in "+vendoring.VendorDir+", and nothing is "+
-			"there yet -- pass --vendor-url and --vendor-ref to clone it, or "+
-			"the hooks fail on every edit")
+		// Said, not filled in from a default url: a plain init would then
+		// reach the network on a machine that may have none, and this tool has
+		// no version of itself it can honestly pin a stranger's project to.
+		notes = append(notes, "no runtime is vendored: the generated hooks "+
+			"call the ultraloom on PATH, so this project relies on the one "+
+			"installed there -- pass --vendor-url and --vendor-ref to put a "+
+			"copy in "+vendoring.VendorDir+" as well")
 	}
 
 	// The list names what init owns in this project, not what this one run
@@ -721,12 +718,13 @@ func mergeSettings(opts Options, facts detect.Facts, filled answers.Answers, wik
 	return out, exitDone, note
 }
 
-// hookCommand builds what a generated hook runs. It points at the vendored
-// runtime relative to the project and never at a directory on this machine:
-// the file it lands in is committed.
+// hookCommand builds what a generated hook runs: a bare name, looked up on
+// PATH, exactly as the ulguard and brain entries in the same list are written.
+// A name travels with the committed file the way no path does -- and the path
+// this used to carry, `.ultraloom/vendor/ultraloom`, is not in git, so a fresh
+// `git worktree` had no runtime and these four hooks did nothing there.
 func hookCommand(argv string) string {
-	return `uv run --project "${CLAUDE_PROJECT_DIR}/` + vendoring.VendorDir +
-		`" ultraloom ` + argv + ` --root "${CLAUDE_PROJECT_DIR}"`
+	return `ultraloom ` + argv + ` --root "${CLAUDE_PROJECT_DIR}"`
 }
 
 // hookEntries is the minimal set that makes a fresh project work. Which

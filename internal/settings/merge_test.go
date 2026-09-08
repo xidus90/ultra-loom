@@ -289,6 +289,11 @@ func TestToolKeyExtraction(t *testing.T) {
 		"npx eslint .":                      "eslint",
 		"npx tsc --noEmit":                  "tsc",
 		"go vet ./...":                      "go_vet",
+		// The first spelling is the one the generated hooks carry; the second
+		// is the one they carried before they called the binary on PATH, and
+		// it has to answer the same key or a re-run of ulinit would install a
+		// second entry beside the old one instead of rewriting it.
+		`ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`:  "hook_session-start",
 		`uv run --project "vendor/ultraloom" ultraloom hook post-edit`: "hook_post-edit",
 		`ultraloom policy hook`: "policy_hook",
 		`ultraloom sync`:        "sync",

@@ -51,7 +51,7 @@ flowchart TD
   * **Null-Overhead-Bypass:** Nicht-Code-Dateien (`.json`, `.yaml`, `.toml`, Bilder) sowie Markdown-Dateien außerhalb des Wikis beenden sofort in $0\text{ ms}$ ohne Prozess-Start.
 
 ### 3. `SessionStart` — Initialisierung & Kontext-Injektion
-* **Hook-Befehl:** `uv run --project .ultraloom/vendor/ultraloom ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+* **Hook-Befehl:** `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
 * **Aufgaben:** Injiziert zu Beginn jeder Session den aktuellen Projektstatus, die letzten Wiki-Logeinträge und Git-Informationen in den Agenten-Kontext.
 
 ### 4. `SubagentStart` & `SubagentStop` — Multi-Agenten-Synchronisation

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -143,16 +144,71 @@ func TestAFullRunWritesTheWholeSetAndSaysSo(t *testing.T) {
 }
 
 // The hook commands land in a file the project commits, so none of them may
-// carry a path that exists only on this machine.
-func TestTheHookCommandsCarryNoMachinePath(t *testing.T) {
+// carry a path that exists only on this machine -- and none of them names a
+// runtime directory inside the project either: the four ultraloom hooks look
+// the binary up on PATH, the way the ulguard and brain entries beside them do.
+func TestTheHookCommandsCallTheBinaryOnPath(t *testing.T) {
 	root := t.TempDir()
 	mustRun(t, answered(root))
 	body := read(t, root, ".claude/settings.json")
-	if !strings.Contains(body, ".ultraloom/vendor/ultraloom") {
-		t.Fatalf("the hooks do not point at the vendored runtime:\n%s", body)
+	// The whole command, not a substring of it: the vendored form ended in
+	// exactly these words, so a Contains check would pass against it too.
+	want := `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+	if got := commandFor(t, body, "SessionStart", ""); got != want {
+		t.Fatalf("SessionStart runs %q, want %q", got, want)
+	}
+	for _, gone := range []string{"uv run", "--project", ".ultraloom/vendor"} {
+		if strings.Contains(body, gone) {
+			t.Fatalf("%q still reaches settings.json:\n%s", gone, body)
+		}
 	}
 	if strings.Contains(body, root) || strings.Contains(body, filepath.ToSlash(root)) {
 		t.Fatalf("a machine path reached settings.json:\n%s", body)
+	}
+}
+
+// commandFor reads back the command of the hook an event and matcher carry, so
+// a test can hold the whole string instead of a fragment of it.
+func commandFor(t *testing.T, body, event, matcher string) string {
+	t.Helper()
+	var file struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal([]byte(body), &file); err != nil {
+		t.Fatalf("settings.json is not readable: %v\n%s", err, body)
+	}
+	for _, item := range file.Hooks[event] {
+		if item.Matcher == matcher && len(item.Hooks) > 0 {
+			return item.Hooks[0].Command
+		}
+	}
+	t.Fatalf("no %s entry with matcher %q:\n%s", event, matcher, body)
+	return ""
+}
+
+// A project installed before the hooks moved to PATH carries the vendored
+// command in an entry this tool owns. Both spellings answer toolKey with
+// "hook_session-start", so the merge recognises the old one as the same hook
+// and rewrites it instead of installing a second SessionStart entry beside it.
+func TestTheVendoredCommandIsRewrittenAndNotDuplicated(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".claude/settings.json",
+		`{"hooks":{"SessionStart":[{"ultraLoomOwned":true,"hooks":[{"type":"command",`+
+			`"command":"uv run --project \"${CLAUDE_PROJECT_DIR}/.ultraloom/vendor/ultraloom\" `+
+			`ultraloom hook session-start --root \"${CLAUDE_PROJECT_DIR}\"","timeout":20}]}]}}`)
+	mustRun(t, answered(root))
+	body := read(t, root, ".claude/settings.json")
+	want := `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+	if got := commandFor(t, body, "SessionStart", ""); got != want {
+		t.Fatalf("SessionStart runs %q, want %q", got, want)
+	}
+	if n := strings.Count(body, "hook session-start"); n != 1 {
+		t.Fatalf("%d session-start hooks after the upgrade, want 1:\n%s", n, body)
 	}
 }
 
@@ -179,9 +235,15 @@ func TestWithGitTheHistoryHooksAreInstalled(t *testing.T) {
 	o.Exec = quietGit
 	mustRun(t, o)
 	body := read(t, root, ".claude/settings.json")
-	for _, want := range []string{"hook stop", "subagent-start", "subagent-stop"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("%s is missing from settings.json:\n%s", want, body)
+	// The whole command per event, not the subcommand name alone: the name
+	// says the hook is installed, the command says what will run it.
+	for _, c := range []struct{ event, want string }{
+		{"SubagentStart", `ultraloom hook subagent-start --root "${CLAUDE_PROJECT_DIR}"`},
+		{"SubagentStop", `ultraloom hook subagent-stop --root "${CLAUDE_PROJECT_DIR}"`},
+		{"Stop", `ultraloom hook stop --root "${CLAUDE_PROJECT_DIR}"`},
+	} {
+		if got := commandFor(t, body, c.event, ""); got != c.want {
+			t.Fatalf("%s runs %q, want %q", c.event, got, c.want)
 		}
 	}
 }
@@ -724,11 +786,10 @@ func TestAnUnreadableVendorNameIsReported(t *testing.T) {
 	}
 }
 
-// A plain run installs hooks that all point into the vendored runtime, and
-// clones nothing. Without a word about it the project gets a settings.json
-// whose PreToolUse hook fails on every Write, Edit and Bash, reported as
-// success.
-func TestARunWithoutARuntimeSaysTheHooksCannotRunYet(t *testing.T) {
+// A plain run clones nothing, so what the project ends up depending on is the
+// ultraloom installed on PATH. The run says which of the two it left behind,
+// and names the flags that would put a copy in the project as well.
+func TestARunWithoutARuntimeSaysWhatTheHooksWillCall(t *testing.T) {
 	report := mustRun(t, answered(t.TempDir()))
 	if !strings.Contains(report, "no runtime is vendored") {
 		t.Fatalf("the missing runtime was not reported:\n%s", report)
@@ -740,8 +801,8 @@ func TestARunWithoutARuntimeSaysTheHooksCannotRunYet(t *testing.T) {
 	}
 }
 
-// Once the runtime stands, the hooks can run and there is nothing to warn
-// about -- a note that never goes away is a note nobody reads.
+// Once a runtime stands in the project there is nothing to warn about -- a
+// note that never goes away is a note nobody reads.
 func TestARuntimeInPlaceIsNotWarnedAbout(t *testing.T) {
 	root := t.TempDir()
 	makeFile(t, root, ".ultraloom/vendor/ultraloom/pyproject.toml", "")

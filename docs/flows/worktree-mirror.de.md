@@ -7,9 +7,11 @@ einer Lücke, die `git worktree` lässt: ein neuer Arbeitsbaum bekommt nur, was
 Git kennt, also fehlt darin jedes gitignorierte Verzeichnis. In diesem Umfeld
 sind das genau die Verzeichnisse, ohne die nichts läuft — die Entwurfsspec
 nennt `space/.tools` mit 4,2 GB Godot-Editor, JDK, Android-SDK und dotnet, und
-`.ultraloom/vendor`, die gepinnte Python-Laufzeit, mit deren Aufruf **jeder
-ultraloom-Hook** beginnt. Ein Worktree ohne das Zweite hat überhaupt keinen
-laufenden Hook.
+`.ultraloom/vendor`, eine gepinnte Python-Laufzeit, die die erzeugten Hooks
+früher aufgerufen haben. Sie tun es nicht mehr: `cmd/init/run.go:727` baut sie
+als blankes `ultraloom` über PATH, und das hat ein frischer Worktree. Ohne
+`.tools` kann ein Worktree also nicht arbeiten, und der Vendor-Eintrag ist ein
+Pfad, den `space` weiterhin aufführt.
 
 Die Reparatur ist eine Windows-Junction pro konfiguriertem Pfad, die auf den
 Haupt-Checkout zeigt, beim Sitzungsstart angelegt und wieder entfernt, wenn die
@@ -128,16 +130,26 @@ keine `config.toml`, eine ohne `[worktree]`, und eine mit leerem `mirror`
 (`internal/mirrorcfg/mirrorcfg.go:37-52`). Ein global verdrahteter Hook trifft
 alle drei in jedem fremden Projekt der Maschine. Eine *beschädigte* Datei ist
 der umgekehrte Fall und wird gemeldet: als „nichts zu spiegeln" gelesen,
-schaltete sie genau den Mechanismus ab, der `.ultraloom/vendor` in Position
-bringt — und das nächste Symptom wäre jeder andere Hook, der aus einem
-scheinbar unverwandten Grund fällt.
+schaltete sie genau den Mechanismus ab, der die konfigurierten Pfade in
+Position bringt — und das nächste Symptom wäre eine fehlende Werkzeugkette,
+die aus einem scheinbar unverwandten Grund fällt.
 
 ## Warum das Go-Binary und kein Python-Hook
 
-Jeder ultraloom-Hook ist Python, und jeder von ihnen läuft über
-`.ultraloom/vendor` — genau das Verzeichnis, das fehlt. Ein Python-Hook, der
-das reparieren soll, bräuchte es also, bevor er anfängt. Der Mechanismus muss
-demnach etwas sein, das ohne alles läuft, und `ulguard` ist ein Go-Binary.
+Bis zum 2026-09-08 war das Argument kurz und zirkulär: jeder ultraloom-Hook
+ist Python, jeder von ihnen lief über `.ultraloom/vendor` — genau das
+Verzeichnis, das fehlt —, ein Python-Hook, der das reparieren soll, bräuchte
+es also, bevor er anfängt. Die vier Hooks, die `ulinit` erzeugt, laufen nicht
+mehr so: `cmd/init/run.go:727` baut sie als blankes `ultraloom` über PATH, für
+sie ist der Kreis damit aufgebrochen.
+
+Was bleibt, ist die schwächere Form desselben Punkts, und sie entscheidet die
+Frage weiterhin: dieser Hook feuert in jedem Projekt bei jedem Sitzungsstart,
+bevor irgendetwas Gespiegeltes steht, darf also von nichts im Baum abhängen,
+den er reparieren soll — und `space/.tools` mit 4,2 GB kann kein Hook
+irgendeiner Sprache dorthin holen. Ein Hook, den ein Projekt selbst über einen
+gespiegelten Interpreter verdrahtet, hat das Zirkelproblem in voller Höhe.
+`ulguard` ist ein Go-Binary und hat keines von beidem.
 
 `ulguard` und nicht `ulinit`, obwohl eine Laufzeit in Position zu bringen
 Installationsarbeit ist: `cmd/init/main.go:37` zweigt `args[0] == "check"` ab
@@ -370,6 +382,7 @@ Aufräumwege. Zweitens ist das Timeout von 20 s geraten: die Zeiten in
 Was später zu einem dieser Ereignisse hinzukommt, gehört in **denselben**
 Eintrag, wo es Zustand teilt: mehrere Einträge zu einem Ereignis starten
 gleichzeitig und nicht hintereinander. Was diese Gleichzeitigkeit für den
-eigenen Python-`SessionStart`-Hook eines Projekts bedeutet, der das
-`.ultraloom/vendor` braucht, das `worktree-link` gerade erst anlegt, ist
-ungemessen.
+eigenen `SessionStart`-Hook eines Projekts bedeutet, der einen Pfad braucht,
+den `worktree-link` gerade erst anlegt, ist ungemessen. Der
+`SessionStart`-Hook von ultraloom ist kein solcher Fall mehr: er ruft das
+`ultraloom` über PATH auf.

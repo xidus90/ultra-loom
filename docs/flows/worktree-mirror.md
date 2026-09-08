@@ -7,8 +7,10 @@ Not a flow of the harness and not a decision either, but the repair of a hole
 gitignored directory is missing in it. In this environment those are the
 directories without which nothing runs — the design spec records
 `space/.tools` at 4.2 GB of Godot editor, JDK, Android SDK and dotnet, and
-`.ultraloom/vendor`, the pinned Python runtime **every ultraloom hook** starts
-by calling. A worktree without the second one has no working hook at all.
+`.ultraloom/vendor`, a pinned Python runtime the generated hooks used to call.
+They no longer do: `cmd/init/run.go:727` builds them as a bare `ultraloom`
+looked up on PATH, which a fresh worktree has. So `.tools` is what a worktree
+cannot do without, and the vendor entry is a path `space` still lists.
 
 The repair is a Windows junction per configured path, pointing at the main
 checkout, made at session start and taken back out when the last session on
@@ -125,16 +127,25 @@ Three ways of having nothing to do are all exit 0 and silent — no
 (`internal/mirrorcfg/mirrorcfg.go:37-52`). A globally wired hook meets all
 three in every unrelated project on the machine. A *damaged* file is the
 opposite case and is reported: read as "nothing to mirror", it would switch off
-the mechanism that puts `.ultraloom/vendor` in place, and the next symptom
-would be every other hook failing for an unrelated-looking reason.
+the mechanism that puts the configured paths in place, and the next symptom
+would be a missing toolchain failing for an unrelated-looking reason.
 
 ## Why the Go binary and not a Python hook
 
-Every ultraloom hook is Python, and every one of them runs through
-`.ultraloom/vendor` — which is precisely the directory that is missing. A
-Python hook asked to repair it would need it to exist already. So the
-mechanism has to be something that runs with nothing in place, and `ulguard`
-is a Go binary.
+Until 2026-09-08 the argument was circular and short: every ultraloom hook is
+Python, every one of them ran through `.ultraloom/vendor` — precisely the
+directory that is missing — so a Python hook asked to repair it would need
+it to exist already. The four hooks `ulinit` generates no longer run that way:
+`cmd/init/run.go:727` builds them as a bare `ultraloom` on PATH, so the circle
+is broken for them.
+
+What remains is the weaker form of the same point, and it still decides the
+question: this hook fires at every session start in every project, before
+anything mirrored is in place, so it must depend on nothing inside the tree it
+repairs — and `space/.tools` at 4.2 GB is nothing a hook of any language
+could put there. A hook a project wires through a mirrored interpreter of its
+own has the circular problem in full. `ulguard` is a Go binary and has
+neither.
 
 `ulguard` and not `ulinit`, although putting a runtime in position is
 installation work: `cmd/init/main.go:37` intercepts `args[0] == "check"` and
@@ -357,6 +368,7 @@ in `session-hooks.md` were measured, these two were not.
 
 Whatever gets added to one of these events later belongs in the **same** entry
 where it shares state: several entries for one event start concurrently, not
-one after another. What that concurrency means for a project's own Python
-`SessionStart` hook, which needs the `.ultraloom/vendor` that `worktree-link`
-is at that moment creating, is unmeasured.
+one after another. What that concurrency means for a project's own
+`SessionStart` hook that needs a path `worktree-link` is at that moment
+creating is unmeasured. The ultraloom `SessionStart` hook is no longer such a
+case: it calls the `ultraloom` on PATH.
