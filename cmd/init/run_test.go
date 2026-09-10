@@ -173,18 +173,32 @@ func TestTheHookCommandsCallTheBinaryOnPath(t *testing.T) {
 // Python entry point it replaces stays in pyproject.toml for the agent flow,
 // so both names exist and only the one written here decides which runs.
 //
-// The whole string and not a substring of it, and with a timeout, because this
-// is the one place the branch pins what the entry has to say. This project's
-// own .claude/settings.json was changed to exactly this command by hand rather
-// than by regenerating it, so nothing downstream would catch a drift between
-// the two: this test is the generator's half of that agreement.
+// Equality and not Contains, on all three fields. Two substring checks stood
+// here first -- for `ulguard hook session-start` and for `--host claude` --
+// and between them they did pin the binary, the event and the host. What they
+// said nothing about was the rest of the command: `ulguard hook session-start
+// --host claude` with no `--root` at all passes both, and that is not a
+// cosmetic gap. Without `--root` the dispatch falls back to walking up from
+// the working directory (`hostio.FindRoot(".")`, cmd/guard/main.go), so the
+// entry would decide the project root from wherever the harness happened to
+// start the process instead of from `${CLAUDE_PROJECT_DIR}`.
 //
-// A bare name and no runtime, which is the difference from the three history
-// hooks beside it. Those still call `ultraloom` through `uv run --project`,
-// and `which ultraloom` on the machine this was written on answers a path
-// inside one checkout's .venv -- a name that resolves only while that
-// environment is active. `ulguard` is an installed binary on PATH and needs no
-// Python at all.
+// The timeout and the empty matcher were not checked either, and the matcher
+// is the one that changes behaviour on merge: identity there is (event,
+// matcher), so a matcher on this entry would win a second slot beside the
+// existing one rather than rewriting it.
+//
+// Exactness earns its keep because this string is also maintained by hand.
+// This repository's own `.claude/settings.json` is edited rather than
+// regenerated, so no later run of ulinit compares the two: if the generator
+// moves, nothing downstream notices, and this test is the only place that
+// says what it must emit.
+//
+// The contrast with SubagentStart, SubagentStop and Stop is the kind of
+// program, not the shape of the command -- `hookCommand` writes those as bare
+// names too (run.go:799), and TestTheHookCommandsCallTheBinaryOnPath above
+// holds every one of the four to a name with no directory in it. Those three
+// generate the Python entry point and cross to Go in a later stage.
 func TestHookEntriesSessionStartIsTheGoBinary(t *testing.T) {
 	entries := hookEntries(detect.Facts{HasGit: true}, false)
 

@@ -51,10 +51,10 @@ func TestCliStatusAndDoctor(t *testing.T) {
 	}
 }
 
-// `hook <event>` is a two-word subcommand, unlike the six single-word ones
-// beside it, so a mistyped event must not fall through to the write barrier:
-// the barrier reads stdin and decides about a file, and answering a hook call
-// that way would be a verdict about the wrong question.
+// `hook <event>` is the only two-word subcommand; every other one in `cli` is
+// a single word. So a mistyped event must not fall through to the write
+// barrier: that barrier reads stdin and decides about a file, and answering a
+// hook call that way would be a verdict about the wrong question.
 func TestCLIRefusesAnUnknownHookEvent(t *testing.T) {
 	var stderr bytes.Buffer
 	code := cli([]string{"hook", "no-such-event"}, strings.NewReader(""), &stderr)
