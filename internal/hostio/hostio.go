@@ -90,17 +90,19 @@ func Read(host Host, r io.Reader) (Payload, error) {
 
 // WriteContext hands lines back for the model to read.
 //
-// Nothing to say writes nothing at all, and that is decided here rather than
-// in an adapter: it is a property of the answer and not of the host, so a
-// second adapter inherits it instead of having to remember it. It is also why
-// a host with no adapter yet answers nil to an empty call -- there is nothing
-// for the missing adapter to fail at.
+// Nothing to say writes nothing at all, and that test sits inside the Claude
+// arm: ahead of the adapter, behind the switch. Behind it on purpose, because
+// a seam's refusal *is* its arm -- an emptiness test in front of the switch
+// would make ErrNoAdapter conditional on there being content and let a host
+// with no adapter answer nil to an empty call. So every arm answers for its
+// own host at every call size, and a second adapter that wants the same
+// silence spells it out where this one does.
 func WriteContext(host Host, w io.Writer, lines []string) error {
-	if len(lines) == 0 {
-		return nil
-	}
 	switch host {
 	case HostClaude:
+		if len(lines) == 0 {
+			return nil
+		}
 		return writeClaudeContext(w, lines)
 	case HostAntigravity:
 		return writeAntigravityContext(w, lines)

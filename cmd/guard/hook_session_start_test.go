@@ -70,8 +70,9 @@ func TestHookSessionStartSaysNothingNonASCII(t *testing.T) {
 }
 
 // Nothing waiting writes no envelope at all, rather than one carrying an empty
-// additionalContext -- internal/hostio/claude.go:80-83 makes that decision
-// and this only shows it reaching the hook's own output.
+// additionalContext -- hostio.WriteContext makes that decision in its Claude
+// arm, and this only shows it reaching the hook's own output. Named rather
+// than cited by line: the decision has already moved between files once.
 func TestHookSessionStartIsSilentWithNothingWaiting(t *testing.T) {
 	root := project(t)
 

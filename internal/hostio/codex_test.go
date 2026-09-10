@@ -29,6 +29,17 @@ func TestCodexFailsClosed(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("a refusal writes nothing, got %q", out.String())
 	}
+
+	// And an empty call refuses too: the refusal does not wait for content.
+	// "Nothing to say writes nothing" is the Claude arm's rule, so a seam that
+	// answered nil to no lines would report success for a host it cannot
+	// write to at all.
+	if err := hostio.WriteContext(hostio.HostCodex, &out, nil); !errors.Is(err, hostio.ErrNoAdapter) {
+		t.Errorf("the codex seam refuses an empty write with ErrNoAdapter, got %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("a refusal writes nothing, got %q", out.String())
+	}
 }
 
 // Antigravity is a seam on both sides, and for two different reasons.
@@ -57,6 +68,16 @@ func TestAntigravityFailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(writeErr.Error(), "PreInvocation") {
 		t.Fatalf("the refusal names what is missing, got %v", writeErr)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("a refusal writes nothing, got %q", out.String())
+	}
+
+	// The empty call refuses as well. Silence for no lines is the Claude arm's
+	// rule and not a property of the answer, so this arm owes the caller
+	// ErrNoAdapter whether there is anything to write or not.
+	if err := hostio.WriteContext(hostio.HostAntigravity, &out, nil); !errors.Is(err, hostio.ErrNoAdapter) {
+		t.Fatalf("the antigravity arm refuses an empty write with ErrNoAdapter, got %v", err)
 	}
 	if out.Len() != 0 {
 		t.Fatalf("a refusal writes nothing, got %q", out.String())
