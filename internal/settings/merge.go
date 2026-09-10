@@ -418,7 +418,14 @@ func toolKey(cmd string) string {
 			clean == "run" {
 			continue
 		}
-		if clean == "ultraloom" && i+1 < len(words) {
+		// `ulguard` beside `ultraloom`, because the hook subcommands are
+		// moving from the Python entry point to the Go binary and both
+		// spellings name the same hook. Without this the four events share
+		// one key and `find` matches them by position instead of by command.
+		// A leading dash is a flag rather than a subcommand, so a bare
+		// `ulguard --root x` keeps the binary name as its key.
+		if (clean == "ultraloom" || clean == "ulguard") && i+1 < len(words) &&
+			!strings.HasPrefix(strings.Trim(words[i+1], `"'`), "-") {
 			sub := strings.ToLower(strings.Trim(words[i+1], `"'`))
 			if (sub == "hook" || sub == "policy") && i+2 < len(words) {
 				return sub + "_" + strings.ToLower(strings.Trim(words[i+2], `"'`))

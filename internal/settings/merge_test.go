@@ -477,3 +477,28 @@ func TestOrderHooksAndFormatBlockEdgeCases(t *testing.T) {
 		t.Fatalf("expected non-slice hooks to be formatted, got %s", formatted)
 	}
 }
+
+// toolKey is the entry identity `find` compares commands by. Both spellings
+// name the same hook, so both must answer the same key: without this,
+// `ulguard hook session-start` and `ulguard hook stop` are one key --
+// "ulguard" -- and the four events collide.
+func TestToolKeyReadsUlguardHooks(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{`ultraloom hook session-start --root "x"`, "hook_session-start"},
+		{`ulguard hook session-start --root "x"`, "hook_session-start"},
+		{`ulguard hook stop --root "x"`, "hook_stop"},
+		{`ulguard.exe hook stop --root "x"`, "hook_stop"},
+		// Not a hook subcommand: the bare name stays the key, so the write
+		// barrier and the post-edit lane keep the slots they have.
+		{`ulguard --root "x"`, "ulguard"},
+		{`ulguard post-edit --root "x"`, "post-edit"},
+	}
+	for _, tt := range tests {
+		if got := toolKey(tt.command); got != tt.want {
+			t.Errorf("toolKey(%q) = %q, want %q", tt.command, got, tt.want)
+		}
+	}
+}
