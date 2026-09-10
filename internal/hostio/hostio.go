@@ -54,11 +54,24 @@ func ParseHost(name string) (Host, error) {
 
 // Payload is what a hook needs to know, whichever host asked.
 //
-// Two fields, because session-start needs two. The tool and the paths a write
-// barrier reads arrive when the stage that needs them does; a field nobody
-// reads has no test holding it in place.
+// Two fields, and no more: the tool and the paths a write barrier reads arrive
+// when the stage that needs them does, because a field nobody reads has no
+// test holding it in place.
 type Payload struct {
-	Event     string
+	// Event is the host's own name for what fired. Carried for the adapters
+	// and read by no hook today -- session-start is dispatched by the
+	// subcommand, not by the payload -- so it exists to be normalised once
+	// rather than twice when a second event arrives.
+	Event string
+
+	// SessionID is where this session's state is filed, or the empty string.
+	//
+	// One string for two cases, and every adapter owes the caller this: a
+	// missing id and an id of the wrong type both arrive as "". Deciding
+	// between them is not the adapter's business -- what counts as a usable
+	// id is the hook's question, and `recordBase` in cmd/guard answers it by
+	// filing nothing. An adapter that refused a mistyped id instead would
+	// exit 1 where the Python hook exited 0.
 	SessionID string
 }
 
@@ -76,7 +89,16 @@ func Read(host Host, r io.Reader) (Payload, error) {
 }
 
 // WriteContext hands lines back for the model to read.
+//
+// Nothing to say writes nothing at all, and that is decided here rather than
+// in an adapter: it is a property of the answer and not of the host, so a
+// second adapter inherits it instead of having to remember it. It is also why
+// a host with no adapter yet answers nil to an empty call -- there is nothing
+// for the missing adapter to fail at.
 func WriteContext(host Host, w io.Writer, lines []string) error {
+	if len(lines) == 0 {
+		return nil
+	}
 	switch host {
 	case HostClaude:
 		return writeClaudeContext(w, lines)
@@ -106,8 +128,8 @@ func FindRoot(start string) (string, error) {
 
 // findRoot is FindRoot with its path resolver as a parameter.
 //
-// filepath.Abs fails only when os.Getwd does, which no test on the platforms
-// this runs on can provoke -- so the resolver is injected here rather than
+// filepath.Abs fails only when os.Getwd does, which no test on any of the
+// platforms this runs on can provoke -- so the resolver is injected here rather than
 // leaving the refusal untested. The caller passes ".", so resolving is not
 // optional: filepath.Dir would walk that to "." and stop there instead of
 // climbing to the volume root.

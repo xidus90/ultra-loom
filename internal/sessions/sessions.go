@@ -1,11 +1,12 @@
 // Package sessions counts the agent sessions standing on one working tree.
 //
-// One file per session under `.ultraloom/hooks/`, which is what the Python
-// hooks already write: `session_start.py` puts one down at session start,
-// `stop.py` rewrites it on every block and every pass, and
-// `subagent_start.py` on every subagent dispatch. Read here rather than
-// through them, because the reader is a Go binary that must run in a worktree
-// where the Python runtime is exactly what is still missing.
+// One file per session under `.ultraloom/hooks/`, in the shape the Python hooks
+// write: `ulguard hook session-start` puts one down at session start -- it took
+// that over from `session_start.py` (fa3dd38), deleted in 6a7037a -- `stop.py`
+// rewrites it on every block and every pass, and `subagent_start.py` on every
+// subagent dispatch. Read here rather than through the Python side, because the reader is
+// a Go binary that must run in a worktree where the Python runtime is exactly
+// what is still missing.
 package sessions
 
 import (
@@ -66,7 +67,7 @@ func Others(root, sessionID string, stale time.Duration) (int, error) {
 // A file that is not there is not an error: a session that never wrote state
 // still ends.
 func Forget(root, sessionID string) error {
-	path := filepath.Join(root, filepath.FromSlash(StateDir), safeName(sessionID)+".json")
+	path := statePath(root, sessionID)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("removing %s: %w", path, err)
 	}

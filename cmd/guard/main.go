@@ -93,8 +93,22 @@ func cli(args []string, stdin io.Reader, stderr io.Writer) int {
 		flags := flag.NewFlagSet("ultraloom-guard hook "+event, flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		root := flags.String("root", "", "path to the project root")
-		host := flags.String("host", "claude", "the harness calling: claude, antigravity or codex")
+		// No default. internal/hostio refuses an unknown host rather than
+		// guessing, because answering a hook in the wrong shape is worse than
+		// refusing to answer, and a default here would have undone that for the
+		// one case it was built for: a hooks.json entry that omits the flag would
+		// have been handed a Claude envelope without a word. ulinit writes the
+		// flag into every entry it generates, so nothing that this project
+		// installs relies on a default.
+		host := flags.String("host", "", "the harness calling: claude, antigravity or codex")
 		if err := flags.Parse(args[2:]); err != nil {
+			return ExitInternal
+		}
+		// Asked before the root is resolved, for the reason the event check
+		// above gives: a call with no host is refused for that, and not for
+		// whichever directory the caller happened to stand in.
+		if *host == "" {
+			fmt.Fprintf(stderr, "ultraloom-guard hook %s: --host is required: expected claude, antigravity or codex\n", event)
 			return ExitInternal
 		}
 		// An empty --root is the Antigravity case: a hook there runs with its

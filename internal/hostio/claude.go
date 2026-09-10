@@ -32,9 +32,10 @@ type claudeAnswer struct {
 // a value of the wrong type reads as absent instead of as damage. That is not
 // laxity, it is where the decision belongs: payload.py's whole job is "is this
 // an object", and what counts as a usable session id is decided one layer up,
-// by `_record_base` in session_start.py, which returns without a word when the
-// id is not a string. A struct decode would refuse `{"session_id": 5}` and
-// exit 1 where the Python hook exits 0.
+// by `recordBase` in cmd/guard, which files nothing when there is no usable id
+// -- as `_record_base` in session_start.py (fa3dd38):52 did, returning without
+// a word when the id was not a string. A struct decode would refuse
+// `{"session_id": 5}` and exit 1 where the Python hook exited 0.
 func readClaude(r io.Reader) (Payload, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
@@ -70,17 +71,11 @@ func readClaude(r io.Reader) (Payload, error) {
 // could not be measured from inside this repository, so nothing is claimed
 // about it here.
 //
-// Nothing to say writes nothing at all -- an additionalContext of "" would put
-// a blank line into the context of every session.
-//
 // The encoder writes straight into w and its escaping is turned off: a context
 // line is prose, and a `>` in it belongs in the transcript as itself. The only
 // failure it can report is w's, because the document holds nothing but
 // strings.
 func writeClaudeContext(w io.Writer, lines []string) error {
-	if len(lines) == 0 {
-		return nil
-	}
 	var answer claudeAnswer
 	answer.HookSpecificOutput.HookEventName = "SessionStart"
 	answer.HookSpecificOutput.AdditionalContext = strings.Join(lines, "\n")

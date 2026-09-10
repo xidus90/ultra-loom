@@ -149,13 +149,35 @@ func TestCLIRefusesAHookOutsideAProject(t *testing.T) {
 	defer undo()
 
 	var stderr bytes.Buffer
-	code := cli([]string{"hook", "session-start"}, strings.NewReader(""), &stderr)
+	code := cli([]string{"hook", "session-start", "--host", "claude"}, strings.NewReader(""), &stderr)
 
 	if code != ExitInternal {
 		t.Fatalf("expected exit 1, got %d", code)
 	}
 	if !strings.Contains(stderr.String(), "config.toml") {
 		t.Fatalf("the refusal says what it looked for, got %q", stderr.String())
+	}
+}
+
+// `--host` has no default, so a call without it is refused rather than handed
+// a Claude envelope. internal/hostio refuses an *unknown* host for that
+// reason, and a default here would have undone it for the one case it was
+// built for: an entry in a second host's hooks.json that omits the flag.
+//
+// The root is given, so the refusal cannot be the root walk's: what this pins
+// is that the missing flag is what stops the call, and that the message names
+// the flag the caller has to add.
+func TestCLIRefusesAHookWithoutAHost(t *testing.T) {
+	var stderr bytes.Buffer
+
+	code := cli([]string{"hook", "session-start", "--root", project(t)},
+		strings.NewReader(`{"session_id":"s1"}`), &stderr)
+
+	if code != ExitInternal {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "--host") {
+		t.Fatalf("the refusal names the flag, got %q", stderr.String())
 	}
 }
 

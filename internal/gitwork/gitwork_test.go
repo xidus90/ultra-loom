@@ -61,9 +61,20 @@ func TestHeadCommitOutsideARepository(t *testing.T) {
 // A root that is not there never reaches an exit code: the spawn itself fails.
 // Same answer as a non-zero one -- an error, never an empty string a caller
 // could mistake for a commit.
+//
+// And the message ends where it stops having something to say. git never ran,
+// so there is nothing on stderr, and the account of the failure is the one the
+// OS gave through `err`. Appending an empty stderr behind a separator would
+// end every such message in a dangling ": ", which reads as an error that was
+// cut off rather than one that is complete.
 func TestHeadCommitOfADirectoryThatIsNotThere(t *testing.T) {
-	if _, err := gitwork.HeadCommit(filepath.Join(t.TempDir(), "nowhere")); err == nil {
+	_, err := gitwork.HeadCommit(filepath.Join(t.TempDir(), "nowhere"))
+
+	if err == nil {
 		t.Fatal("a directory that is not there has no head")
+	}
+	if strings.HasSuffix(err.Error(), ": ") {
+		t.Fatalf("the message ends in a dangling separator: %q", err.Error())
 	}
 }
 

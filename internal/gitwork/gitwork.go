@@ -15,7 +15,9 @@ import (
 	"github.com/xidus90/ultra-loom/internal/gitenv"
 )
 
-// ErrIgnoredRoot is a root git answers about but never answers with.
+// ErrIgnoredRoot marks the refusal of a root git ignores. Such a directory is
+// inside a repository, so rev-parse answers about it readily -- with the
+// surrounding repository's HEAD, which is the wrong tree to measure against.
 var ErrIgnoredRoot = errors.New("git ignores this root, so it can never report a change there")
 
 // HeadCommit is worktree.py's `head_commit`: the commit a run starts on, as
@@ -78,10 +80,23 @@ func git(root string, arguments ...string) (string, error) {
 	command.Stderr = &stderr
 	out, err := command.Output()
 	if err != nil {
-		// git's own words on stderr go through: it is the only one that knows
-		// why it could not answer.
-		return "", fmt.Errorf("cannot inspect the working tree in %s: git %s: %v: %s",
-			root, strings.Join(arguments, " "), err, strings.TrimSpace(stderr.String()))
+		// Two kinds of failure end up here and they do not carry the same
+		// information. git ran and refused: its own words are on stderr, and
+		// they are the only account of why -- "not a git repository",
+		// "ambiguous argument 'HEAD'". git never ran: the spawn itself failed,
+		// stderr is empty, and everything there is to say arrives through
+		// `err` -- the OS's chdir error for a directory that is not there,
+		// which the suite pins in TestHeadCommitOfADirectoryThatIsNotThere.
+		//
+		// So stderr is appended only when there is stderr. Unconditionally the
+		// message would end in a dangling ": " for every spawn failure, which
+		// reads as a truncated error rather than as a complete one.
+		detail := strings.TrimSpace(stderr.String())
+		if detail != "" {
+			detail = ": " + detail
+		}
+		return "", fmt.Errorf("cannot inspect the working tree in %s: git %s: %v%s",
+			root, strings.Join(arguments, " "), err, detail)
 	}
 	return string(out), nil
 }
