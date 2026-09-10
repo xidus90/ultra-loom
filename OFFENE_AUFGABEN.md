@@ -1,0 +1,431 @@
+# Offene Aufgaben, Spezifikationen und Pläne (Status-Tracker)
+
+**Stand:** 2026-09-10
+**Haupt-Checkout:** [`master`](file:///c:/Users/micro/Documents/%23GIT/ultraloom) — `8be2162`, **8 Commits** vor `origin/master`
+
+Diese Übersicht führt die aktiven Stränge, Zweige, Worktrees und offenen
+Arbeitspakete im Repository `ultraloom`. Abgeschlossenes wird über die
+Checkboxen (`- [x]`) abgehakt.
+
+Sie ersetzt kein Wiki — nur steht unter [`docs/wiki/`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki)
+bisher nichts: `index.md`, `log.md` und `audit.md` sind leere Vorlagen mit einem
+Merksatz, `_identities.tsv` trägt nur seine Kopfzeile. Was in diesem Repo
+dauerhaft gilt, steht heute in `README.md`, `AGENTS.md` und den Ablaufseiten
+unter [`docs/flows/`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/flows).
+Das Füllen des Wikis ist selbst ein offener Punkt — siehe Abschnitt 6.
+
+> [!NOTE]
+> **Zur Sprache dieser Datei.** `AGENTS.md` verlangt für Dokumentation ein
+> englisches Original mit einem `.de.md` daneben. Diese Datei folgt stattdessen
+> den Schwesterdateien in `space` und `ultra-brain` und steht nur auf Deutsch.
+> Ein Statustracker ist ein Arbeitspapier wie die Dateien unter
+> `docs/.superpowers/`, die von der Regel ausgenommen sind.
+
+---
+
+## 1. Aktive Zweige, Worktrees und ihr Stand
+
+| Strang / Fokus | Branch | Worktree-Pfad | Status | Aktiver Stand | Nächste Aktion |
+|---|---|---|---|---|---|
+| **Worktree-Spiegel (Junctions für git-ignorierte Verzeichnisse)** | `master` | [Hauptverzeichnis](file:///c:/Users/micro/Documents/%23GIT/ultraloom) | 🟢 **gemergt** | `be16705` mergte den Strang, `8be2162` ist HEAD. Zweig und Worktree sind bereits abgebaut | Das Ausführungsledger einordnen (Abschnitt 2) und die parkierten Nachläufer abarbeiten |
+| **MCP-Server nativ statt über uv** | `claude/mcp-native` (gelöscht) | `.worktrees/mcp-native` (entfernt) | ✅ **erledigt** | **0 eigene Commits**, 35 hinter master — die Spitze `b82ab51` ist per `git merge-base --is-ancestor` als Vorfahr von `master` bestätigt. Worktree und Zweig am 2026-09-10 abgebaut | keine — der Strang ist geschlossen |
+| **GDScript-Bahn dort fahren, wo der Godot-Baum steht** | `claude/brain-lint-braucht-ziel` (gelöscht) | — (kein Worktree) | ✅ **erledigt** | **0 eigene Commits**, 38 hinter master — `3433e6f` ist per `git merge-base --is-ancestor` als Vorfahr von `master` bestätigt. Zweig am 2026-09-10 gelöscht | keine — der Strang ist geschlossen |
+| **Konsolenkodierung: Befunde, die cp1252 nicht schreiben kann** | `claude/jovial-panini-eedcc1` (existiert nicht mehr) | — (kein Worktree) | ✅ **erledigt** | **Am 2026-09-10 nachgemessen:** der Zweig ist weg (`git branch -a` kennt ihn nicht mehr), und der Inhalt liegt in `master`. `9032b14` ist **kein** Vorfahr von `master`, aber `d0780c5` trägt denselben Betreff, dasselbe Autordatum (2026-08-27 12:53 +0200) und dieselbe Änderung an `src/ultraloom/cli.py` (+19) und `tests/test_cli.py` (+51) — der Zweigcommit, auf `master` neu abgespielt. Beweis im Baum: [`src/ultraloom/cli.py:58`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/src/ultraloom/cli.py) sagt `stream.reconfigure(errors="replace")`, Zeile 52 begründet die Regel | keine. Der frühere Befund („der Fix ist nicht in master", `cli.py` kenne weder `reconfigure` noch `errors="replace"`) war zum damaligen Stand 2026-09-10 09:03 **richtig** und ist seit `d0780c5` überholt |
+| **Audit-Nacharbeit (Tore, Multi-Marker, Aufräumen)** | `feat/audit-nacharbeit` | — (kein Worktree) | ✅ **erledigt** | **Am 2026-09-10 beide Commits auf `master` übernommen:** `e2c4911` als `94e2c2b` (Spec, 394 Zeilen) und `90d3e50` als `d941d26` (`cmd/init/run.go` +57, `cmd/init/run_test.go` +74). Beide Cherry-Picks liefen ohne Konflikt (Auto-Merge). Danach `ultraloom check all`: Exit 0 — ruff, `ulinit check gofmt`, `go vet`, dmypy, 920 Python-Tests, `go test ./...`, Python-Coverage 100 %, Go-Coverage 98,4 %. **Das frühere Urteil, `90d3e50` sei zu verwerfen, war falsch begründet** — der Commit fasst keine `.gitignore` dieses Repos an, sondern ergänzt in `cmd/init` eine Behandlung, die `master` gar nicht hatte (`grep` nach `gitignore` in `cmd/init/*.go` fand dort nichts); die Ausnahme `!/.ultra-brain/config.toml` war unberührt | **Offen: der Zweig selbst.** Cherry-Picks sind keine Vorfahren, `git branch -d` verweigert also — der Abbau bräuchte `-D`, und das ist eine Nutzerentscheidung |
+| **Mehrere LLM-Anbieter** | `feature/multi-provider-llm` | [`.worktrees/multi-provider-llm`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/.worktrees/multi-provider-llm) | 🟠 **weit veraltet** | **155 eigene** Commits, **399 hinter** master, letzter Stand 2026-08-24 | Entscheiden, was davon noch trägt. Der Entwurf lebt nur auf dem Zweig; ein Rebase über 399 Commits ist kein Selbstläufer |
+
+> [!IMPORTANT]
+> **Zu parallelen Sitzungen — die Falle dieses Repos ist eine andere als in `space`.**
+> Ein Verzeichnis unter `.claude/worktrees/` ist **nicht** notwendig ein
+> Git-Worktree. Wer dort arbeitet, teilt Index und HEAD mit dem Haupt-Checkout:
+> `git status` antwortet leer, `git add` überspringt neue Dateien wortlos.
+> Die verlässliche Frage ist `git rev-parse --show-toplevel` beziehungsweise
+> `git worktree list` — **nicht** `--git-dir` gegen `--git-common-dir`, dieser
+> Vergleich liefert hier falsch positiv (siehe `CLAUDE.md`).
+>
+> Dazu die Regel vom 2026-08-25: **vor jedem Commit `git diff --cached --stat`
+> lesen.** An jenem Tag nahm ein Commit hier fünf Umbenennungen einer fremden
+> Sitzung mit — `git add <meine Datei>` war richtig, der Index hielt aber schon
+> fremde Arbeit.
+
+- [x] **`CLAUDE.md` war an einer Stelle veraltet — erledigt mit `8be2162`.**
+      Der Befund vom 2026-09-10: die Seite nannte
+      `.claude/worktrees/project-history-planning-cf98dc` als Beispiel eines
+      echten Worktrees, obwohl `.claude/worktrees/` **leer** war und
+      `git worktree list` nur `master`, `mcp-native` und `multi-provider-llm`
+      kannte. `8be2162` („Date the worktree layout the argument rests on")
+      schrieb den Absatz um: er datiert die Lage jetzt („as of 2026-09-10
+      `git worktree list` names `.worktrees/mcp-native` and
+      `.worktrees/multi-provider-llm`, and `.claude/worktrees/` is empty") und
+      führt das alte Verzeichnis nur noch als ausdrücklich vergangenes
+      Beispiel. Das Argument („der Pfad ist kein Beweis") stand ohnehin
+      richtig — es ruht seither auf einem datierten Stand statt auf einem
+      stillschweigend veralteten.
+
+---
+
+## 2. Strang: Worktree-Spiegel — gemergt, Ledger verschoben, Ablageort offen
+
+* **Spezifikation:** [2026-09-07-worktree-mirror-design.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers/specs/2026-09-07-worktree-mirror-design.md)
+* **Durchführungsplan:** [2026-09-07-worktree-mirror.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers/plans/2026-09-07-worktree-mirror.md)
+* **Ablaufseite:** [worktree-mirror.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/flows/worktree-mirror.md) / [.de.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/flows/worktree-mirror.de.md)
+* **Ausführungsledger:** [sdd/2026-09-07-worktree-mirror/ledger.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers/sdd/2026-09-07-worktree-mirror/ledger.md) — 52 KB, am 2026-09-10 dorthin verschoben, **weiter ungetrackt** (`.gitignore:2`)
+
+Acht Tasks, alle abgeschlossen, Schlussreview „BRANCH READY FOR MERGE",
+gemergt mit `be16705`.
+
+- [x] Tasks 1–8 samt Fix-Runden, Re-Reviews und Schluss-Fix-Welle
+- [x] Die elf Plantext-Korrekturen sind mit `e22eff2` und `9547320` in Plan und Spec eingetragen
+- [x] Die zwei beim Schlussreview parkierten Minors sind mit `d744a0c` **doch noch** geschlossen: die Zeilenangabe in beiden Ablaufseiten steht auf `worktree_test.go:1078-1102`, und `link`s Docstring nennt jetzt beide Routen statt einer
+- [x] **Das Ledger bleibt eine Arbeitsspur — entschieden am 2026-09-10.**
+      Am 2026-09-10 nach
+      `docs/.superpowers/sdd/2026-09-07-worktree-mirror/ledger.md` verschoben —
+      und damit **nachgemessen, dass die Vorbildannahme dieses Punktes falsch
+      war**: `.gitignore:2` ignoriert `docs/.superpowers/sdd/` vollständig, mit
+      der Begründung „Work traces of plan execution: intermediate states of
+      commits that follow". `git ls-files docs/.superpowers/` kennt unter `sdd/`
+      keine einzige Datei, auch nicht den `crlf-fix-report.md` des
+      Installer-Kern-Strangs. Das Verzeichnis war also nie ein *Ablageort für
+      Eingechecktes*, sondern der Ort, an dem Arbeitsspuren liegen bleiben.
+      **Offen bleibt damit die eigentliche Frage:** ist das Ledger eine
+      Arbeitsspur (dann ist es hier richtig und bleibt ungetrackt) oder eine
+      Übergabe (dann gehört es in einen getrackten Ort — siehe Abschnitt 7,
+      wo `handovers/` genau diese Frage schon stellt). **Entschieden: es ist
+      eine Arbeitsspur** und bleibt an seinem jetzigen Pfad ungetrackt liegen.
+      Die Frage nach `handovers/` in Abschnitt 7 bleibt davon unberührt offen.
+
+### Was der Merge nicht mitgebracht hat
+
+> [!WARNING]
+> **Der Zweig merged inert.** Keine versionierte Datei dieses Repos deklariert
+> `[worktree] mirror`, die Vorlage ist unberührt, und die Verdrahtung liegt
+> außerhalb dieses Repos. `ultraloom` benutzt seinen eigenen Spiegel also nicht.
+> Das ist eine offene Entscheidung, kein Defekt.
+
+- [ ] **Die zweite Hälfte von Task 7 steht aus:** der Eintrag in der globalen
+      `settings.json`. Vom Nutzer freigegeben, aber bis nach dem Schlussreview
+      zurückgehalten, weil der Hook ein maschinenweites `ulguard` braucht und
+      dieses Binary aus geprüftem Code kommen soll.
+- [ ] `.claude/settings.json` dieses Repos trägt **keinen** `worktree-link`-Hook
+      (nur `ulguard` als PreToolUse und `ulguard post-edit`). Solange das so
+      ist, heilt hier kein Sitzungsstart irgendwelche Junctions.
+- [ ] Vier registrierte `space`-Worktrees hatten am 2026-09-08 noch keine
+      Laufzeit. Nach Entwurf heilen sie beim eigenen Sitzungsstart, sobald der
+      globale Hook hängt — hängt er nicht, heilen sie nie. Seither nicht
+      nachgesehen.
+
+### Nachläufer, die das Schlussreview bewusst hat liegen lassen
+
+- [ ] **`sameDir` liegt dreifach:** [`cmd/guard/worktree.go:519`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/cmd/guard/worktree.go),
+      [`internal/worktreetopo/worktreetopo.go:160`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/internal/worktreetopo/worktreetopo.go),
+      [`internal/junction/junction_test.go:21`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/internal/junction/junction_test.go).
+      Die Zusammenlegung als exportiertes `worktreetopo.SameDir` war der
+      Reviewbefund „Important 5" und wurde aus der Fix-Welle **herausgehalten**,
+      weil ein Refactor unmittelbar vor dem Merge Risiko für Ordnung kauft.
+- [ ] **`cli` verdrahtet `os.Stdout` an vier Stellen** ([`cmd/guard/main.go:23,43,53,68`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/cmd/guard/main.go)),
+      deshalb lässt sich der Schweigevertrag durch `cli` hindurch nicht prüfen
+      („Important 4", ebenfalls herausgehalten).
+- [ ] **Der Flagset-Block steht fünfmal in `main.go`** (gezählt:
+      5 × `flag.NewFlagSet`). Ein `subcommand()`-Helfer ist die Aufräumarbeit,
+      dreimal über die Tasks 4, 5 und 6 vertagt.
+- [ ] **Der Sitzungs-Cutoff schließt das Loch nicht** — weder 24 Stunden noch
+      irgendeine andere Zahl. Der echte Fix ist ein Schreibvorgang auf der
+      lebenden Seite: `worktree-link` fasst die Zustandsdatei der Sitzung beim
+      Start an, oder es wird von `SessionEnd` aus geschrieben. Steht so auch in
+      [`docs/flows/worktree-mirror.md`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/flows/worktree-mirror.md): „is not built".
+- [ ] `registeredAs` dupliziert die Schleife aus `Topology.registered`; eine
+      Methode auf `Topology`, die die getroffene Schreibweise zurückgibt, hielte
+      den Vergleich im Paket, dem er gehört.
+- [ ] Ein Fehler im Sweep bricht die Schleife ab: bei zwei schlechten Pfaden
+      wird nur der erste genannt, und eine unlesbare Zwischenkomponente in einem
+      **früheren** Spiegeleintrag verhindert das Anlegen eines späteren
+      gesunden (etwa `.ultraloom/vendor`, die gepinnte Laufzeit). Laut, nicht
+      still — der nächste `worktree-link` versucht es erneut.
+- [x] Die Überlebensmeldung behauptete eine **Ursache**, die `os.Lstat` nicht
+      belegen kann. **Nachgerechnet: erledigt** —
+      [`cmd/guard/worktree.go:238`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/cmd/guard/worktree.go)
+      sagt heute „nothing here removed it", einen Befund statt einer Ursache.
+- [ ] Eine Anweisung bleibt vermutlich ungedeckt: `return err` nach
+      `junction.Remove` in `cmd/guard`. Drei ACL-Versuche sind dokumentiert; der
+      deterministische Weg braucht ein offenes Handle über `x/sys` und die erste
+      `_windows_test.go` in `cmd/guard` — die gibt es dort nach wie vor nicht
+      (nur `internal/junction/junction_windows_test.go`). Die Schluss-Fix-Welle
+      hat den `os.Remove`-Zweig in `junction.Remove` selbst gedeckt, nicht
+      diesen Aufrufer.
+- [ ] `TestCliDispatchesWorktreeUnlink` benutzt einen bereits geleerten
+      Payload-Leser wieder — es läuft nur, weil das Flag-Parsen scheitert, bevor
+      stdin gelesen wird. Zerbrechlich, nicht falsch.
+- [ ] Das Konventionsverzeichnis selbst (`.worktrees`, `.claude/worktrees`) deckt
+      `standsInside` nicht ab: wäre **es** eine Junction, folgte `os.ReadDir` ihr
+      und zählte ihre echten Unterverzeichnisse als Waisen dieses Repos.
+
+---
+
+## 3. Strang: Dokumentation gegen den Code nachrechnen (laufend)
+
+Die acht ungepushten Commits sind ein solcher Durchgang: `bd6feef` bis
+`8be2162`, alle mit derselben Bewegung — eine Behauptung in der Doku wird gegen
+den Code gemessen und entweder korrigiert oder als datierter Befund
+stehengelassen. Zwei der acht ändern Code statt Prosa: `bd6feef` und
+`d0780c5`.
+
+- [x] Die generierten Hooks rufen das `ultraloom` auf dem PATH (`bd6feef` —
+      neben `d0780c5` eine der zwei Codeänderungen des Strangs, in `cmd/init`)
+- [x] Sagen, was für den Befehl gilt, über dem der Docstring steht (`9374b92`)
+- [x] Sagen, wann das von den Hooks gerufene `ultraloom` nicht auf dem PATH ist (`c1f7333`)
+- [x] Die Hooks so zählen, wie `hookEntries` sie schreibt (`8294b33`)
+- [x] `hookCommand` beim Namen nennen, und die Zahl, die nicht zurückgezogen wurde (`f0bddb3`)
+- [x] Den Policy-Erzwinger nennen, der wirklich läuft (`7c1a879`)
+- [x] Befunde melden, die die Konsole nicht kodieren kann (`d0780c5` — die
+      zweite Codeänderung des Strangs, `cli.py` und `tests/test_cli.py`; siehe
+      Zeile 4 der Matrix in Abschnitt 1)
+- [x] Die Worktree-Lage datieren, auf der das Argument ruht (`8be2162` — der
+      `CLAUDE.md`-Fix am Ende von Abschnitt 1)
+
+### Zwei dokumentierte Lücken, die als Befund stehen
+
+- [ ] **`ultraloom policy check <kind> <value>` wurde nie gebaut.** Der
+      README-Abschnitt „Policy" beschrieb eine Handform, die es nicht gibt;
+      `ulguard check …` ist kein Unterbefehl, sondern fällt in den
+      Payload-Leser und antwortet mit Exit 1. Der Satz steht seit `7c1a879`
+      als datierter Befund in [`README.md:424-429`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/README.md)
+      statt gelöscht zu sein — **die Entscheidung, ob die Fähigkeit gebaut oder
+      der Abschnitt entfernt wird, ist offen.**
+- [ ] **Der Rest des Policy-Abschnitts weicht in fünf Punkten vom Code ab**,
+      jeder am selben Tag gemessen und im README benannt. Die Prosa ist noch
+      nicht nachgezogen.
+- [x] Die Zahl „fifteen" in
+      [`docs/flows/verify-until-green.md:675`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/flows/verify-until-green.md)
+      — **kein offener Punkt:** der Satz ist ein datierter Befund, und die
+      Korrektur steht direkt dahinter („the count below comes out to fourteen").
+
+---
+
+## 4. Strang: Backlog aus Teilprojekt 1 und 2
+
+* **Datei:** [2026-08-21-teilprojekt-2-backlog.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers/specs/2026-08-21-teilprojekt-2-backlog.md)
+
+> [!NOTE]
+> Die Datei sammelt in **drei Runden** (Teilprojekt 1, Teilprojekt 2, Umbau der
+> Prüfkette), was gesehen, beurteilt und mit Begründung verschoben wurde. Sie
+> wird mitgepflegt: mehrere Punkte tragen bereits ein **ERLEDIGT** mit Verweis
+> auf die Spec, die sie umgesetzt hat. Nur diese Erledigt-Vermerke sind unten
+> ausgewertet — **gegen den heutigen Code nachgerechnet ist keiner der offenen
+> Punkte**, also vor dem Anfassen erst prüfen, ob er noch besteht.
+
+### Runde 1 — aus Teilprojekt 1
+
+- [x] **Zeitgrenze für Prüfkommandos** — umgesetzt über `process.run`
+      (`Popen` in eigener Prozessgruppe bzw. Job-Objekt, Baumtötung bei
+      Fristablauf, zweites kurzes Sammelfenster). Damit ist auch das
+      Enkelproblem erledigt.
+- [ ] **Der Journal-Cache ist unbedingt.** Ein Knoten mit einem `ok`-Eintrag
+      unter `(Name, input_hash)` liefert dessen Delta zurück, auch außerhalb des
+      Wiedergabemodus. Ein begrenzter Zyklus ist damit wirkungslos, wenn seine
+      Nutzlast sich nicht ändert. Wenn Wiederholschleifen gebraucht werden, ist
+      das die erste Frage.
+- [ ] **Schema-Semantik des Modell-Adapters:** wie reichhaltig `AgentNode.schema`
+      sein darf — verschachtelte Dataclasses, Listen, Optionals.
+- [ ] **`mcp__<server>` ohne Werkzeugsegment.** Abgeleitet aus dem Parser des
+      SDK, nie gegen einen laufenden MCP-Server gemessen.
+- [ ] **Der Contract-Test ist nie gelaufen** (`uv run pytest -m contract`) — er
+      braucht Zugangsdaten und Netz. Solange das offen ist, ist die
+      Token-Abrechnung unbestätigt: `usage.get("output_tokens", 0)` liefert bei
+      einer Umbenennung still Kosten von 0.
+- [ ] **Committet der Reparateur, sieht die Wache nichts.** `guard` misst über
+      `git status`, also über den Arbeitsbaum. Ein Agent, der committet,
+      hinterlässt einen sauberen Baum — eine geänderte Testdatei geht durch.
+      Heute nur entschärft: das Werkzeugprofil `edit` enthält kein Bash. Die
+      härtere Grundlage wäre der Vergleich gegen einen beim Laufstart
+      festgehaltenen Ausgangs-Commit.
+- [ ] **Das Pausenfenster gehört niemandem.** Ändert ein Mensch zwischen `run`
+      und `resume` eine geschützte Datei, lastet die Wache das dem Reparateur an
+      (Exit 4 gegen einen Unschuldigen). Scharf, sobald Teilprojekt 4 die
+      Gate-Variante der Testsperre baut.
+
+Kleinere Punkte derselben Runde: `_why_it_looped` erklärt die Besuchsgrenze erst
+beim Erreichen; eine Antwort mit unerreichbarem Pause-Hash wird still verworfen;
+`list_flows` verschweigt eine Datei wie `my-flow.py`, statt sie zu erklären;
+`tests/test_config.py` trägt einen redundanten Grenztest; `flows/__init__.py`
+ist ein leeres Paket.
+
+### Runde 2 — aus Teilprojekt 2
+
+- [x] **`claude-agent-sdk` ist nicht gepinnt** — erledigt: das Extra nennt
+      `claude-agent-sdk==0.2.143`, und `run` prüft vor dem ersten Knoten, ob eine
+      startbare CLI erreichbar ist.
+- [ ] **`setting_sources` bleibt ungesetzt** im Adapter (`model/agent_sdk.py`).
+- [ ] **Ein Exit-Code ist das ganze Urteil — manche Prüfwerkzeuge kennen ihn
+      nicht.** Teilweise erledigt (die Mechanik steht), der Rest offen.
+- [x] **Eine Prüfart, ein Kommando** (`config._KINDS`) — erledigt, mehrere
+      Kommandos je Art sind gebaut.
+- [x] **Zwischen Prüfungen gibt es keine Reihenfolge** (Spec 9.4) — erledigt.
+- [ ] **Stille Präzedenz bei Coverage.** `resolve_check` prüft
+      `config.coverage_report` **vor** `config.commands`; wer beides setzt,
+      bekommt ohne Warnung das erste. Offen ist, wie viel `load_config`
+      beurteilen darf.
+- [ ] **`[verify.coverage].threshold` wird nicht durchgesetzt** — gelesen,
+      weitergereicht, aber kein Kommando bekommt sie. Offen: ob der Schlüssel
+      überhaupt bleiben soll. **Betrifft dieses Repo unmittelbar:** die
+      `config.toml` hier setzt `threshold = 100`.
+- [ ] **Der Beweis für die Testsperre fehlt.** Fünf Läufe in zwei Projekten
+      haben versucht, einen echten Agenten an eine Testdatei zu bringen; keiner
+      hat es geschafft. Unit-getestet, gegen ein echtes Modell unbewiesen.
+
+### Runde 3 — aus dem Umbau der Prüfkette
+
+- [ ] **Der POSIX-Zweig von `process.py` ist nie ausgeführt worden.**
+      `_terminate_posix` trägt `# pragma: no cover  # POSIX-only` und ist auf
+      dieser Maschine nie gelaufen. Die Hälfte der Plattformweiche ist
+      Behauptung. **Oberster Punkt dieser Runde** — er braucht eine
+      POSIX-Maschine.
+- [ ] **Ein Journal von vor dem Umbau passt nicht mehr auf seinen `check`-Knoten.**
+      `VerifyState` hat `blocked` und `brief` dazubekommen, beide gehen in den
+      `input_hash`. Ein laufender Auftrag führt den Knoten nach dem Upgrade neu
+      aus — bezahlte Token für getane Arbeit. Was fehlt, ist die Meldung.
+- [ ] **Restfenster bei der PID-Wiederverwendung unter Windows.** Ein
+      Fremdprozess, der nach der Wurzel geboren wird und eine recycelte PID aus
+      unserem Baum als Eltern-PID trägt, würde mitgetötet. Wahrscheinlichkeit
+      winzig, Schaden aber einer, den niemand mit ultraloom in Verbindung
+      brächte.
+- [ ] **Godot hat kein `coverage`-Preset**, und das kostet jedes Godot-Projekt
+      eine Zeile Konfiguration. Bewusst so — ein erfundenes Preset hätte nach
+      einer Prüfung ausgesehen, ohne eine zu sein.
+
+---
+
+## 5. Übergreifend: Repo-Zustand und Prüfketten
+
+### Git
+
+- [ ] **10 Commits sind ungepusht** (8 vom 2026-09-08/10 plus die zwei Cherry-Picks
+      `94e2c2b` und `d941d26` vom 2026-09-10). Was das Remote erreicht, entscheidet der
+      Nutzer — siehe `CLAUDE.md`. Kein Subagent pusht; nach einem Subagentenlauf
+      wird `git ls-remote origin <branch>` gelesen, nicht dem Bericht geglaubt.
+- [x] **Der Zweigabbau ist gelaufen.** Am 2026-09-10 sind
+      `claude/mcp-native` und `claude/brain-lint-braucht-ziel` gelöscht, beide
+      ohne eigene Commits und ihre Spitzen als Vorfahren von `master`
+      bestätigt. Der dritte Kandidat, `claude/jovial-panini-eedcc1`, war zu
+      diesem Zeitpunkt schon weg. Damit stehen **zwei Zweige neben `master`**:
+      `feat/audit-nacharbeit` und `feature/multi-provider-llm` — siehe Matrix
+      oben. `feat/audit-nacharbeit` ist inhaltlich erledigt (beide Commits am
+      2026-09-10 cherry-gepickt), aber als Cherry-Pick kein Vorfahr: sein
+      Abbau bräuchte `git branch -D` und steht noch aus.
+- [x] **Ein Worktree** mit sauberem Arbeitsbaum
+      (`.worktrees/multi-provider-llm`); `.worktrees/mcp-native` ist am
+      2026-09-10 mit dem Zweigabbau entfernt worden.
+- [ ] **Untrackt im Baum, Stand 2026-09-10 nach dem Ledgerumzug:** diese
+      Datei hier, das Ledger (jetzt unter `docs/.superpowers/sdd/`, dort per
+      `.gitignore:2` gewollt ungetrackt) — und dazu ein Satz Dateien, die
+      **keine Sitzung dieses Strangs geschrieben hat**. Am 2026-09-10
+      nachgesehen: es sind **zwei** Verursacher, nicht einer.
+      - Um **10:57** hat ein Wiki-Indexer über den Baum geschrieben, mit
+        `"scope": "project/ultraloom"` in `graph.json`: dazu `index.md` im
+        Wurzelverzeichnis und je eines in `docs/`, `docs/flows/`,
+        `docs/.superpowers/`, `docs/.superpowers/plans/`,
+        `docs/.superpowers/specs/`, sowie ein `_identities.tsv` im
+        Wurzelverzeichnis mit **68 Einträgen** in genau dem Schema, das
+        `docs/wiki/_identities.tsv` als Kopfzeile trägt
+        (`doc_id`, `pfad`, `content_hash`, `revision`). Er hat seinen Katalog
+        also **neben** `docs/wiki/` gelegt statt hinein.
+      - Um **11:04** hat Obsidian `docs/wiki/.obsidian/` angelegt — die
+        Vault-Konfiguration, die beim Öffnen des Verzeichnisses entsteht. Das
+        ist eine andere Ursache als die erste und hat mit dem Indexer nichts zu
+        tun.
+      Der Indexlauf ist zugleich der Beweis, dass das leere Wiki aus
+      Abschnitt 6 nicht unindiziert ist: der Katalog existiert, er liegt nur
+      ungetrackt am falschen Ort. **Offen: ob der Indexer nach `docs/wiki/`
+      umgelenkt wird und ob `.obsidian/` in die `.gitignore` gehört.**
+
+### Prüfkette
+
+Konfiguriert in [`.ultraloom/config.toml`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/.ultraloom/config.toml).
+**Am 2026-09-10 gefahren wurde nur das Profil `edit`** — `lint` und `types`,
+beide grün (exit 0). `test` und `coverage` liefen nicht; für sie sind die
+Angaben unten die Konfiguration, kein Messergebnis.
+
+| Bahn | Befehle | Anmerkung |
+|---|---|---|
+| `lint` | `uv run ruff check .`, `./ulinit check gofmt cmd internal`, `go vet ./...` | nebenläufig; `gofmt -l` exitet auch bei Befund mit 0, deshalb der Umweg über `ulinit check` |
+| `types` | `uv run dmypy run -- --no-error-summary --no-pretty` | Daemon statt mypy: warm 1400 → 988 ms, kalt 9,6 → 9,1 s (A/B am 2026-08-27) |
+| `test` | `uv run pytest`, `go test ./...` | nebenläufig |
+| `coverage` | `uv run --script hooks/coverage-check.py 98.0` | Python über `fail_under`, Go-Boden **98,0** |
+| Profile | `edit` = lint+types; `precommit` = lint+types+test+coverage | |
+
+- [ ] **`precommit` fährt pytest zweimal.** Weil `test` konfiguriert ist, liest
+      `coverage` nicht mehr, was die Suite hinterlassen hat, sondern misst
+      selbst. Kosten bekannt und angenommen — ein grüner Bericht über alten
+      Daten ist das eine, was nicht passieren darf.
+- [ ] **Der Go-Boden ist eine Stolperdrahtgrenze, kein Ziel.** Gemessen am
+      2026-08-28: 745 Anweisungen, 11 in zehn unerreichbaren Blöcken = 98,5 %.
+      **Am 2026-09-10 nachgemessen: 98,4 %** — `d941d26` hat 57 Anweisungen in
+      `cmd/init` dazugelegt und einen Zehntelpunkt der Luft verbraucht.
+      Der halbe Punkt Luft absorbiert etwa drei weitere unerreichbare
+      Fehlerzweige. **Anheben, wenn die Luft verbraucht ist — nicht weiten.**
+- [ ] **Eine verwaiste `.dmypy.json` legt die `types`-Bahn lahm, und die
+      Meldung sagt nicht, was zu tun ist.** Am 2026-09-10 brach der Stop-Hook mit
+      `The NamedPipe at \\.\pipe\dmypy-*.pipe was not found` ab; `dmypy kill`
+      meldete Erfolg, der nächste `run` starb trotzdem sofort („Daemon has
+      died"). Erst `rm .dmypy.json` plus `dmypy start` half. Das ist der Preis
+      des Daemons aus dem A/B vom 2026-08-27 — er ist bezahlt, aber ein
+      Selbstheilungsschritt in der `types`-Bahn (Statusdatei weg, wenn die Pipe
+      fehlt) wäre billig.
+- [ ] **Ein Zeitflackern ist bekannt:**
+      `test_check_all_waits_for_the_checks_at_the_same_time` war einmal unter
+      Last rot (1,40 s), allein und im zweiten vollen Lauf grün.
+- [ ] `[verify.coverage].threshold = 100` steht in der `config.toml`, wird aber
+      nicht durchgesetzt — ultraloom druckt die Zahl nur, durchgesetzt wird, was
+      `fail_under` in `pyproject.toml` und der Boden 98,0 im Report-Kommando
+      sagen. Ein Leser der Konfiguration liest hier eine Anforderung, die keine
+      ist. Siehe den Backlog-Punkt in Abschnitt 4, Runde 2.
+
+---
+
+## 6. Übergreifend: Das Wiki ist leer
+
+`AGENTS.md` legt fest, wohin welches Wissen gehört: Projektwissen nach
+[`docs/wiki/`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki),
+übertragbares Wissen in einen geteilten Bereich, im Zweifel geteilt und aus dem
+Projekt darauf verweisen. Umgesetzt ist davon nichts.
+
+| Datei | Inhalt heute |
+|---|---|
+| [`docs/wiki/index.md`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki/index.md) | Überschrift „Katalog" plus ein Merksatz |
+| [`docs/wiki/log.md`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki/log.md) | Überschrift „Protokoll" plus ein Merksatz |
+| [`docs/wiki/audit.md`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki/audit.md) | „Gefüllt wird es ab Scheibe 5; bis dahin bleibt es leer" |
+| [`docs/wiki/_identities.tsv`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki/_identities.tsv) | nur die Kopfzeile |
+
+- [ ] **Das Wiki ist als Datei leer, aber nicht unindiziert.** Am 2026-09-10
+      um 10:57 hat ein Wiki-Indexer den ganzen Baum unter
+      `"scope": "project/ultraloom"` erfasst — 68 Dokumente mit `sha256` in
+      einem `_identities.tsv`, dazu `graph.json` und sechs `index.md`. Nur
+      schrieb er das alles ins **Wurzelverzeichnis** und in die
+      Dokumentordner, nicht nach `docs/wiki/`, und nichts davon ist getrackt.
+      Die Tabelle unten beschreibt also die Vorlagen, nicht den Wissensstand.
+      Siehe den Befund in Abschnitt 5.
+- [ ] **Entscheiden, ob das Wiki hier überhaupt gefüllt wird.** Das Wissen dieses
+      Repos steht heute in `README.md` (lang), `AGENTS.md`, `CLAUDE.md` und
+      `docs/flows/`. Entweder das Wiki wird der Ort und die Ablaufseiten ziehen
+      um, oder die drei Vorlagen sagen, was statt ihrer gilt.
+- [ ] `audit.md` verweist auf „Scheibe 5" — eine Nummerierung, die in diesem Repo
+      sonst nirgends vorkommt. Der Satz stammt vermutlich aus `ultra-brain`.
+- [x] `docs/benchmarks.md` wird geführt, wie `AGENTS.md` es verlangt:
+      nachgesehen, die Messungen des Worktree-Spiegel-Strangs stehen drin —
+      2026-09-08 00:30 (Kosten von `worktree-link` am Sitzungsstart, gemessen in
+      `space` bei `43ece6f`) und 2026-09-08 15:05 (Python-Einstiegspunkt gegen
+      das Go-Binary daneben).
+
+---
+
+## 7. Ablage und Übergaben
+
+- Nur **eine** Übergabe liegt unter
+  [`handovers/`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/handovers):
+  `2026-08-28-2019-installer-kern-merged.md`. Der Worktree-Spiegel-Strang, mit
+  Abstand der größte seither, hat keine.
+- [ ] Entscheiden, ob `handovers/` weitergeführt wird oder das Ausführungsledger
+      diese Rolle übernimmt.
+- 23 Pläne und 27 Spezifikationen unter
+  [`docs/.superpowers/`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers),
+  dazu ein SDD-Verzeichnis mit einem Bericht. Nach `AGENTS.md` sind das
+  Arbeitspapiere: einmal geschrieben, von einem Menschen gelesen, nie übersetzt.
