@@ -163,8 +163,11 @@ func gather(root string, run detect.Runner) (detect.Facts, error) {
 	return facts, nil
 }
 
-// git runs one command and reads its output, and is the only subprocess this
-// program starts.
+// git runs one command and reads its output.
+//
+// It was the only subprocess this program started until `check types` grew a
+// second one; that one lives in check.go, reads both streams and hands the
+// exit code back, none of which this needs.
 //
 // An exit status of 1 with nothing printed is git's way of saying a setting is
 // unset; that is an answer, not a failure, and it becomes an empty string.

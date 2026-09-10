@@ -21,17 +21,37 @@
 # measurement ran while the machine was busy and said the opposite, with
 # spreads wide enough to hide the whole effect.
 #
-# Still `uv run` and not a shim from `uv tool install`: that is what pins the
-# version. A globally installed mypy would judge this project by whatever
-# version the machine happens to carry, and the gate would drift from the
-# development dependency without anyone editing a line. The same reason keeps
-# `lint` on `uv run`.
+# The daemon is what makes the lane cheap and is also the one thing that breaks
+# it: a status file left behind by a daemon that is gone takes the lane down
+# with `The NamedPipe ... was not found`, and `dmypy kill` does not fix it --
+# on 2026-09-10 it reported success and the next run died all the same. Only
+# removing the status file helped. `ulinit check types` is that step: it runs
+# dmypy, and when the failure is about the daemon rather than about the code it
+# clears the state and runs once more, saying so on stderr. Which of the two it
+# is comes from dmypy itself -- a verdict carries mypy's own status, a daemon
+# fault leaves fail() with exit 2 -- plus one of the three messages mypy prints
+# about a status file describing something that is not there. A blocking error
+# also exits 2 and is passed through untouched.
+#
+# Go and not a script beside hooks/coverage-check.py, measured on 2026-09-10,
+# 10 warm runs each: `uv run --script` on an empty PEP-723 script costs 55 ms
+# median, `ulinit` 31 ms. 24 ms against a lane whose warm work is 230 ms, on
+# every post-edit -- and this lane exists because of an A/B that bought 412 ms.
+# `ulinit check` is where this repository already keeps its tool choices:
+# commit-msg, gofmt and coverage stand there.
+#
+# Still `uv run dmypy` inside, and not a shim from `uv tool install`: that is
+# what pins the version. A globally installed mypy would judge this project by
+# whatever version the machine happens to carry, and the gate would drift from
+# the development dependency without anyone editing a line. The same reason
+# keeps `lint` on `uv run`.
 #
 # `run --` rather than `check`, because that form restarts the daemon by itself
 # when the flags behind it change; a daemon still judging by the previous
-# settings is worse than no daemon.
+# settings is worse than no daemon. The flags themselves moved into the
+# subcommand, next to the code that reads its output.
 [verify]
-types = "uv run dmypy run -- --no-error-summary --no-pretty"
+types = "./ulinit check types"
 
 # What the repairer must not touch. `pyproject.toml` stands beside the tests
 # because the thresholds live there: a loosened ruff rule or a lowered
