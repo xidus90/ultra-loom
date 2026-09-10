@@ -40,6 +40,20 @@ var StackTools = map[string][]ToolSpec{
 		{Name: "go", Stack: "go", InstallCmd: "winget install GoLang.Go"},
 		{Name: "gofmt", Stack: "go", InstallCmd: "winget install GoLang.Go"},
 	},
+	// The version is pinned because AGENTS.md requires it of a tool a hook
+	// invokes, and this one is invoked by `ulguard post-edit`. Its neighbours
+	// above are not pinned; that is a gap of its own, and closing it here
+	// would change what every other stack installs in a commit about the
+	// shell lane.
+	//
+	// The entry is late because the stack was detected and the lane was run
+	// long before anything could say what to install: `detect/signals.go:60`
+	// answers "shell" for a `.shellcheckrc`, `post_edit.go` runs
+	// `shellcheck`, and this table had no row for either.
+	"shell": {
+		{Name: "shellcheck", Stack: "shell",
+			InstallCmd: "winget install --id koalaman.shellcheck --version 0.11.0"},
+	},
 }
 
 // LookPathFunc abstracts os/exec.LookPath for deterministic testing.

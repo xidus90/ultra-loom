@@ -530,3 +530,59 @@ func TestOtherLanesStayAtTheRoot(t *testing.T) {
 		t.Fatalf("expected go vet at the root, got %v", cmds)
 	}
 }
+
+// The lane-availability tests. `defaultCommandRunner` used to answer this
+// question by matching the console's own words -- "is not recognized as an
+// internal or external command" -- and a German Windows prints "ist entweder
+// falsch geschrieben oder konnte nicht gefunden werden" instead. So the
+// escape hatch never opened here, and every edit to a file with an unmapped
+// extension blocked with exit 2 on a machine without shellcheck. The
+// replacement asks the PATH, which speaks no language.
+func TestLaneTool(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{"shellcheck **/*.sh", "shellcheck"},
+		{"npx --prefix frontend eslint app.ts", "npx"},
+		{"uv run brain lint file.md", "uv"},
+		{"go vet ./...", "go"},
+		{"   spaced   out  ", "spaced"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := laneTool(tt.command); got != tt.want {
+			t.Errorf("laneTool(%q) = %q, want %q", tt.command, got, tt.want)
+		}
+	}
+}
+
+func TestLaneAvailable(t *testing.T) {
+	found := func(string) (string, error) { return "/usr/bin/shellcheck", nil }
+	missing := func(string) (string, error) { return "", errors.New("executable file not found in %PATH%") }
+
+	if !laneAvailable("shellcheck **/*.sh", found) {
+		t.Error("a lane whose tool is on PATH is available")
+	}
+	if laneAvailable("shellcheck **/*.sh", missing) {
+		t.Error("a lane whose tool is not on PATH is unavailable")
+	}
+	// An empty text names no tool, so there is nothing to look up and nothing
+	// to refuse. Answering "unavailable" would drop a lane over a bug
+	// somewhere else and hide it.
+	if !laneAvailable("", missing) {
+		t.Error("a lane with no tool is not refused for a missing tool")
+	}
+}
+
+// The whole point, measured against the real PATH rather than a stub: a tool
+// that is not installed costs the lane and not the exit code.
+func TestDefaultCommandRunnerSkipsMissingTool(t *testing.T) {
+	out, err := defaultCommandRunner("", "ulguard-no-such-tool-8f3a --version")
+	if err != nil {
+		t.Fatalf("a missing tool must not fail the hook, got %v", err)
+	}
+	if out != "" {
+		t.Fatalf("a skipped lane says nothing here, got %q", out)
+	}
+}

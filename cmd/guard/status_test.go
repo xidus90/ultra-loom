@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,5 +210,48 @@ func TestRunStatusPyrightWithUV(t *testing.T) {
 	out := stdout.String()
 	if !strings.Contains(out, "uv run pyright") {
 		t.Fatalf("expected uv run pyright in status output, got:\n%s", out)
+	}
+}
+
+// The missing-tool report is computed from getCommandsForStacks, the same
+// builder the hook runs, and not from the lane list printed above it. Two
+// lists drift, and this one has to be about the lanes that actually run.
+func TestUnavailableLanes(t *testing.T) {
+	nothing := func(string) (string, error) { return "", errors.New("not found") }
+	everything := func(string) (string, error) { return "/usr/bin/x", nil }
+
+	missing := unavailableLanes([]string{"shell", "go"}, nothing)
+	if len(missing) != 2 || missing[0] != "go" || missing[1] != "shellcheck" {
+		t.Fatalf("expected [go shellcheck] sorted, got %v", missing)
+	}
+
+	if got := unavailableLanes([]string{"shell", "go"}, everything); len(got) != 0 {
+		t.Fatalf("expected nothing missing, got %v", got)
+	}
+
+	// A tool named by two lanes is reported once: the answer is about tools to
+	// install, not about lanes that mention them.
+	onlyGo := func(name string) (string, error) {
+		if name == "go" {
+			return "/usr/bin/go", nil
+		}
+		return "", errors.New("not found")
+	}
+	if got := unavailableLanes([]string{"typescript", "vue"}, onlyGo); len(got) != 1 || got[0] != "npx" {
+		t.Fatalf("expected [npx] once, got %v", got)
+	}
+}
+
+func TestRenderLaneTools(t *testing.T) {
+	var green bytes.Buffer
+	renderLaneTools(&green, nil)
+	if !strings.Contains(green.String(), "[OK]") {
+		t.Errorf("a machine with every tool says so: %q", green.String())
+	}
+
+	var red bytes.Buffer
+	renderLaneTools(&red, []string{"shellcheck"})
+	if !strings.Contains(red.String(), "shellcheck") || !strings.Contains(red.String(), "[WARN]") {
+		t.Errorf("a missing tool is named and marked: %q", red.String())
 	}
 }

@@ -40,6 +40,13 @@ func root(text string) command { return command{text: text} }
 // for this program's own git calls, and `without_location` in
 // `src/ultraloom/process.py` for the children the Python check lane spawns.
 func defaultCommandRunner(dir, command string) (string, error) {
+	// Before the shell, so a missing tool costs the lane and not the exit
+	// code. Silent on purpose: the hook stays fast and says nothing, and
+	// `ulguard status` is where a lane that cannot run is named.
+	if !laneAvailable(command, exec.LookPath) {
+		return "", nil
+	}
+
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("cmd", "/c", command)
@@ -48,14 +55,40 @@ func defaultCommandRunner(dir, command string) (string, error) {
 	}
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		outStr := string(out)
-		if strings.Contains(outStr, "is not recognized as an internal or external command") ||
-			strings.Contains(outStr, "command not found") {
-			return "", nil
-		}
-	}
 	return string(out), err
+}
+
+// laneTool is the executable a lane command starts with, or "" for a text
+// that names none.
+func laneTool(command string) string {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// laneAvailable answers whether a lane can run at all, by asking the PATH.
+//
+// This used to be decided after the fact, by matching the console's own words
+// against "is not recognized as an internal or external command". A German
+// Windows prints "ist entweder falsch geschrieben oder konnte nicht gefunden
+// werden", so the escape hatch never opened on this machine: every edit to a
+// file with an unmapped extension ran the whole chain -- which is the
+// deliberate fallback of the selective-dispatch design -- reached the shell
+// lane without shellcheck installed, and blocked the edit with exit 2. The
+// PATH speaks no language.
+//
+// A text with no tool is available, not refused. There is nothing to look up,
+// and answering "unavailable" would drop a lane over a bug elsewhere and hide
+// it.
+func laneAvailable(command string, look func(string) (string, error)) bool {
+	tool := laneTool(command)
+	if tool == "" {
+		return true
+	}
+	_, err := look(tool)
+	return err == nil
 }
 
 var explicitIgnoredExtensions = map[string]bool{

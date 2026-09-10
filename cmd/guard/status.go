@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/xidus90/ultra-loom/internal/detect"
@@ -219,7 +221,51 @@ func runStatus(stdout io.Writer, stderr io.Writer, root string) int {
 			fmt.Fprintf(stdout, "   • [%s] %s\n     Reason: %s\n", f.Event, f.Command, f.Reason)
 		}
 	}
+	renderLaneTools(stdout, unavailableLanes(facts.Stacks, exec.LookPath))
+
 	fmt.Fprintln(stdout, "================================================================================")
 
 	return ExitOK
+}
+
+// unavailableLanes names every tool a configured lane would start that this
+// machine does not have.
+//
+// Built from getCommandsForStacks -- the same builder the hook runs -- and not
+// from the lane list printed above. A second list drifts, and this answer has
+// to be about the lanes that actually run.
+//
+// This report is why the hook may stay silent about a tool it cannot find.
+// `defaultCommandRunner` drops such a lane and says nothing, so the edit is
+// not blocked; without a place that names the gap, a lane nobody can run
+// would look exactly like a lane that passed.
+func unavailableLanes(stacks []string, look func(string) (string, error)) []string {
+	seen := map[string]bool{}
+	var missing []string
+	// The wide form: no target, so every configured lane contributes its tool.
+	for _, cmd := range getCommandsForStacks(stacks, "", false, "", "") {
+		tool := laneTool(cmd.text)
+		if tool == "" || seen[tool] {
+			continue
+		}
+		seen[tool] = true
+		if _, err := look(tool); err != nil {
+			missing = append(missing, tool)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func renderLaneTools(stdout io.Writer, missing []string) {
+	fmt.Fprintln(stdout, "\n--------------------------------------------------------------------------------")
+	fmt.Fprintln(stdout, " Lane Tools On This Machine")
+	fmt.Fprintln(stdout, "--------------------------------------------------------------------------------")
+	if len(missing) == 0 {
+		fmt.Fprintln(stdout, " [OK] Every configured lane's tool is on PATH.")
+		return
+	}
+	for _, tool := range missing {
+		fmt.Fprintf(stdout, " [WARN] %s is not on PATH: its lane is configured and silently skipped.\n", tool)
+	}
 }

@@ -2,6 +2,7 @@ package tooling
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -104,5 +105,24 @@ func TestInstallTool(t *testing.T) {
 	noCmdSpec := ToolSpec{Name: "no-cmd"}
 	if err := InstallTool(noCmdSpec, runner, "."); err == nil {
 		t.Fatal("want error on missing install command")
+	}
+}
+
+// The shell stack was detected by `detect` and run by `ulguard post-edit`
+// while this table had no entry for it, so a machine without shellcheck could
+// not be told what to install. The version is pinned because AGENTS.md
+// requires it of a tool a hook invokes; its neighbours here are not, which is
+// a gap of its own and not this entry's to close.
+func TestCheckToolsShell(t *testing.T) {
+	lookup := func(string) (string, error) { return "", errors.New("not found") }
+
+	_, missing := CheckTools([]string{"shell"}, lookup)
+
+	if len(missing) != 1 || missing[0].Name != "shellcheck" {
+		t.Fatalf("expected shellcheck missing, got %v", missing)
+	}
+	if !strings.Contains(missing[0].InstallCmd, "koalaman.shellcheck") ||
+		!strings.Contains(missing[0].InstallCmd, "--version") {
+		t.Fatalf("the install line names the package and pins a version, got %q", missing[0].InstallCmd)
 	}
 }
