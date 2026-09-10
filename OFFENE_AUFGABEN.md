@@ -461,6 +461,11 @@ Projekt darauf verweisen. Umgesetzt ist davon nichts.
       um, oder die drei Vorlagen sagen, was statt ihrer gilt.
 - [ ] `audit.md` verweist auf „Scheibe 5" — eine Nummerierung, die in diesem Repo
       sonst nirgends vorkommt. Der Satz stammt vermutlich aus `ultra-brain`.
+- [ ] **`docs/benchmarks.de.md` trägt die Überschrift „Chronologisches
+      Benchmark-Protokoll" **zweimal**, in der englischen Fassung steht sie
+      einmal. Am 2026-09-10 beim Eintragen der `types`-Messung gesehen; der
+      neue Eintrag steht unter der ersten. Die beiden Blöcke sind nicht
+      chronologisch ineinander sortiert, sondern liegen hintereinander.
 - [x] `docs/benchmarks.md` wird geführt, wie `AGENTS.md` es verlangt:
       nachgesehen, die Messungen des Worktree-Spiegel-Strangs stehen drin —
       2026-09-08 00:30 (Kosten von `worktree-link` am Sitzungsstart, gemessen in

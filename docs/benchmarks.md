@@ -47,6 +47,22 @@ The tables below summarize the latest performance measurements across all 5 benc
 
 ## Chronological Benchmark Log
 
+### 2026-09-10 CEST — The `types` Lane: Which Wrapper Pays for dmypy, and What Full Coverage Does to a Floor
+
+* **Repository:** `ultraloom` on `master` at `298b473`, Windows 11, Go 1.27, Python 3.13.15.
+* **Objective:** `.ultraloom/config.toml` called `uv run dmypy run --` directly, and a status file left behind by a daemon that was gone took the whole lane down. The self-healing step had to live somewhere. Two questions decided where: what does each wrapper cost per invocation, and does adding Go code eat the 98.0% floor's remaining air?
+* **Method:** PowerShell 7 `[Diagnostics.Stopwatch]` around a call-operator invocation, one discarded warm-up, then 10 runs per case, warm only. Reported as median with min and max, the same harness as the 2026-09-08 00:30 entry. Coverage read from `go test ./... -covermode=set` and counted out of the profile itself rather than off the summary line.
+* **Findings:**
+  * `uv run --script` on an empty PEP-723 script: **55 ms** median (min 53, max 159).
+  * `./ulinit check coverage` with no work to do, i.e. Go process start alone: **31 ms** median (min 29, max 43).
+  * `uv run dmypy run -- --no-error-summary --no-pretty` with a warm daemon, the lane's actual work: **230 ms** median (min 218, max 257).
+  * **The wrapper choice is 24 ms**, or 261 ms against 285 ms for the whole lane — about 9%. It is paid at every post-edit, against a lane that exists only because the 2026-08-27 A/B bought 412 ms warm. The Go form won on that.
+  * **Correction to the 2026-09-08 15:05 entry's reading.** Its ~253 ms is the Python *package* entry point, which imports `ultraloom`. A PEP-723 script through `uv run --script` starts in a fifth of that. The two figures are not the same thing and the older one must not be quoted about scripts.
+  * **Coverage: the intuition is backwards.** Measured before the change: 2294 statements, 2258 covered, 36 uncovered, 98.4%. The 98.0% floor allows 45 uncovered, so 9 statements of air. Adding fully covered code *dilutes* the uncovered set and **raises** the figure: after `67a9f2b` the tree reads **98.5%**. Only unreachable branches cost. The floor is an argument against untested code, not against more code.
+* **Not a timing, but measured in the same session and worth the line:** the first version of the heal called `dmypy kill` before removing the status file. The pid in a stale status file is alive by definition -- that is why `is_running()` was fooled -- and on Windows dmypy kills through `taskkill /pid <n> /f /t`. A test that put a sleeping shell's pid into the file found the shell gone afterwards. The kill was removed; the same test now finds it alive.
+
+---
+
 ### 2026-09-08 15:05 CEST — Session Hooks: the Python Entry Point Against the Go Binary Beside It
 
 * **Repository:** `ultraloom` on branch `claude/hooks-global-runtime`, the global `ultraloom` at `~/.local/bin/ultraloom` and `ulguard.exe` from this checkout.

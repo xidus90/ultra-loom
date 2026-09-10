@@ -47,6 +47,22 @@ Die folgenden Tabellen fassen die aktuellsten Performance-Messungen über alle 5
 
 ## Chronologisches Benchmark-Protokoll
 
+### 10.09.2026 MESZ — Die `types`-Bahn: welche Verpackung dmypy bezahlt, und was volle Deckung mit einem Boden macht
+
+* **Repository:** `ultraloom` auf `master` bei `298b473`, Windows 11, Go 1.27, Python 3.13.15.
+* **Ziel:** `.ultraloom/config.toml` rief `uv run dmypy run --` unmittelbar, und eine Statusdatei, die ihren Daemon überlebt hatte, legte die ganze Bahn lahm. Der Selbstheilungsschritt musste irgendwo wohnen. Zwei Fragen entschieden das Wo: was kostet jede Verpackung pro Aufruf, und frisst neuer Go-Code die restliche Luft über dem Boden von 98,0 %?
+* **Methode:** PowerShell 7 `[Diagnostics.Stopwatch]` um einen Aufruf über den Call-Operator, ein verworfener Warmlauf, dann 10 Läufe je Fall, nur warm. Angegeben als Median mit min und max, dieselbe Vorrichtung wie im Eintrag vom 08.09.2026 00:30. Die Deckung aus `go test ./... -covermode=set`, ausgezählt aus dem Profil selbst statt von der Summenzeile abgelesen.
+* **Ergebnisse:**
+  * `uv run --script` auf einem leeren PEP-723-Skript: **55 ms** Median (min 53, max 159).
+  * `./ulinit check coverage` ohne Arbeit, also reiner Go-Prozessstart: **31 ms** Median (min 29, max 43).
+  * `uv run dmypy run -- --no-error-summary --no-pretty` mit warmem Daemon, die eigentliche Arbeit der Bahn: **230 ms** Median (min 218, max 257).
+  * **Die Wahl der Verpackung sind 24 ms**, also 261 ms gegen 285 ms für die ganze Bahn — etwa 9 %. Bezahlt wird das an jedem Post-Edit, gegen eine Bahn, die es nur gibt, weil das A/B vom 27.08.2026 warm 412 ms brachte. Die Go-Form hat damit gewonnen.
+  * **Korrektur der Lesart des Eintrags vom 08.09.2026 15:05.** Seine ~253 ms sind der Python-**Paket**-Einsprungpunkt, der `ultraloom` importiert. Ein PEP-723-Skript über `uv run --script` startet in einem Fünftel davon. Die zwei Zahlen sind nicht dasselbe, und die ältere darf nicht über Skripte zitiert werden.
+  * **Deckung: die Ahnung stimmt nicht.** Vor der Änderung gemessen: 2294 Anweisungen, 2258 gedeckt, 36 offen, 98,4 %. Der Boden 98,0 % erlaubt 45 offene, also 9 Anweisungen Luft. Vollständig gedeckter neuer Code **verdünnt** die offenen und **hebt** die Zahl: nach `67a9f2b` steht der Baum bei **98,5 %**. Nur unerreichbare Zweige kosten. Der Boden ist ein Argument gegen ungetesteten Code, nicht gegen mehr Code.
+* **Keine Zeitmessung, aber in derselben Sitzung gemessen und die Zeile wert:** die erste Fassung der Heilung rief `dmypy kill`, bevor sie die Statusdatei entfernte. Der Pid in einer abgestandenen Statusdatei ist per Definition lebendig — genau deshalb wurde `is_running()` getäuscht — und unter Windows tötet dmypy über `taskkill /pid <n> /f /t`. Ein Test, der den Pid eines schlafenden Shell-Prozesses in die Datei schrieb, fand den Prozess danach nicht mehr. Der `kill` ist entfernt; derselbe Test findet ihn jetzt am Leben.
+
+---
+
 ### 08.09.2026 15:05 MESZ — Sitzungs-Hooks: der Python-Einsprungpunkt gegen das Go-Binary daneben
 
 * **Repository:** `ultraloom` auf Zweig `claude/hooks-global-runtime`, das globale `ultraloom` unter `~/.local/bin/ultraloom` und `ulguard.exe` aus diesem Checkout.
