@@ -145,15 +145,16 @@ func TestAFullRunWritesTheWholeSetAndSaysSo(t *testing.T) {
 
 // The hook commands land in a file the project commits, so none of them may
 // carry a path that exists only on this machine -- and none of them names a
-// runtime directory inside the project either: the four ultraloom hooks look
-// the binary up on PATH, the way the ulguard and brain entries beside them do.
+// runtime directory inside the project either: the hooks look their binary up
+// on PATH, the way the ulguard and brain entries beside them do. SessionStart
+// is the ulguard binary now, the three history hooks are still the Python one.
 func TestTheHookCommandsCallTheBinaryOnPath(t *testing.T) {
 	root := t.TempDir()
 	mustRun(t, answered(root))
 	body := read(t, root, ".claude/settings.json")
 	// The whole command, not a substring of it: the vendored form ended in
 	// exactly these words, so a Contains check would pass against it too.
-	want := `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+	want := `ulguard hook session-start --host claude --root "${CLAUDE_PROJECT_DIR}"`
 	if got := commandFor(t, body, "SessionStart", ""); got != want {
 		t.Fatalf("SessionStart runs %q, want %q", got, want)
 	}
@@ -164,6 +165,26 @@ func TestTheHookCommandsCallTheBinaryOnPath(t *testing.T) {
 	}
 	if strings.Contains(body, root) || strings.Contains(body, filepath.ToSlash(root)) {
 		t.Fatalf("a machine path reached settings.json:\n%s", body)
+	}
+}
+
+// The generated SessionStart entry names the Go binary and the host. The
+// Python entry point it replaces stays in pyproject.toml for the agent flow,
+// so both names exist and only the one written here decides which runs.
+func TestHookEntriesSessionStartIsTheGoBinary(t *testing.T) {
+	entries := hookEntries(detect.Facts{HasGit: true}, false)
+
+	var found string
+	for _, entry := range entries {
+		if entry.Event == "SessionStart" {
+			found = entry.Command
+		}
+	}
+	if !strings.Contains(found, "ulguard hook session-start") {
+		t.Fatalf("SessionStart runs the Go binary, got %q", found)
+	}
+	if !strings.Contains(found, "--host claude") {
+		t.Fatalf("and it names the host, got %q", found)
 	}
 }
 
@@ -203,7 +224,7 @@ func TestTheVendoredCommandIsRewrittenAndNotDuplicated(t *testing.T) {
 			`ultraloom hook session-start --root \"${CLAUDE_PROJECT_DIR}\"","timeout":20}]}]}}`)
 	mustRun(t, answered(root))
 	body := read(t, root, ".claude/settings.json")
-	want := `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+	want := `ulguard hook session-start --host claude --root "${CLAUDE_PROJECT_DIR}"`
 	if got := commandFor(t, body, "SessionStart", ""); got != want {
 		t.Fatalf("SessionStart runs %q, want %q", got, want)
 	}

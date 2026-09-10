@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/xidus90/ultra-loom/internal/hostio"
 )
 
 func main() {
@@ -66,6 +68,51 @@ func cli(args []string, stdin io.Reader, stderr io.Writer) int {
 			return ExitInternal
 		}
 		return runWorktreeRemove(os.Stdout, stderr, args[1])
+	}
+
+	// `hook` carries a second word, unlike every subcommand above. A mistyped
+	// event is refused here rather than falling through to the write barrier
+	// below: that barrier reads stdin and decides about a file, and answering
+	// a hook call that way is a verdict about the wrong question.
+	//
+	// The event is checked before the flags are parsed and before the root is
+	// resolved, so an unknown one is refused for what it is and not for
+	// whichever directory the caller happened to stand in.
+	if len(args) > 0 && args[0] == "hook" {
+		if len(args) < 2 {
+			fmt.Fprintln(stderr, "usage: ulguard hook <event> --host <host> [--root <dir>]")
+			return ExitInternal
+		}
+		event := args[1]
+		// One event so far, so one comparison. It becomes a set when the stop
+		// gate and the subagent pair arrive at their own stages.
+		if event != "session-start" {
+			fmt.Fprintf(stderr, "ultraloom-guard hook: unknown event %q\n", event)
+			return ExitInternal
+		}
+		flags := flag.NewFlagSet("ultraloom-guard hook "+event, flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		root := flags.String("root", "", "path to the project root")
+		host := flags.String("host", "claude", "the harness calling: claude, antigravity or codex")
+		if err := flags.Parse(args[2:]); err != nil {
+			return ExitInternal
+		}
+		// An empty --root is the Antigravity case: a hook there runs with its
+		// working directory set to the one holding hooks.json, not the project
+		// root, so the root is found by walking up. Measured 2026-09-10; see
+		// docs/.superpowers/specs/2026-09-10-antigravity-hook-messung.md.
+		// Whether that host sets CLAUDE_PROJECT_DIR is unmeasured and this
+		// does not rely on it either way.
+		resolved := *root
+		if resolved == "" {
+			found, err := hostio.FindRoot(".")
+			if err != nil {
+				fmt.Fprintf(stderr, "ultraloom-guard hook %s: %v\n", event, err)
+				return ExitInternal
+			}
+			resolved = found
+		}
+		return runHookSessionStart(stdin, os.Stdout, stderr, resolved, *host)
 	}
 
 	flags := flag.NewFlagSet("ultraloom-guard", flag.ContinueOnError)

@@ -800,6 +800,16 @@ func hookCommand(argv string) string {
 	return `ultraloom ` + argv + ` --root "${CLAUDE_PROJECT_DIR}"`
 }
 
+// guardHookCommand builds what a generated hook runs on Claude Code: the Go
+// binary by name, the event, and the host it is answering.
+//
+// By name for the reason hookCommand records: a name has no directory that a
+// working tree could be missing. The host is a flag because these events carry
+// no `tool_input` to recognise one from -- see internal/hostio.
+func guardHookCommand(event string) string {
+	return `ulguard hook ` + event + ` --host claude --root "${CLAUDE_PROJECT_DIR}"`
+}
+
 // hookEntries is the minimal set that makes a fresh project work. Which
 // version of each hook finally wins is a question for the consolidation of the
 // six repositories, not for the installer.
@@ -809,7 +819,9 @@ func hookCommand(argv string) string {
 // without a repository that question has no answer at all.
 func hookEntries(facts detect.Facts, wikiHooks bool) []settings.Entry {
 	entries := []settings.Entry{
-		{Event: "SessionStart", Command: hookCommand("hook session-start"), Timeout: 20},
+		// The one event that has crossed to the Go binary. hookCommand stays
+		// for the three below it, which run on Python until their own stages.
+		{Event: "SessionStart", Command: guardHookCommand("session-start"), Timeout: 20},
 		{Event: "PreToolUse", Matcher: "Write|Edit|NotebookEdit|Bash|PowerShell",
 			Command: `ulguard --root "${CLAUDE_PROJECT_DIR}"`, Timeout: 10},
 	}
