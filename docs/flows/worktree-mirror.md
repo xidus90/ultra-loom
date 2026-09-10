@@ -269,9 +269,10 @@ the only liveness there is to read, and a file older than
 (`cmd/guard/worktree.go:74-94`).
 
 The number is only as good as the writes behind it, and there are four:
-`src/ultraloom/hooks/session_start.py:59` at session start, `stop.py:250` on
-every block and `:283` on every pass, and `subagent_start.py:38` on every
-subagent dispatch — the last gated on the payload alone and on no
+`ulguard hook session-start` at session start — it took that over from
+`src/ultraloom/hooks/session_start.py:59`, deleted in `6a7037a` —
+`stop.py:250` on every block and `:283` on every pass, and
+`subagent_start.py:38` on every subagent dispatch — the last gated on the payload alone and on no
 configuration at all. So the file is as young as the last turn that ended or
 the last subagent dispatched. Only a long interactive session that dispatches
 no subagent, in a project without a configured stop gate, ages past its own

@@ -12,12 +12,19 @@ remote's refs before and after its run, it is.
 Invocation, one per event, each reading Claude Code's payload from stdin:
 
 ```bash
-ultraloom hook session-start    # SessionStart
+ulguard hook session-start --host claude   # SessionStart
 ultraloom hook post-edit        # PostToolUse
 ultraloom hook subagent-start   # SubagentStart
 ultraloom hook subagent-stop    # SubagentStop
 ultraloom hook stop             # Stop
 ```
+
+SessionStart is answered by the Go binary; `stop`, `subagent-start` and
+`subagent-stop` run on Python. It needs no Python runtime — which is what a
+fresh worktree is missing — and it takes the harness as a flag, because
+SessionStart, Stop and the subagent events carry no tool call to recognise one
+from. `--host` has no default: a call that omits it is refused rather than
+answered in the wrong shape.
 
 ## The graph
 
@@ -69,19 +76,22 @@ for the same reason at a smaller scale. Only then does the chain run.
 
 ### `session-start`
 
-Reads `.ultraloom/runs/`, asks `pending_gate` of every journal, and prints one
-block per paused run — the run id, the node it waits at, its question, and the
-`ultraloom resume <id> --answer "your answer"` line. A journal it cannot read
-is named on stderr and skipped: one damaged file is a finding of its own, and
-hiding the other runs behind it would turn a small defect into a silent one.
+Reads `.ultraloom/runs/`, asks every journal for its pending gate, and hands
+back one block per paused run — the run id, the node it waits at, its
+question, and the `ultraloom resume <id> --answer "your answer"` line. Under
+Claude Code those blocks travel in `hookSpecificOutput.additionalContext`;
+nothing to say writes nothing at all. A journal it cannot read is named on
+stderr and skipped: one damaged file is a finding of its own, and hiding the
+other runs behind it would turn a small defect into a silent one.
 
-That line is ASCII down to the placeholder. It goes to whatever console the
-harness hands over, and on Windows that is cp1252 by default: a single `…`
-there does not merely look wrong, `print` raises and the hook dies with a code
-the exit protocol does not describe.
+That line is ASCII down to the placeholder. It is parity with the Python hook
+this replaced, which printed to whatever console the harness handed over —
+cp1252 by default on Windows, where a single `…` did not merely look wrong but
+made `print` raise. The Go hook writes UTF-8 and would not fail on it, so the
+spelling is kept because a session's announcement should not change with the
+port, not as a safeguard.
 
-It also records `head_commit` as the session's base, silently in both failure
-cases — no session id means nowhere to file it, no repository means nothing to
+It also records the session's base commit, silently in both failure cases — no session id means nowhere to file it, no repository means nothing to
 file. Neither is a defect worth a line in every session of every checkout that
 is not a git repository. Where the absence matters is the stop gate, and that
 is where it is said out loud.

@@ -13,12 +13,19 @@ Lauf schon.
 Aufruf, je Ereignis einer, jeder liest die Payload von Claude Code über stdin:
 
 ```bash
-ultraloom hook session-start    # SessionStart
+ulguard hook session-start --host claude   # SessionStart
 ultraloom hook post-edit        # PostToolUse
 ultraloom hook subagent-start   # SubagentStart
 ultraloom hook subagent-stop    # SubagentStop
 ultraloom hook stop             # Stop
 ```
+
+SessionStart beantwortet das Go-Binary; `stop`, `subagent-start` und
+`subagent-stop` laufen auf Python. Es braucht keine Python-Laufzeit — genau
+die fehlt in einem frischen Worktree — und nimmt die Harness als Flag, weil
+SessionStart, Stop und das Subagentenpaar keinen Werkzeugaufruf mitbringen, an
+dem sie zu erkennen wäre. `--host` hat keinen Vorgabewert: ein Aufruf ohne das
+Flag wird abgelehnt und nicht in der falschen Form beantwortet.
 
 ## Der Graph
 
@@ -71,19 +78,24 @@ die Kette.
 
 ### `session-start`
 
-Liest `.ultraloom/runs/`, fragt jedes Journal über `pending_gate` und druckt je
-pausiertem Lauf einen Block — die Lauf-ID, den Knoten, an dem er wartet, seine
-Frage und die Zeile `ultraloom resume <id> --answer "your answer"`. Ein Journal,
-das er nicht lesen kann, wird auf stderr genannt und übersprungen: Eine
-beschädigte Datei ist ein Befund für sich, und die übrigen Läufe dahinter zu
-verstecken machte aus einem kleinen Defekt einen stillen.
+Liest `.ultraloom/runs/`, fragt jedes Journal nach seinem offenen Gate und gibt
+je pausiertem Lauf einen Block zurück — die Lauf-ID, den Knoten, an dem er
+wartet, seine Frage und die Zeile `ultraloom resume <id> --answer "your
+answer"`. Unter Claude Code reisen diese Blöcke in
+`hookSpecificOutput.additionalContext`; wer nichts zu sagen hat, schreibt gar
+nichts. Ein Journal, das er nicht lesen kann, wird auf stderr genannt und
+übersprungen: Eine beschädigte Datei ist ein Befund für sich, und die übrigen
+Läufe dahinter zu verstecken machte aus einem kleinen Defekt einen stillen.
 
-Diese Zeile ist ASCII bis in den Platzhalter. Sie geht auf die Konsole, die der
-Harness gerade übergibt, und unter Windows ist das voreingestellt cp1252: Ein
-einzelnes `…` sieht dort nicht bloß falsch aus, `print` wirft, und der Hook
-stirbt mit einem Code, den das Exit-Protokoll nicht beschreibt.
+Diese Zeile ist ASCII bis in den Platzhalter. Das ist Gleichlauf mit dem
+Python-Hook, den sie ersetzt: Der druckte auf die Konsole, die der Harness
+gerade übergab — unter Windows voreingestellt cp1252, wo ein einzelnes `…`
+nicht bloß falsch aussah, sondern `print` werfen ließ. Das Go-Binary schreibt
+UTF-8 und würde daran nicht scheitern; die Schreibweise bleibt also, weil die
+Ankündigung einer Sitzung sich mit dem Port nicht ändern soll, und nicht als
+Absicherung.
 
-Er schreibt außerdem `head_commit` als Basis der Sitzung auf, in beiden
+Er schreibt außerdem den Basis-Commit der Sitzung auf, in beiden
 Fehlerfällen schweigend — ohne Sitzungskennung gibt es keinen Ort dafür, ohne
 Repository nichts abzulegen. Keiner der beiden Fälle ist ein Mangel des
 Projekts, und keiner ist eine Zeile in jeder Sitzung jedes Checkouts wert, das

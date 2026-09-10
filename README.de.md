@@ -117,12 +117,14 @@ ulinit check commit-msg .git/COMMIT_EDITMSG
 uv run ultraloom commit calibrate --count 50 --language de
 ```
 
-### 6. Agenten-Lifecycle-Hooks (Python / `ultraloom hook`)
+### 6. Agenten-Lifecycle-Hooks (`ulguard hook` / `ultraloom hook`)
 
-Überwacht den Agentenstatus und den Rundenabschluss:
+Überwacht den Agentenstatus und den Rundenabschluss. SessionStart ist der
+eine, der zum Go-Binary gewechselt ist; die drei anderen laufen weiter auf
+Python:
 
 ```bash
-uv run ultraloom hook session-start   # Meldet offene Gates & merkt sich Start-Commit
+ulguard hook session-start --host claude  # Meldet offene Gates & merkt sich Start-Commit
 uv run ultraloom hook stop            # Prüft geänderte Dateien vor Rundenende
 uv run ultraloom hook subagent-start  # Merkt sich Remote-/HEAD-Schnappschuss
 uv run ultraloom hook subagent-stop   # Meldet Änderungen entfernter Refs
@@ -1123,7 +1125,7 @@ Hook vom Wurzelverzeichnis des Arbeitsbaums aus startet.
 
 ## Sitzungs-Hooks
 
-    ultraloom hook session-start    # SessionStart
+    ulguard hook session-start --host claude   # SessionStart
     ultraloom hook post-edit        # PostToolUse
     ultraloom hook subagent-start   # SubagentStart
     ultraloom hook subagent-stop    # SubagentStop
@@ -1135,6 +1137,13 @@ Ordnung ist, ob die Arbeit dieses Zuges grün ist, bevor der Zug endet, ob ein
 pausierter Lauf noch auf eine Antwort wartet, und was ein Subagent getan hat,
 das sein Bericht verschweigt. Jeder liest die Payload von Claude Code über
 stdin, genau wie `ulguard`.
+
+SessionStart beantwortet das Go-Binary. Es braucht keine Python-Laufzeit —
+genau die fehlt in einem frischen Worktree — und nimmt die Harness als Flag,
+weil SessionStart, Stop und das Subagentenpaar keinen Werkzeugaufruf
+mitbringen, an dem sie zu erkennen wäre. `--host` hat keinen Vorgabewert: ein
+Aufruf ohne das Flag wird abgelehnt und nicht in der falschen Form
+beantwortet.
 
 | Ereignis | Hook | Was er tut |
 | -------- | ---- | ---------- |

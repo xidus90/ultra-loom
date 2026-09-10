@@ -51,7 +51,7 @@ flowchart TD
   * **Zero-Overhead Bypass:** Non-code files (`.json`, `.yaml`, `.toml`, images) and non-wiki markdown documents exit immediately in $0\text{ ms}$ without spawning subprocesses.
 
 ### 3. `SessionStart` — Session Initialization & Context Injection
-* **Hook Command:** `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+* **Hook Binary:** `ulguard hook session-start --host claude --root "${CLAUDE_PROJECT_DIR}"`
 * **Guarantees:** Injects active project context, latest wiki log entries, and git status into the agent prompt at the beginning of each session.
 
 ### 4. `SubagentStart` & `SubagentStop` — Multi-Agent Coordination

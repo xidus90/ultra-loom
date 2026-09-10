@@ -279,9 +279,10 @@ ist als `sessionStale = 24 * time.Hour`, wird nicht gezählt
 (`cmd/guard/worktree.go:74-94`).
 
 Die Zahl ist nur so gut wie die Schreibvorgänge dahinter, und es sind vier:
-`src/ultraloom/hooks/session_start.py:59` beim Sitzungsstart, `stop.py:250` bei
-jeder Blockade und `:283` bei jedem Durchlauf, und `subagent_start.py:38` bei
-jedem Subagentenstart — der Letzte allein an der Payload und an keiner
+`ulguard hook session-start` beim Sitzungsstart — es hat das von
+`src/ultraloom/hooks/session_start.py:59` übernommen, gelöscht in `6a7037a` —
+`stop.py:250` bei jeder Blockade und `:283` bei jedem Durchlauf, und
+`subagent_start.py:38` bei jedem Subagentenstart — der Letzte allein an der Payload und an keiner
 Konfiguration hängend. Die Datei ist also so jung wie der letzte beendete Zug
 oder der letzte losgeschickte Subagent. Nur eine lange interaktive Sitzung, die
 keinen Subagenten schickt, in einem Projekt ohne konfiguriertes Stop-Gate,

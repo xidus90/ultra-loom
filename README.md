@@ -117,12 +117,13 @@ ulinit check commit-msg .git/COMMIT_EDITMSG
 uv run ultraloom commit calibrate --count 50 --language en
 ```
 
-### 6. Agent Lifecycle Hooks (Python / `ultraloom hook`)
+### 6. Agent Lifecycle Hooks (`ulguard hook` / `ultraloom hook`)
 
-Tracks agent state and turn completion:
+Tracks agent state and turn completion. SessionStart is the one that has
+crossed to the Go binary; the other three still run on Python:
 
 ```bash
-uv run ultraloom hook session-start   # Reports pending gates & records base commit
+ulguard hook session-start --host claude  # Reports pending gates & records base commit
 uv run ultraloom hook stop            # Verifies changed files before ending turn
 uv run ultraloom hook subagent-start  # Records remote/HEAD snapshot
 uv run ultraloom hook subagent-stop   # Reports remote ref drift
@@ -1015,7 +1016,7 @@ runs the hook from the top of the working tree.
 
 ## Session hooks
 
-    ultraloom hook session-start    # SessionStart
+    ulguard hook session-start --host claude   # SessionStart
     ultraloom hook post-edit        # PostToolUse
     ultraloom hook subagent-start   # SubagentStart
     ultraloom hook subagent-stop    # SubagentStop
@@ -1026,6 +1027,12 @@ questions it cannot see: is the file that was just written in order, is the
 work of this turn green before the turn ends, does a paused run still wait for
 an answer, and what did a subagent do that its report left out. Each reads
 Claude Code's payload from stdin, exactly like `ulguard`.
+
+SessionStart is answered by the Go binary. It needs no Python runtime, which
+is what a fresh worktree is missing, and it takes the harness as a flag
+because SessionStart, Stop and the subagent events carry no tool call to
+recognise one from -- `--host` has no default, so a call that omits it is
+refused rather than answered in the wrong shape.
 
 | Event | Hook | What it does |
 | ----- | ---- | ------------ |
