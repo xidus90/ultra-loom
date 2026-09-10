@@ -69,14 +69,29 @@ dieses Muster als Vorgabe (`write_manifest`, sobald `sources == "docs"`).
 `internal/detect/edges.go:37` akzeptiert jedes Schwesterverzeichnis, das auf
 `_wiki` endet und ein `.git` hat; ausgeschlossen wird nur das Projekt selbst
 (`name == projectDir`), nie geprüft, dass es `<projekt>_wiki` heißt — obwohl der
-Docstring die Konvention behauptet. Unter `#GIT/` gibt es seit 2026-09-06 23:20
-genau ein solches Verzeichnis: `iam_wiki`.
+Docstring die Konvention behauptet. Unter `#GIT/` gibt es genau ein solches
+Verzeichnis, `iam_wiki`, und das ist ein **anderes Projekt**: brains Registry
+führt es als `project/iam-wiki` mit `readonly = true`.
 
 Folge, in der Flotte gemessen: `ultraloom/.ultraloom/answers.toml` steht auf
 `mode = "neighbour_repo"`, `bundle = "iam_wiki/"`. **Das ist der Grund, warum
 `brainEntry` hier nie die brain-Einträge geschrieben hat** — es schaltet auf
-`Mode == "brain"` (`cmd/init/run.go:704`). Das leere `docs/wiki` und die ganze
-Kette „nichts wird ins Wiki geschrieben" hängen an dieser einen Zeile.
+`Mode == "brain"` (`cmd/init/run.go:704`). Nicht „niemand hat die Mode
+gesetzt", sondern „ein Detektor hat die falsche gesetzt". Hätte `ulinit`
+daraufhin `brain wiki-gate` installiert, hätte das Gate gegen ein fremdes,
+readonly registriertes Repo geprüft und grün gemeldet — schlechter als kein
+Gate.
+
+**Die Erkennung setzt das aber nicht durch, sie schlägt es vor.** Vier Daten,
+die das zeigen und die eine erste Fassung dieses Absatzes widerlegt haben:
+`NeighbourWiki` hängt seit `c28e71c` (2026-08-28) im Erkennungsweg, `iam_wiki`
+existiert als Repo seit 2026-07-27, `ultraloom`s Eintrag stammt aus `e84df9e`
+(2026-08-29) — und `space` wurde mit `4f272921` **zwei Tage später**
+aufgesetzt, bei gleichem Code und gleichem Schwesterrepo, und trägt
+`mode = "brain"`. Dazwischen stand das Interview: bei `space` hat ein Mensch
+den Vorschlag überstimmt, bei `ultraloom` wurde er genommen. Der Defekt ist
+damit die **Vorgabe**, nicht ein Zwang — und daher genau die Sorte, die in
+einem unbeaufsichtigten `--yes`-Lauf durchgeht.
 
 Dazu: `gather` (`cmd/init/main.go:161`) weist das Ergebnis **bedingungslos** zu
 und verwirft damit, was `Detect` im Repo selbst gefunden hat — auch mit
@@ -288,7 +303,7 @@ Pflegeschleife sich schließt. Die Kette, in dieser Reihenfolge:
 
 | Stufe | Inhalt | Hängt an |
 |---|---|---|
-| 0 | D2 reparieren (`NeighbourWiki` verlangt `<projekt>_wiki`, `gather` weist nicht mehr bedingungslos zu), und `ultraloom`s eigene `answers.toml` auf `brain` / `docs/wiki/` setzen | c0s Task 7, weil er `cmd/init` besitzt |
+| 0 | D2 reparieren (`NeighbourWiki` verlangt `<projekt>_wiki` **und** gleicht gegen brains Registry ab, die für jedes Repo schon sagt, welchem Scope es gehört und ob es readonly ist; `gather` weist nicht mehr bedingungslos zu), und `ultraloom`s eigene `answers.toml` auf `brain` / `docs/wiki/` setzen | c0s Zweig `claude/go-hooks-stufe-0-1`, bis er gemergt ist |
 | 1 | Teil 1: `answers.Answers` erweitern, `.brain.toml` generieren, `vault` als vierte Mode | Stufe 0 |
 | 2 | Teil 3: die drei Hookeinträge, `.agents/hooks.json` als zweiter Schreiber | Stufe 1 |
 | 3 | Teil 2: das Preset | Stufe 1 |
