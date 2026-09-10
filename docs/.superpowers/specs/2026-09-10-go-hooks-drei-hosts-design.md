@@ -1,4 +1,4 @@
-# Hooks in Go, für drei Höste
+# Hooks in Go, für drei Hosts
 
 **Datum:** 2026-09-10
 **Stand:** entworfen, nicht umgesetzt
@@ -109,6 +109,11 @@ Bevor Code darauf baut, wird gemessen:
 2. **Kann `PreInvocation` Kontext in das Modell schreiben?** Wenn nicht, ist
    `session-start` auf Gemini nicht nachbaubar und der Inhalt gehört als Prosa
    nach `GEMINI.md`.
+3. **Hat Antigravity eine harte Zeitgrenze für Stop-Handler?** Das Gate braucht
+   300 Sekunden. Liegt der Deckel darunter, ist es dort nicht portierbar —
+   unabhängig davon, wie gut der Port ist. Dann bleibt auf Gemini nur eine
+   verkürzte Kette oder ein Gate, das den Lauf anstößt und nicht auf ihn
+   wartet.
 
 ## Bausteine
 
@@ -132,43 +137,78 @@ Typen.
 **Adapter**, `internal/hostio/{claude,antigravity,codex}.go`: Nutzlast
 erkennen, Nutzlast lesen, Antwort schreiben.
 
-Erkennung ohne `--host`-Flag, an der Nutzlast, wie `brain guard` es tut:
-`hook_event_name` mit `tool_input.file_path` ist Claude, `TargetFile` ist
-Antigravity. Ein Flag wäre ein zweiter Ort, an dem dieselbe Wahrheit steht.
+Der Host kommt als `--host claude|antigravity|codex` im Kommando, geschrieben
+von `ulinit`. Eine Erkennung an der Nutzlast, wie `brain guard` sie tut, war
+der erste Entwurf und ist verworfen: sie unterscheidet `tool_input.file_path`
+von `TargetFile` und damit *Werkzeug*-Nutzlasten. Die vier Ereignisse hier sind
+auf Claude keine Werkzeugereignisse — SessionStart, Stop und das
+Subagent-Paar tragen kein `tool_input`, es gibt also nichts zu erkennen.
+`brain guard` hilft nicht weiter, weil sein `extractCall` ebenfalls
+Werkzeugnutzlasten liest.
+
+Das Flag ist auch kein zweiter Ort für dieselbe Wahrheit: `ulinit` schreibt
+`.claude/settings.json` und `.agents/hooks.json` aus einer Tabelle und kennt
+den Host in dem Moment, in dem es das Kommando bildet. Und es ist der einzige
+Weg, der schon vor der Messung von Antigravitys Stop-Nutzlast trägt.
+
+Die Wurzel: `${CLAUDE_PROJECT_DIR}` ist auf Antigravity nie gesetzt, und das
+Arbeitsverzeichnis ist das Verzeichnis der `hooks.json`, also `.agents/`
+(`MIGRATION.md:157`). Ohne `--root` wird von dort aufwärts bis zur ersten
+`.ultraloom/config.toml` gesucht; ein gegebenes `--root` schlägt das.
 
 Unterbefehle in `cmd/guard/`, nach dem Muster der sechs vorhandenen in
 `cmd/guard/main.go`: `hook session-start`, `hook subagent-start`,
 `hook subagent-stop`, `hook stop`, `check all`, `check coverage`.
 
-## Fehlerverhalten: das Gate fällt geschlossen
+## Fehlerverhalten: eine Exit-1-Disziplin, die bleibt
 
 `payload.py` kennt 0 durchlassen, 1 interner Fehler, 2 blockieren. `stop.py`
 gibt an sieben Stellen 1 zurück: `:100`, `:109`, `:146`, `:207`, `:218`,
 `:227`, `:248`.
 
-Nachgerechnet gegen den Vertrag ist 1 beim Host ein *nicht* blockierender
-Fehler — die Runde endet trotzdem. Belegt in `ultra-brain/pkg/guard/guard.go:22-28`,
-dort am 2026-09-06 gemessen. Für ultraloom heißt das: **eine kaputte
-`.ultraloom/config.toml` schaltet das Stop-Gate still ab.** Der Lauf endet
-grün, obwohl nichts geprüft wurde.
+Der erste Entwurf dieses Abschnitts nannte das einen Defekt — eine kaputte
+`.ultraloom/config.toml` schalte das Gate „still" ab. Das war aus den
+Exit-Codes gelesen und nicht gegen den Code gerechnet, und es hält nicht: jede
+dieser Stellen trägt ihr Argument daneben, und keine schweigt.
 
-Der Port übernimmt das nicht. Jeder Fehler, der verhindert, dass das Gate
-*läuft*, verlässt mit 2 und nennt den Grund. Exit 1 bleibt allein, wo es nichts
-zu blockieren gibt — `session-start` etwa hat kein Urteil zu fällen. Die
-Go-Tests halten das fest, statt die Python-Zeilen abzuschreiben.
+- `:109`, kein `session_id`: ein Zähler, den alle Sitzungen ohne Kennung
+  teilen, würde eine Sitzung aufgeben, weil eine andere dreimal blockiert
+  wurde. „Exit 1 never holds the turn, so the cost of refusing here is a line
+  on stderr."
+- `:207`, kaputte `[verify]`-Tabelle: „not a finding about the work, and
+  holding a turn over one would leave nobody able to fix it from inside the
+  session." Das Argument trägt: eine gehaltene Runde kann die Datei nicht
+  bearbeiten, die sie hält.
+- `:248`, Kette komplett unbenutzbar: „no verdict about the work, and so
+  neither a block nor something to count."
 
-Kein `fail_open`-Schalter. Ein Schalter, den jemand setzt und vergisst, führt
-zum heutigen Zustand zurück, nur unsichtbarer.
+Ebenso ist `stop_hook_active` **absichtlich** nicht gelesen (`:111-117`): es
+sagt „schon einmal blockiert" und nie wie oft, kann die Obergrenze also nicht
+tragen, und eine zweite Quelle, die dem Zähler widersprechen kann, macht das
+Verhalten des Gates genau dann unerklärlich, wenn jemand versucht,
+herauszukommen. Die Schranke ist der `MAX_BLOCKS`-Zähler im Sitzungszustand.
+Der Port übernimmt beides.
+
+Eine echte Unstimmigkeit bleibt, und nur sie wird repariert: `:141-146`. Der
+Kommentar verlangt, eine Frage, die git nicht beantworten konnte, dürfe „not
+end a turn as if the answer had been 'clean'" — der Code darunter verlässt mit
+1, und 1 beendet die Runde. Kommentar und Code widersprechen sich. Der Go-Port
+verlässt dort mit 2 und zählt den Block, womit der Kommentar gilt und die
+Schleife über `MAX_BLOCKS` weiter begrenzt ist.
+
+Kein `fail_open`-Schalter, und keine Umstellung der übrigen sechs Stellen.
 
 ## Nachweis
 
 TDD, Test vor Code, 100 % Coverage. Vorlage sind die knapp 5.000 Python-Testzeilen
-— jeder Fall wird gegen den Code nachgerechnet, nicht abgeschrieben. Der Befund
-oben ist genau ein Fall, in dem der Python-Test das falsche Verhalten
-festhält.
+— jeder Fall wird gegen den Code nachgerechnet, nicht abgeschrieben. Der
+Abschnitt über das Fehlerverhalten zeigt, wozu diese Regel da ist: dort hatte
+nicht der Test das falsche Verhalten festgehalten, sondern der erste Entwurf
+dieses Spec die richtige Begründung überlesen.
 
-Golden-Dateien für die drei Antwortformen, damit ein Formatwechsel eines Hosts
-als Testfehler auffällt und nicht im Betrieb.
+Golden-Dateien für die zwei bekannten Antwortformen — Claude und Antigravity —
+damit ein Formatwechsel als Testfehler auffällt und nicht im Betrieb. Codex hat
+keine bekannte Form; dort steht die Fail-Closed-Prüfung an ihrer Stelle.
 
 Zwei plattformgebundene Coverage-Ausschlüsse, beide begründet:
 
@@ -201,7 +241,7 @@ Windows, `killpg` auf POSIX. Dazu `gitwork` vollständig. Dann
 `hook subagent-start` und `hook subagent-stop`.
 
 **Stufe 3 — Stop-Gate.** `internal/ulconfig`, `internal/lanes`, dann
-`hook stop` mit der Exit-2-Reparatur.
+`hook stop` samt `MAX_BLOCKS`-Zähler und der einen Reparatur an `:146`.
 
 **Stufe 4 — Lanes als Befehl.** `ulguard check all` und `check coverage`
 ersetzen `uv run ultraloom check all` im erzeugten Pre-Commit-Hook
