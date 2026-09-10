@@ -1,9 +1,14 @@
 {
-  "hooks": {
+  "wiki-guard": {
     "PreToolUse": [
       {
-        "matcher": "write_to_file|replace_file_content|multi_replace_file_content|run_command",
-        "command": "uv run --directory C:/Users/micro/Documents/#GIT/ultra-brain python .ultra-brain/hooks/wiki_guard.py"
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "brain guard"
+          }
+        ]
       }
     ]
   }
