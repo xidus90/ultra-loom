@@ -56,8 +56,9 @@ func runHookSessionStart(stdin io.Reader, stdout, stderr io.Writer, root, hostNa
 // already run, and anything it committed would sit inside the baseline that is
 // supposed to expose it.
 //
-// Silent in two of the three cases, which is _record_base's decision
-// (session_start.py:43-59). Without a session id there is nowhere to file it,
+// Silent in two of the three cases, which was _record_base's decision
+// (session_start.py (fa3dd38):43-59, deleted in 6a7037a). Without a session id
+// there is nowhere to file it,
 // and outside a repository there is nothing to file -- neither is a defect of
 // the project, and neither is worth a line in every session of every checkout
 // that is not a git repository. The stop gate is where the absence matters,
@@ -70,11 +71,11 @@ func runHookSessionStart(stdin io.Reader, stdout, stderr io.Writer, root, hostNa
 func recordBase(sessionID, root string) error {
 	if sessionID == "" {
 		// hostio.Read hands a missing id and a wrongly typed one over as the
-		// empty string alike -- the type assertion at
-		// internal/hostio/claude.go:60, and its reasoning at :31-37. That is
-		// the `isinstance(session_id, str)` test of session_start.py:52 with the
-		// one divergence that a literal `"session_id": ""` files nothing here
-		// while Python files it under `unnamed` (state.py:75).
+		// empty string alike; that contract is on hostio.Payload.SessionID, and
+		// the type assertion keeping it is in the Claude adapter. It is the
+		// `isinstance(session_id, str)` test of session_start.py (fa3dd38):52
+		// with the one divergence that a literal `"session_id": ""` files
+		// nothing here while Python filed it under `unnamed` (state.py:75).
 		return nil
 	}
 	commit, err := gitwork.HeadCommit(root)
@@ -92,7 +93,7 @@ func waiting(root string, stderr io.Writer) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		// An absent runs directory means no runs, which is what
-		// session_start.py:65 answers to the same question. Every other
+		// session_start.py (fa3dd38):65 answered to the same question. Every other
 		// failure to list the directory answers the same way, one step wider
 		// than Python's `is_dir()`: a project whose journals cannot be read is
 		// not a project with an open question to announce, and this hook has
@@ -105,8 +106,9 @@ func waiting(root string, stderr io.Writer) []string {
 			names = append(names, entry.Name())
 		}
 	}
-	// By name, as session_start.py:69's `sorted(directory.glob(...))` is: two
-	// runs reported in directory order would read differently on two machines.
+	// By name, as session_start.py (fa3dd38):69's `sorted(directory.glob(...))`
+	// was: two runs reported in directory order would read differently on two
+	// machines.
 	sort.Strings(names)
 
 	var lines []string
@@ -116,8 +118,8 @@ func waiting(root string, stderr io.Writer) []string {
 		if err != nil {
 			// Named, not swallowed, and not fatal either: one damaged file is
 			// a finding of its own, and hiding the other runs behind it would
-			// turn a small defect into a silent one. session_start.py:74-78
-			// says the same in the same place.
+			// turn a small defect into a silent one. session_start.py
+			// (fa3dd38):74-78 said the same in the same place.
 			fmt.Fprintf(stderr, "ulguard hook session-start: %v\n", err)
 			continue
 		}
@@ -125,12 +127,12 @@ func waiting(root string, stderr io.Writer) []string {
 			continue
 		}
 		runID := strings.TrimSuffix(name, ".jsonl")
-		// ASCII down to the placeholder, because session_start.py:86-89 words
-		// it that way and both hooks run side by side until the Python one
-		// goes. Its reason does not carry over: `print` there raises
-		// UnicodeEncodeError on a cp1252 console, while json.Encoder here
-		// writes UTF-8 and reports nothing. So this wording is parity and not
-		// a safeguard.
+		// ASCII down to the placeholder, because that is how
+		// session_start.py (fa3dd38):86-89 worded the line this replaces, and a
+		// session's announcement should not change spelling with the port. Its
+		// reason does not carry over: `print` there raised UnicodeEncodeError on
+		// a cp1252 console, while json.Encoder here writes UTF-8 and reports
+		// nothing. So this wording is parity with what was, not a safeguard.
 		lines = append(lines, fmt.Sprintf(
 			"run %s is waiting at %s: %s\n  answer it with: ultraloom resume %s --answer \"your answer\"",
 			runID, gate.Node, gate.Question, runID))

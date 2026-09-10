@@ -81,8 +81,8 @@ func TestReadClaudeReportsAFailingStdin(t *testing.T) {
 // A session id of the wrong type reads as absent, not as damage. payload.py
 // insists only that the payload is an object; what counts as a usable id is
 // decided one layer up, by the `not isinstance(session_id, str)` line in
-// `_record_base` (src/ultraloom/hooks/session_start.py), which returns without
-// a word. Refusing here would exit 1 where the Python hook exits 0.
+// `_record_base` (session_start.py (fa3dd38):52), which returned without a
+// word. Refusing here would exit 1 where the Python hook exited 0.
 func TestReadClaudeAcceptsAMistypedSessionID(t *testing.T) {
 	got, err := hostio.Read(hostio.HostClaude, strings.NewReader(`{"hook_event_name": "SessionStart", "session_id": 5}`))
 	if err != nil {
@@ -108,10 +108,10 @@ func TestReadClaudeAcceptsAMistypedEventName(t *testing.T) {
 	}
 }
 
-// A payload without a session id still reads: session_start.py records no base
-// then and says nothing, because there is nowhere to file it. That decision
-// lives in the hook, so the adapter must not refuse here. Checked against
-// _record_base in src/ultraloom/hooks/session_start.py.
+// A payload without a session id still reads: `recordBase` in cmd/guard files
+// no base then and says nothing, because there is nowhere to file it. That
+// decision lives in the hook, so the adapter must not refuse here. Checked
+// against _record_base in session_start.py (fa3dd38):43-59.
 func TestReadClaudeAcceptsAMissingSessionID(t *testing.T) {
 	got, err := hostio.Read(hostio.HostClaude, strings.NewReader(`{"hook_event_name": "SessionStart"}`))
 	if err != nil {
@@ -156,8 +156,10 @@ func TestWriteClaudeContextLeavesProseAlone(t *testing.T) {
 	}
 }
 
-// Nothing to say is silence and not an empty envelope: an additionalContext of
-// "" would put a blank line into every session's context.
+// Nothing to say is silence and not an empty envelope. What Claude Code does
+// with an additionalContext of "" could not be measured from inside this
+// repository, so nothing is claimed about it: writing no envelope needs no
+// host-side justification.
 func TestWriteClaudeContextOfNothingWritesNothing(t *testing.T) {
 	var out bytes.Buffer
 

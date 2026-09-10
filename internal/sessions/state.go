@@ -29,9 +29,14 @@ type stateFile struct {
 	// Alphabetical, and that is load-bearing: Marshal follows field order for
 	// a struct -- it sorts keys only for a map -- and state.py writes these
 	// files with sort_keys=True. So one state is one key order whichever side
-	// wrote it. Not one byte sequence: measured on 2026-09-10, json.dumps puts
-	// a space after every `:` and `,` where Marshal puts none, so the two
-	// files differ in whitespace and only in whitespace.
+	// wrote it, which is what a golden comparison over these files reads.
+	//
+	// Key order is all it buys. The two encoders do not agree on the bytes and
+	// cannot be made to: measured on 2026-09-10, json.dumps puts a space after
+	// every `:` and `,` where Marshal puts none, and their escaping diverges in
+	// both directions -- for the snapshot key `ä<b`, Python's default
+	// ensure_ascii=True writes `\u00e4<b` while Marshal writes the letter raw
+	// and escapes the `<` as `\u003c`.
 	Base      *string            `json:"base"`
 	Blocks    *int               `json:"blocks"`
 	Snapshots *map[string]string `json:"snapshots"`

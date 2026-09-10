@@ -43,7 +43,7 @@ func TestEntriesReadsInOrderAndSkipsBlankLines(t *testing.T) {
 		t.Fatalf("tools not read: %+v", got[0].Tools)
 	}
 	if got[1].Tools != nil {
-		t.Fatalf("a null tools is absent, got %q", *got[1].Tools)
+		t.Fatalf("a null tools carries no value, got %q", *got[1].Tools)
 	}
 	if got[0].Delta["n"] != float64(1) {
 		t.Fatalf("delta not read: %+v", got[0].Delta)
@@ -51,8 +51,8 @@ func TestEntriesReadsInOrderAndSkipsBlankLines(t *testing.T) {
 }
 
 // A damaged line is named with its number and not swallowed. journal.py raises
-// JournalError with exactly this shape, and session_start.py prints it and
-// carries on with the other runs.
+// JournalError with exactly this shape, and `waiting` in cmd/guard prints it
+// and carries on with the other runs.
 func TestEntriesNamesTheDamagedLine(t *testing.T) {
 	path := write(t, okLine+"\n{not json\n")
 
@@ -121,7 +121,7 @@ func TestEntriesNamesALineWithAnUnknownKey(t *testing.T) {
 
 // `null` is a value and absence is damage: the Python side writes `str | None`,
 // so the key is always there and only its value says "nothing".
-func TestEntriesReadsANullValueAsAbsent(t *testing.T) {
+func TestEntriesReadsANullValueAsNoValue(t *testing.T) {
 	got, err := journal.Entries(write(t, pausedLine+"\n"))
 	if err != nil {
 		t.Fatalf("a null value is not damage: %v", err)
@@ -130,7 +130,7 @@ func TestEntriesReadsANullValueAsAbsent(t *testing.T) {
 		t.Fatalf("expected one entry, got %d", len(got))
 	}
 	if got[0].Tools != nil || got[0].Effort != nil {
-		t.Fatalf("a null reads as absent, got %+v", got[0])
+		t.Fatalf("a null reads as nil, got %+v", got[0])
 	}
 	if got[0].Detail == nil || *got[0].Detail != "which colour?" {
 		t.Fatalf("the question next to those nulls is lost: %+v", got[0])

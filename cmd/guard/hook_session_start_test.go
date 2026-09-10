@@ -42,18 +42,19 @@ func TestHookSessionStartReportsAPausedRun(t *testing.T) {
 	if !strings.Contains(context, `ultraloom resume run-a --answer "your answer"`) {
 		t.Fatalf("the answer command is spelled out: %q", context)
 	}
-	// Sorted by file name, as session_start.py:69's sorted(directory.glob(...))
-	// is: two runs reported in directory order would read differently on two
-	// machines.
+	// Sorted by file name, as session_start.py (fa3dd38):69's
+	// sorted(directory.glob(...)) was: two runs reported in directory order
+	// would read differently on two machines.
 	if strings.Index(context, "run-a") > strings.Index(context, "run-b") {
 		t.Fatalf("runs come in name order: %q", context)
 	}
 }
 
-// The wording stays ASCII because session_start.py:81-89 words it that way and
-// both hooks run side by side until the Python one goes. Nothing here claims
-// Go would fail on a wider rune -- json.Encoder writes UTF-8 without
-// complaint; the claim is only that the two hooks say the same thing.
+// The wording stays ASCII because that is how session_start.py (fa3dd38):81-89
+// worded the line this replaces, and a session's announcement should not change
+// spelling with the port. Nothing here claims Go would fail on a wider rune --
+// json.Encoder writes UTF-8 without complaint; the claim is only that the Go
+// hook says what the Python one said.
 func TestHookSessionStartSaysNothingNonASCII(t *testing.T) {
 	root := project(t)
 	writeRun(t, root, "run-a", waitingRun)
@@ -134,7 +135,8 @@ func TestHookSessionStartRecordsTheBaseCommit(t *testing.T) {
 	}
 }
 
-// Silent in both failure cases, as session_start.py:43-59's _record_base is:
+// Silent in both failure cases, as session_start.py (fa3dd38):43-59's
+// _record_base was:
 // without a session id there is nowhere to file it, and outside a repository
 // there is nothing to file. Neither is a defect of the project, and neither is
 // worth a line in every session of every checkout that is not a repository.

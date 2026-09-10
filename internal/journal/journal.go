@@ -39,8 +39,9 @@ type Entry struct {
 // that never started has no journal, and one unreadable line makes the whole
 // journal unreadable rather than being skipped -- a journal read past its
 // damage would answer about a run nobody can reconstruct. The caller decides
-// what that costs; `session_start.py` prints the error and carries on with the
-// other runs, so one damaged file hides its own lines and no others.
+// what that costs; `waiting` in cmd/guard prints the error and carries on with
+// the other runs, so one damaged file hides its own lines and no others -- as
+// `session_start.py` (fa3dd38):74-78 did before it.
 //
 // A well-formed object whose keys do not match `Entry` is damage too, the same
 // way `Entry(**json.loads(line))` raises TypeError for a missing or an

@@ -1,7 +1,10 @@
 """Reading what Claude Code puts on stdin, and the exit codes it reads back.
 
-Shared by all four hooks so the protocol is stated once. What exit 2 *means*
-is not shared -- it depends on the event, and each hook says so itself.
+Shared by the three hooks still on Python -- `stop`, `subagent-start` and
+`subagent-stop` -- so the protocol is stated once. SessionStart was the fourth
+until 6a7037a; `ulguard hook session-start` carries this protocol in Go now.
+What exit 2 *means* is not shared -- it depends on the event, and each hook
+says so itself.
 """
 
 from __future__ import annotations

@@ -73,8 +73,9 @@ func runWorktreeLink(stdout, stderr io.Writer, root string) int {
 
 // How long a session's state file counts for. Nothing deletes these files, so
 // the mtime is the only liveness there is to read, and it is as good as the
-// writes: session_start.py writes at session start (:59), stop.py on every
-// block and every pass (:250, :283), and subagent_start.py on every subagent
+// writes: `ulguard hook session-start` writes at session start -- as
+// session_start.py (fa3dd38):59 did before it -- stop.py on every block and
+// every pass (:250, :283), and subagent_start.py on every subagent
 // dispatch (:38) -- the last of those gated on the payload alone and on no
 // configuration at all. So the file is as young as the last turn that ended,
 // or the last subagent dispatched, and only a session that does neither ages
