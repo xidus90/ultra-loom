@@ -1157,9 +1157,11 @@ func TestParseHost(t *testing.T) {
 	}
 }
 
-// CLAUDE_PROJECT_DIR is never set by Antigravity, and its working directory is
-// the one holding hooks.json -- `.agents/` -- so the root has to be found by
-// walking up. Measured against MIGRATION.md:157.
+// A hook on Antigravity runs with its working directory set to the one holding
+// hooks.json -- `.agents/` -- and not the project root, so the root has to be
+// found by walking up. Measured against MIGRATION.md:157, whose sentence is
+// about `${CLAUDE_PLUGIN_ROOT}` and the working directory; it says nothing
+// about CLAUDE_PROJECT_DIR, and neither does this.
 func TestFindRootWalksUpToTheConfig(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".ultraloom"), 0o755); err != nil {
@@ -1297,10 +1299,10 @@ func WriteContext(host Host, w io.Writer, lines []string) error {
 // FindRoot walks up from `start` to the first directory holding
 // `.ultraloom/config.toml`.
 //
-// Needed because `${CLAUDE_PROJECT_DIR}` is never set by Antigravity and its
-// hooks run with the working directory set to the one holding `hooks.json`,
-// which is `.agents/` (MIGRATION.md:157). A `--root` given on the command line
-// outranks this and is handled by the caller.
+// Needed because a hook on Antigravity runs with its working directory set to
+// the one holding `hooks.json`, which is `.agents/` and not the project root
+// (`MIGRATION.md:157`, measured 2026-09-10). A `--root` given on the command
+// line outranks this and is handled by the caller.
 func FindRoot(start string) (string, error) {
 	current, err := filepath.Abs(start)
 	if err != nil {
@@ -2069,9 +2071,12 @@ In `cmd/guard/main.go`, vor dem abschließenden Schranken-Block:
 		if err := flags.Parse(args[2:]); err != nil {
 			return ExitInternal
 		}
-		// An empty --root is the Antigravity case: the variable
-		// ${CLAUDE_PROJECT_DIR} is never set there and the working directory
-		// is the one holding hooks.json, so the root is found by walking up.
+		// An empty --root is the Antigravity case: a hook there runs with its
+		// working directory set to the one holding hooks.json, not the project
+		// root, so the root is found by walking up. Measured 2026-09-10; see
+		// docs/.superpowers/specs/2026-09-10-antigravity-hook-messung.md.
+		// Whether that host sets CLAUDE_PROJECT_DIR is unmeasured and this
+		// does not rely on it either way.
 		resolved := *root
 		if resolved == "" {
 			found, err := hostio.FindRoot(".")
