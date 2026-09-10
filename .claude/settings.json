@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook session-start --root \"${CLAUDE_PROJECT_DIR}\"",
+            "command": "ulguard hook session-start --host claude --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 20
           }
         ],

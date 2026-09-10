@@ -191,7 +191,6 @@ def _parser() -> argparse.ArgumentParser:
 
     hook = subparsers.add_parser("hook", parents=[common], help="run one of the session hooks")
     hook_subs = hook.add_subparsers(dest="hook_name")
-    hook_subs.add_parser("session-start", parents=[common], help="report runs waiting at a gate")
     stop = hook_subs.add_parser(
         "stop", parents=[common], help="hold the turn until the chain is green"
     )

@@ -6,24 +6,20 @@ import argparse
 import sys
 from pathlib import Path
 
-from ultraloom.hooks import session_start
-
 
 def dispatch(args: argparse.Namespace, root: Path) -> int:
     """Run the named hook against the real streams."""
-    if args.hook_name == "session-start":
-        return session_start.run(sys.stdin, root, sys.stdout, sys.stderr)
     if args.hook_name == "subagent-start":
-        # Local for the same reason: these two reach git through `process`,
-        # and session-start must not pay for an import it never uses. Note
-        # the two spellings -- the subcommand has a hyphen, the module an
-        # underscore -- and that they are never the same string.
+        # Imported here and not at the top: these two reach git through
+        # `process`, and a call that means another hook must not pay for that
+        # import. Note the two spellings -- the subcommand has a hyphen, the
+        # module an underscore -- and that they are never the same string.
         from ultraloom.hooks import subagent_start
 
         return subagent_start.run(sys.stdin, root, sys.stderr)
     if args.hook_name == "stop":
-        # Local like the others, and this one carries the check chain: a
-        # session-start that only reads a directory must not import it.
+        # Local like the others, and this one carries the check chain: the
+        # hooks that only read a file or the remote must not import it.
         from ultraloom.hooks import stop
 
         # Read off the namespace here and passed as a value, the way

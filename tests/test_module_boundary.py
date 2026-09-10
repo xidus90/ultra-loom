@@ -192,9 +192,10 @@ def test_the_probe_notices_a_harness_import_that_was_moved_to_the_top(tmp_path: 
     assert "ultraloom.graph" in leaked, output
 
 
-# The same probe again, for the hook that runs once per session. The empty
-# stdin makes it exit 1; what is tested is what the call loaded.
-RUN_SESSION_START = (
+# The same probe again, for a hook that reports on a subagent. The empty stdin
+# is not JSON, so the hook says so and exits 1; what is tested is what the
+# call loaded.
+RUN_SUBAGENT_STOP = (
     _PREAMBLE
     + """
 import io
@@ -211,18 +212,18 @@ print("CHECKS:", "ultraloom.checks" in sys.modules)
 )
 
 
-def test_session_start_pulls_in_neither_the_harness_nor_the_check_chain(tmp_path: Path) -> None:
-    """It reads a directory; paying for the check chain would be absurd."""
+def test_subagent_stop_pulls_in_neither_the_harness_nor_the_check_chain(tmp_path: Path) -> None:
+    """It compares git refs; paying for the check chain would be absurd.
+
+    The hook that used to stand here was `session-start`, and it is gone: the
+    Go binary answers that event now. `stop` is the one hook that legitimately
+    carries the check chain, so this is the boundary for the hooks that do not.
+    """
     code, leaked, output = _probe(
-        RUN_SESSION_START, "hook", "session-start", "--root", str(tmp_path)
+        RUN_SUBAGENT_STOP, "hook", "subagent-stop", "--root", str(tmp_path)
     )
 
-    # Not the empty list the other probes assert, and deliberately: finding a
-    # paused run *is* reading the journal, so those two are this hook's work
-    # and not a leak. Spelled out rather than struck from _FORBIDDEN, because
-    # everything else on that list would still be one here -- and because the
-    # day this hook starts pulling in the runner, this line says so.
-    assert leaked == ["ultraloom.gate", "ultraloom.journal"], output
+    assert leaked == [], output
     assert "CHECKS: False" in output, output
     assert code == 1, output
 

@@ -12,14 +12,20 @@ from ultraloom.cli import main
 from ultraloom.hooks.stop import MARKER
 
 
-def test_session_start_reads_the_payload_from_stdin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    payload = json.dumps({"session_id": "s1", "hook_event_name": "SessionStart"})
-    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+def test_hook_session_start_is_gone(capsys: pytest.CaptureFixture[str]) -> None:
+    """The Go binary answers SessionStart now; two entry points would drift.
 
-    assert main(["hook", "session-start", "--root", str(tmp_path)]) == 0
-    assert capsys.readouterr().out == ""
+    Written as a test and not just as a deletion, because a subcommand that
+    quietly comes back is how the two halves start disagreeing about which one
+    the host calls. argparse refuses the name before `main` reaches a hook, so
+    the exit comes out of `parse_args` as a SystemExit and never as a return
+    value.
+    """
+    with pytest.raises(SystemExit) as exit_info:
+        main(["hook", "session-start", "--root", "."])
+
+    assert exit_info.value.code != 0
+    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_hook_without_a_name_says_what_to_type(
