@@ -50,9 +50,9 @@ flowchart TD
   * **Goroutine-Parallelität:** Formatierer, Linter und Typprüfer laufen gleichzeitig in parallelen Threads.
   * **Null-Overhead-Bypass:** Nicht-Code-Dateien (`.json`, `.yaml`, `.toml`, Bilder) sowie Markdown-Dateien außerhalb des Wikis beenden sofort in $0\text{ ms}$ ohne Prozess-Start.
 
-### 3. `SessionStart` — Initialisierung & Kontext-Injektion
+### 3. `SessionStart` — Initialisierung & Ankündigung pausierter Runs
 * **Hook-Binary:** `ulguard hook session-start --host claude --root "${CLAUDE_PROJECT_DIR}"`
-* **Aufgaben:** Injiziert zu Beginn jeder Session den aktuellen Projektstatus, die letzten Wiki-Logeinträge und Git-Informationen in den Agenten-Kontext.
+* **Aufgaben:** Injiziert zu Beginn jeder Session einen Eintrag pro pausiertem Run — die Run-ID, den Knoten, an dem er wartet, seine Frage und in einer zweiten Zeile den Befehl `ultraloom resume <run> --answer "your answer"`, der ihn beantwortet. Wartet nichts, wird nichts injiziert.
 
 ### 4. `SubagentStart` & `SubagentStop` — Multi-Agenten-Synchronisation
 * **Hook-Befehle:** `ultraloom hook subagent-start` / `subagent-stop`

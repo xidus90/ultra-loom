@@ -50,9 +50,9 @@ flowchart TD
   * **Goroutine Concurrency:** Language tools (e.g. formatting, linting, and type checking) execute in parallel threads.
   * **Zero-Overhead Bypass:** Non-code files (`.json`, `.yaml`, `.toml`, images) and non-wiki markdown documents exit immediately in $0\text{ ms}$ without spawning subprocesses.
 
-### 3. `SessionStart` — Session Initialization & Context Injection
+### 3. `SessionStart` — Session Initialization & Paused-Run Announcement
 * **Hook Binary:** `ulguard hook session-start --host claude --root "${CLAUDE_PROJECT_DIR}"`
-* **Guarantees:** Injects active project context, latest wiki log entries, and git status into the agent prompt at the beginning of each session.
+* **Guarantees:** Injects one entry per paused run at the beginning of each session — the run's id, the node it waits at, its question, and on a second line the `ultraloom resume <run> --answer "your answer"` command that answers it. With nothing waiting it injects nothing at all.
 
 ### 4. `SubagentStart` & `SubagentStop` — Multi-Agent Coordination
 * **Hook Commands:** `ultraloom hook subagent-start` / `subagent-stop`
