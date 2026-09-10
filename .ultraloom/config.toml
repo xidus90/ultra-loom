@@ -50,8 +50,17 @@
 # when the flags behind it change; a daemon still judging by the previous
 # settings is worse than no daemon. The flags themselves moved into the
 # subcommand, next to the code that reads its output.
+#
+# By name and not `./ulinit`, which is the same lesson `hookCommand` in
+# cmd/init/run.go:794 already wrote down: a name has no directory a working
+# tree could be missing. `ulinit.exe` is built into the repository root and is
+# not in git, so a fresh `git worktree` has none -- and on 2026-09-10 both
+# lanes there failed with `[WinError 2]` and took the commit gate with them,
+# while the hooks that had learned this stayed green beside them. The price is
+# that the installed ulinit checks rather than the worktree's own build, which
+# is the right way round: these two lanes are tools, not the code under test.
 [verify]
-types = "./ulinit check types"
+types = "ulinit check types"
 
 # What the repairer must not touch. `pyproject.toml` stands beside the tests
 # because the thresholds live there: a loosened ruff rule or a lowered
@@ -66,7 +75,7 @@ tests = ["tests/", "pyproject.toml"]
 [verify.lint]
 commands = [
   "uv run ruff check .",
-  "./ulinit check gofmt cmd internal",
+  "ulinit check gofmt cmd internal",
   "go vet ./...",
 ]
 threaded = true

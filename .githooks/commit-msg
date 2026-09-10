@@ -1,5 +1,21 @@
 #!/usr/bin/env bash
 # UltraLoom commit message quality gate
+#
+# `ulinit` by name and not `./ulinit`: the binary is built into the repository
+# root, is not in git, and `scripts/install.*` never puts it there. A fresh
+# `git worktree` therefore had none, and this hook died with
+# `./ulinit: No such file or directory` -- measured on 2026-09-10, and named
+# before that in docs/.superpowers/specs/2026-09-01-audit-nacharbeit-design.md:322.
+#
+# The check below is the other half of what that audit asked for: a missing
+# shim must say what to run, because the bare failure of a name lookup reads
+# like a broken hook rather than a missing install.
 set -euo pipefail
 
-./ulinit check commit-msg "$1"
+if ! command -v ulinit > /dev/null 2>&1; then
+    echo "commit-msg: ulinit is not on PATH." >&2
+    echo "  Install it with scripts/install.sh (or scripts/install.ps1 on Windows)." >&2
+    exit 1
+fi
+
+ulinit check commit-msg "$1"
