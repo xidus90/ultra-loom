@@ -76,9 +76,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _show(root, args.run_id)
 
     if args.command == "hook":
-        # Imported here, like the commit-msg, and before load_config: a hook
-        # that only reads the journal must not pay for the check chain, and
-        # `check` must not pay for the hooks.
+        # Imported here, like the commit-msg, and before load_config, so that
+        # `check` does not pay for the hooks. Which of the hooks pays for what
+        # is decided one level down, in hooks/cli.py.
         from ultraloom.hooks import cli as hooks_cli
 
         return hooks_cli.dispatch(args, root)
