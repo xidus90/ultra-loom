@@ -81,6 +81,77 @@ func TestEntriesCountsBlankLinesWhenNumbering(t *testing.T) {
 	}
 }
 
+// journal.py's Entry is a dataclass with no defaults, so a line missing any of
+// the ten keys raises TypeError there and comes back as a JournalError naming
+// the line. Accepting it as a zero value would let a paused run whose last line
+// lost its `outcome` read as "nothing waiting" -- unannounced, and silently.
+func TestEntriesNamesALineMissingAKey(t *testing.T) {
+	short := `{"delta":{},"detail":null,"effort":null,"input_hash":"h1","kind":"gate","node":"ask","seconds":0.1,"tokens":0,"tools":null}`
+	path := write(t, okLine+"\n"+short+"\n")
+
+	_, err := journal.Entries(path)
+
+	if err == nil {
+		t.Fatal("a line missing a key is not an entry")
+	}
+	if !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("the error names the line number, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "outcome") {
+		t.Fatalf("the error names the missing key, got %v", err)
+	}
+}
+
+// A key nobody reads means the writer and this reader disagree about the
+// format, which journal.py also refuses -- `Entry(**...)` raises TypeError on an
+// unexpected keyword.
+func TestEntriesNamesALineWithAnUnknownKey(t *testing.T) {
+	extra := strings.Replace(okLine, `{"delta"`, `{"mood":"brisk","delta"`, 1)
+	path := write(t, extra+"\n")
+
+	_, err := journal.Entries(path)
+
+	if err == nil {
+		t.Fatal("an unknown key is a disagreement about the format")
+	}
+	if !strings.Contains(err.Error(), "line 1") || !strings.Contains(err.Error(), "mood") {
+		t.Fatalf("the error names the line and the key, got %v", err)
+	}
+}
+
+// `null` is a value and absence is damage: the Python side writes `str | None`,
+// so the key is always there and only its value says "nothing".
+func TestEntriesReadsANullValueAsAbsent(t *testing.T) {
+	got, err := journal.Entries(write(t, pausedLine+"\n"))
+	if err != nil {
+		t.Fatalf("a null value is not damage: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one entry, got %d", len(got))
+	}
+	if got[0].Tools != nil || got[0].Effort != nil {
+		t.Fatalf("a null reads as absent, got %+v", got[0])
+	}
+	if got[0].Detail == nil || *got[0].Detail != "which colour?" {
+		t.Fatalf("the question next to those nulls is lost: %+v", got[0])
+	}
+}
+
+// The one place this reader is stricter than journal.py: Python accepts a
+// string in `tokens` because it never checks the annotation.
+func TestEntriesNamesALineWithAMistypedValue(t *testing.T) {
+	wrong := strings.Replace(okLine, `"tokens":12`, `"tokens":"twelve"`, 1)
+
+	_, err := journal.Entries(write(t, wrong+"\n"))
+
+	if err == nil {
+		t.Fatal("a string where a count belongs is not an entry")
+	}
+	if !strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("the error names the line number, got %v", err)
+	}
+}
+
 // A line of arbitrary length is read, because nothing caps what `append`
 // writes: `delta` is a node's own output. A reader with a ceiling the writer
 // does not share would turn a legitimate run into one that cannot be

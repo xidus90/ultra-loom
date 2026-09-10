@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -41,11 +42,10 @@ type Entry struct {
 // what that costs; `session_start.py` prints the error and carries on with the
 // other runs, so one damaged file hides its own lines and no others.
 //
-// The check is narrower than the Python one: `Entry(**json.loads(line))` there
-// also refuses a well-formed object whose keys do not match the dataclass,
-// while unmarshalling into a struct accepts a missing key as a zero value and
-// ignores an unknown one. It is stricter about types in return -- Python takes
-// a string for `tokens`, this does not.
+// A well-formed object whose keys do not match `Entry` is damage too, the same
+// way `Entry(**json.loads(line))` raises TypeError for a missing or an
+// unexpected keyword. It is stricter about types on top of that -- Python never
+// checks its annotations and takes a string for `tokens`, this does not.
 //
 // The whole file is read at once, as `read_text` does, and no line length is
 // refused: nothing caps what `append` writes, since `delta` is a node's own
@@ -66,11 +66,66 @@ func Entries(path string) ([]Entry, error) {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var entry Entry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		entry, err := decode(line)
+		if err != nil {
 			return nil, fmt.Errorf("%s: line %d is not a journal entry: %w", path, number+1, err)
 		}
 		found = append(found, entry)
 	}
 	return found, nil
+}
+
+// entryKeys are the ten keys `Entry` is written from, in the order journal.py
+// declares its fields.
+//
+// The list is spelled out rather than derived from the struct tags because it
+// is the contract with the Python writer, not a restatement of this file: a
+// field added here without a writer that writes it should read as a
+// disagreement, which a derived list would hide.
+var entryKeys = []string{
+	"node", "kind", "input_hash", "delta", "outcome",
+	"tools", "effort", "tokens", "seconds", "detail",
+}
+
+// decode turns one line into an Entry, or says why it is not one.
+//
+// The object is read twice on purpose: the first pass sees which keys are
+// *present*, which unmarshalling into a struct cannot tell apart from absent.
+// The difference matters because `tools`, `effort` and `detail` are `str | None`
+// on the Python side -- a `null` there is a written value and its key is always
+// there, so absence is damage and `null` is not.
+func decode(line string) (Entry, error) {
+	var keyed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &keyed); err != nil {
+		return Entry{}, err
+	}
+
+	var missing []string
+	for _, key := range entryKeys {
+		if _, ok := keyed[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return Entry{}, fmt.Errorf("no value for %s", strings.Join(missing, ", "))
+	}
+
+	var unknown []string
+	for key := range keyed {
+		if !slices.Contains(entryKeys, key) {
+			unknown = append(unknown, key)
+		}
+	}
+	if len(unknown) > 0 {
+		// Sorted, because a map's order is not stable and an error message that
+		// changed between runs would be one no test could name.
+		slices.Sort(unknown)
+		return Entry{}, fmt.Errorf("unknown key %s", strings.Join(unknown, ", "))
+	}
+
+	var entry Entry
+	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		return Entry{}, err
+	}
+	return entry, nil
 }
