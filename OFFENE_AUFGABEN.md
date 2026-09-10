@@ -1,7 +1,7 @@
 # Offene Aufgaben, Spezifikationen und Pläne (Status-Tracker)
 
 **Stand:** 2026-09-10
-**Haupt-Checkout:** [`master`](file:///c:/Users/micro/Documents/%23GIT/ultraloom) — `8be2162`, **8 Commits** vor `origin/master`
+**Haupt-Checkout:** [`master`](file:///c:/Users/micro/Documents/%23GIT/ultraloom) — Basis ist `origin/master` = `d744a0c`; den Stand mit `git log --oneline origin/master..master` lesen. Eine Zahl an dieser Stelle veraltet mit dem Commit, der sie einträgt
 
 Diese Übersicht führt die aktiven Stränge, Zweige, Worktrees und offenen
 Arbeitspakete im Repository `ultraloom`. Abgeschlossenes wird über die
@@ -27,7 +27,7 @@ Das Füllen des Wikis ist selbst ein offener Punkt — siehe Abschnitt 6.
 
 | Strang / Fokus | Branch | Worktree-Pfad | Status | Aktiver Stand | Nächste Aktion |
 |---|---|---|---|---|---|
-| **Worktree-Spiegel (Junctions für git-ignorierte Verzeichnisse)** | `master` | [Hauptverzeichnis](file:///c:/Users/micro/Documents/%23GIT/ultraloom) | 🟢 **gemergt** | `be16705` mergte den Strang, `8be2162` ist HEAD. Zweig und Worktree sind bereits abgebaut | Das Ausführungsledger einordnen (Abschnitt 2) und die parkierten Nachläufer abarbeiten |
+| **Worktree-Spiegel (Junctions für git-ignorierte Verzeichnisse)** | `master` | [Hauptverzeichnis](file:///c:/Users/micro/Documents/%23GIT/ultraloom) | 🟢 **gemergt** | `be16705` mergte den Strang. Zweig und Worktree sind bereits abgebaut | Das Ausführungsledger einordnen (Abschnitt 2) und die parkierten Nachläufer abarbeiten |
 | **MCP-Server nativ statt über uv** | `claude/mcp-native` (gelöscht) | `.worktrees/mcp-native` (entfernt) | ✅ **erledigt** | **0 eigene Commits**, 35 hinter master — die Spitze `b82ab51` ist per `git merge-base --is-ancestor` als Vorfahr von `master` bestätigt. Worktree und Zweig am 2026-09-10 abgebaut | keine — der Strang ist geschlossen |
 | **GDScript-Bahn dort fahren, wo der Godot-Baum steht** | `claude/brain-lint-braucht-ziel` (gelöscht) | — (kein Worktree) | ✅ **erledigt** | **0 eigene Commits**, 38 hinter master — `3433e6f` ist per `git merge-base --is-ancestor` als Vorfahr von `master` bestätigt. Zweig am 2026-09-10 gelöscht | keine — der Strang ist geschlossen |
 | **Konsolenkodierung: Befunde, die cp1252 nicht schreiben kann** | `claude/jovial-panini-eedcc1` (existiert nicht mehr) | — (kein Worktree) | ✅ **erledigt** | **Am 2026-09-10 nachgemessen:** der Zweig ist weg (`git branch -a` kennt ihn nicht mehr), und der Inhalt liegt in `master`. `9032b14` ist **kein** Vorfahr von `master`, aber `d0780c5` trägt denselben Betreff, dasselbe Autordatum (2026-08-27 12:53 +0200) und dieselbe Änderung an `src/ultraloom/cli.py` (+19) und `tests/test_cli.py` (+51) — der Zweigcommit, auf `master` neu abgespielt. Beweis im Baum: [`src/ultraloom/cli.py:58`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/src/ultraloom/cli.py) sagt `stream.reconfigure(errors="replace")`, Zeile 52 begründet die Regel | keine. Der frühere Befund („der Fix ist nicht in master", `cli.py` kenne weder `reconfigure` noch `errors="replace"`) war zum damaligen Stand 2026-09-10 09:03 **richtig** und ist seit `d0780c5` überholt |
@@ -298,8 +298,10 @@ ist ein leeres Paket.
 
 ### Git
 
-- [ ] **10 Commits sind ungepusht** (8 vom 2026-09-08/10 plus die zwei Cherry-Picks
-      `94e2c2b` und `d941d26` vom 2026-09-10). Was das Remote erreicht, entscheidet der
+- [ ] **Ungepusht ist alles zwischen `origin/master` (`d744a0c`) und `master`.**
+      Keine Zahl hier: sie war in diesem Dokument schon zweimal falsch, weil der
+      Commit, der sie einträgt, sie selbst widerlegt. `git log --oneline
+      origin/master..master` ist die Antwort. Was das Remote erreicht, entscheidet der
       Nutzer — siehe `CLAUDE.md`. Kein Subagent pusht; nach einem Subagentenlauf
       wird `git ls-remote origin <branch>` gelesen, nicht dem Bericht geglaubt.
 - [x] **Der Zweigabbau ist gelaufen.** Am 2026-09-10 sind
@@ -332,10 +334,38 @@ ist ein leeres Paket.
         Vault-Konfiguration, die beim Öffnen des Verzeichnisses entsteht. Das
         ist eine andere Ursache als die erste und hat mit dem Indexer nichts zu
         tun.
+      Dasselbe Werkzeug hat auch `.agents/hooks.json` und
+      `.claude/settings.json` geändert, ohne dass eine Sitzung dieses Strangs
+      es anfasste: beide tragen jetzt einen `brain guard`-Hook, in
+      `.agents/hooks.json` unter Umbenennung des Wurzelschlüssels von `hooks`
+      auf `wiki-guard` und mit `run_command` aus dem Matcher entfernt. Diese
+      zwei Änderungen liegen am 2026-09-10 ungestaged im Baum und sind
+      **nicht** mit den Commits dieses Tages gegangen. **Offen: ob sie so
+      gewollt sind.**
       Der Indexlauf ist zugleich der Beweis, dass das leere Wiki aus
       Abschnitt 6 nicht unindiziert ist: der Katalog existiert, er liegt nur
       ungetrackt am falschen Ort. **Offen: ob der Indexer nach `docs/wiki/`
       umgelenkt wird und ob `.obsidian/` in die `.gitignore` gehört.**
+
+### Zwei halbe Go-Formen in der `check`-Familie
+
+Beim Bau von `ulinit check types` am 2026-09-10 mitgelesen; keiner der beiden
+Punkte wurde angefasst.
+
+- [ ] **`ulinit check coverage` gibt 0 zurück, wenn `--summary` leer ist**
+      ([`cmd/init/check.go`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/cmd/init/check.go)),
+      und `check_test.go` schreibt genau das fest. Es misst selbst nichts,
+      sondern prüft nur eine Zeichenkette, die man ihm reicht — ein Tor, das
+      grün meldet, wenn man ihm nichts gibt. Deshalb ruft die `config.toml`
+      für `coverage` weiter das Python-Skript, obwohl der Go-Weg daneben liegt.
+- [ ] **`ulinit check commit-msg` ist kein Ersatz für `ultraloom commit-msg`.**
+      Die Go-Form ist eine festverdrahtete Wortlistenprüfung auf Englisch
+      über nur die erste Zeile
+      ([`internal/commit/language.go`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/internal/commit/language.go)),
+      die Python-Form liest `[commit]`, kennt `--language en|de` und
+      `--calibrate N`. Ein Projekt mit deutschen Commits zerbricht an der
+      Umstellung. Offen: ob die Go-Form die Konfiguration nachbaut oder als
+      bewusst engere Prüfung benannt wird.
 
 ### Prüfkette
 
@@ -358,18 +388,40 @@ Angaben unten die Konfiguration, kein Messergebnis.
       Daten ist das eine, was nicht passieren darf.
 - [ ] **Der Go-Boden ist eine Stolperdrahtgrenze, kein Ziel.** Gemessen am
       2026-08-28: 745 Anweisungen, 11 in zehn unerreichbaren Blöcken = 98,5 %.
-      **Am 2026-09-10 nachgemessen: 98,4 %** — `d941d26` hat 57 Anweisungen in
-      `cmd/init` dazugelegt und einen Zehntelpunkt der Luft verbraucht.
+      **Am 2026-09-10 zweimal nachgemessen: 98,4 % nach `d941d26`** (57
+      Anweisungen in `cmd/init`, ein Zehntelpunkt Luft verbraucht), **wieder
+      98,5 % nach `67a9f2b`**. Die zweite Zahl widerlegt die naheliegende
+      Sorge: gut gedeckter neuer Code verdünnt die ungedeckten Anweisungen und
+      **hebt** den Prozentsatz. Nur unerreichbare Zweige kosten. Gemessen waren
+      es 2294 Anweisungen, 36 davon offen; der Boden 98,0 erlaubt 45.
       Der halbe Punkt Luft absorbiert etwa drei weitere unerreichbare
       Fehlerzweige. **Anheben, wenn die Luft verbraucht ist — nicht weiten.**
-- [ ] **Eine verwaiste `.dmypy.json` legt die `types`-Bahn lahm, und die
-      Meldung sagt nicht, was zu tun ist.** Am 2026-09-10 brach der Stop-Hook mit
-      `The NamedPipe at \\.\pipe\dmypy-*.pipe was not found` ab; `dmypy kill`
-      meldete Erfolg, der nächste `run` starb trotzdem sofort („Daemon has
-      died"). Erst `rm .dmypy.json` plus `dmypy start` half. Das ist der Preis
-      des Daemons aus dem A/B vom 2026-08-27 — er ist bezahlt, aber ein
-      Selbstheilungsschritt in der `types`-Bahn (Statusdatei weg, wenn die Pipe
-      fehlt) wäre billig.
+- [x] **Die verwaiste `.dmypy.json` legt die `types`-Bahn nicht mehr lahm.**
+      Gebaut am 2026-09-10 als `ulinit check types` (`67a9f2b`), und die
+      `config.toml` ruft es statt `uv run dmypy run --`. Zwei Messungen haben
+      den Entwurf dabei geändert, beide gegen die erste Annahme:
+      - **Nur die Pipe-Meldung erreicht den Aufrufer von `dmypy run`.** `do_run`
+        fragt `is_running()`, und das verschluckt jedes `BadStatus` und startet
+        einen frischen Daemon — eine Statusdatei mit totem Pid heilt sich selbst
+        und schreibt „Daemon started". Der Fall, der die Bahn umbringt, ist der
+        andere: **lebendiger Pid, verschwundene Pipe.**
+      - **Die Heilung darf nichts töten.** `dmypy kill` stand in der ersten
+        Fassung und ist wieder heraus: der Pid in einer abgestandenen
+        Statusdatei ist per Definition lebendig — deshalb wurde `is_running`
+        getäuscht — und gehört fast immer dem, dem das Betriebssystem die
+        recycelte Nummer gegeben hat. Unter Windows tötet dmypy über
+        `taskkill /pid <n> /f /t`. **Gemessen: ein schlafender Shell-Prozess,
+        dessen Pid in der Datei stand, überlebte die Heilung nicht.** Das ist
+        derselbe Schaden, den dieses Dokument für `process.py` in Abschnitt 4,
+        Runde 3 als offenen Punkt führt. Ohne `kill` überlebt er.
+      Die Unterscheidung zwischen Befund und Defekt kommt von dmypy selbst: ein
+      Urteil trägt mypys Status durch `check_output`, ein Daemonfehler verlässt
+      `fail()` mit Exit 2. Exit 2 allein genügt nicht, weil ein blockierender
+      Fehler auch 2 ist — deshalb zusätzlich eine der Meldungen aus mypys
+      Quelltext. Go und kein Skript neben `hooks/coverage-check.py`, gemessen am
+      2026-09-10 über 10 warme Läufe: `uv run --script` auf einem leeren
+      PEP-723-Skript 55 ms Median, `ulinit` 31 ms — 24 ms an jedem Post-Edit,
+      gegen eine Bahn, die es wegen eines A/B über 412 ms überhaupt gibt.
 - [ ] **Ein Zeitflackern ist bekannt:**
       `test_check_all_waits_for_the_checks_at_the_same_time` war einmal unter
       Last rot (1,40 s), allein und im zweiten vollen Lauf grün.
