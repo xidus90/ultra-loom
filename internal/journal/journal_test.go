@@ -86,8 +86,12 @@ func TestEntriesCountsBlankLinesWhenNumbering(t *testing.T) {
 // does not share would turn a legitimate run into one that cannot be
 // announced, so there is no ceiling here either.
 func TestEntriesReadsAVeryLongLine(t *testing.T) {
+	// A whole entry, not a partial one: this test is about the line's length,
+	// and a line missing keys would also fail a reader that checked for them.
 	node := strings.Repeat("x", 5*1024*1024)
-	path := write(t, `{"node":"`+node+`","outcome":"ok"}`+"\n")
+	line := `{"delta":{},"detail":null,"effort":"low","input_hash":"h0","kind":"work","node":"` +
+		node + `","outcome":"ok","seconds":2.5,"tokens":12,"tools":"bash"}`
+	path := write(t, line+"\n")
 
 	got, err := journal.Entries(path)
 	if err != nil {

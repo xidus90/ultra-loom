@@ -34,9 +34,12 @@ type Entry struct {
 // Entries is journal.py's `entries`: every line, in order.
 //
 // An absent file is empty and not an error, and a line that cannot be decoded
-// is named with its number. Both are that module's decisions: a run that never
-// started has no journal, and a damaged line is a finding worth pointing at
-// rather than a reason to hide the lines around it.
+// ends the read with its number named. Both are that module's decisions: a run
+// that never started has no journal, and one unreadable line makes the whole
+// journal unreadable rather than being skipped -- a journal read past its
+// damage would answer about a run nobody can reconstruct. The caller decides
+// what that costs; `session_start.py` prints the error and carries on with the
+// other runs, so one damaged file hides its own lines and no others.
 //
 // The check is narrower than the Python one: `Entry(**json.loads(line))` there
 // also refuses a well-formed object whose keys do not match the dataclass,
