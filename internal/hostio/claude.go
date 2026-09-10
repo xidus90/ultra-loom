@@ -2,16 +2,16 @@ package hostio
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 )
 
-// claudePayload is the part of Claude Code's hook payload these hooks read.
-type claudePayload struct {
-	HookEventName string `json:"hook_event_name"`
-	SessionID     string `json:"session_id"`
-}
+// errNotAnObject is payload.py's second refusal, word for word. Named because
+// two paths reach it: the decode that fails on an array, a string or a number,
+// and the one that succeeds on JSON null.
+var errNotAnObject = errors.New("a hook payload is an object")
 
 // claudeAnswer is the envelope Claude Code reads a SessionStart answer from.
 type claudeAnswer struct {
@@ -23,33 +23,42 @@ type claudeAnswer struct {
 
 // readClaude is payload.py's `read`, narrowed to the fields in use.
 //
-// Anything that is not a JSON object is refused and named, which is that
-// module's rule. The probe into `any` and the decode into claudePayload are
-// two passes on purpose: payload.py tells "stdin is not JSON" apart from "a
-// hook payload is an object", and a single decode into a map would merge the
-// two refusals into whichever one the decoder happened to phrase.
+// It refuses exactly what that module refuses and nothing more: stdin that is
+// not JSON, and JSON that is not an object. Both refusals are worded the way
+// payload.py words them, so the two hooks say the same thing for as long as
+// both exist.
 //
-// A missing session id is not refused: session_start.py's `_record_base`
-// returns without a word when the id is not a string, because there is nowhere
-// to file a base commit -- that decision belongs to the hook and not to this
-// adapter.
+// The fields are read by type assertion rather than decoded into a struct, so
+// a value of the wrong type reads as absent instead of as damage. That is not
+// laxity, it is where the decision belongs: payload.py's whole job is "is this
+// an object", and what counts as a usable session id is decided one layer up,
+// by `_record_base` in session_start.py, which returns without a word when the
+// id is not a string. A struct decode would refuse `{"session_id": 5}` and
+// exit 1 where the Python hook exits 0.
 func readClaude(r io.Reader) (Payload, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
 		return Payload{}, fmt.Errorf("reading stdin: %w", err)
 	}
-	var probe any
-	if err := json.Unmarshal(raw, &probe); err != nil {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		// A decode into a map tells the two cases apart by error type: bad
+		// syntax is a *json.SyntaxError, while an array, a string or a number
+		// is a *json.UnmarshalTypeError. Only the first is "not JSON".
+		var wrongType *json.UnmarshalTypeError
+		if errors.As(err, &wrongType) {
+			return Payload{}, errNotAnObject
+		}
 		return Payload{}, fmt.Errorf("stdin is not JSON: %w", err)
 	}
-	if _, ok := probe.(map[string]any); !ok {
-		return Payload{}, fmt.Errorf("a hook payload is an object")
+	if payload == nil {
+		// JSON null decodes into a nil map and reports no error, and null is
+		// no more an object than an array is.
+		return Payload{}, errNotAnObject
 	}
-	var payload claudePayload
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return Payload{}, fmt.Errorf("stdin is not a hook payload: %w", err)
-	}
-	return Payload{Event: payload.HookEventName, SessionID: payload.SessionID}, nil
+	event, _ := payload["hook_event_name"].(string)
+	sessionID, _ := payload["session_id"].(string)
+	return Payload{Event: event, SessionID: sessionID}, nil
 }
 
 // writeClaudeContext puts lines where the model will read them.

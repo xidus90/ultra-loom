@@ -46,9 +46,11 @@ func TestReadClaudeRefusesWhatIsNotAPayload(t *testing.T) {
 		{"not json", "stdin is not JSON"},
 		{"[1, 2]", "a hook payload is an object"},
 		{`"a string"`, "a hook payload is an object"},
-		// An object whose field has the wrong type gets past the probe above
-		// and is refused by the decode into the payload's own shape.
-		{`{"session_id": 5}`, "stdin is not a hook payload"},
+		{"42", "a hook payload is an object"},
+		// JSON null is not an object either. It needs its own case because it
+		// decodes into a nil map without an error, where every other non-object
+		// above fails the decode outright.
+		{"null", "a hook payload is an object"},
 	} {
 		_, err := hostio.Read(hostio.HostClaude, strings.NewReader(testCase.body))
 		if err == nil {
@@ -73,6 +75,36 @@ func TestReadClaudeReportsAFailingStdin(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "reading stdin") {
 		t.Fatalf("the refusal names what failed, got %v", err)
+	}
+}
+
+// A session id of the wrong type reads as absent, not as damage. payload.py
+// insists only that the payload is an object; what counts as a usable id is
+// decided one layer up, by the `not isinstance(session_id, str)` line in
+// `_record_base` (src/ultraloom/hooks/session_start.py), which returns without
+// a word. Refusing here would exit 1 where the Python hook exits 0.
+func TestReadClaudeAcceptsAMistypedSessionID(t *testing.T) {
+	got, err := hostio.Read(hostio.HostClaude, strings.NewReader(`{"hook_event_name": "SessionStart", "session_id": 5}`))
+	if err != nil {
+		t.Fatalf("a mistyped session id is the hook's business, not the adapter's: %v", err)
+	}
+	if got.SessionID != "" {
+		t.Fatalf("expected an empty session id, got %q", got.SessionID)
+	}
+	if got.Event != "SessionStart" {
+		t.Fatalf("the rest of the payload still reads: %+v", got)
+	}
+}
+
+// The same for the event name: a non-string there is not the adapter's
+// business either, and no hook has to be taught to distrust the type.
+func TestReadClaudeAcceptsAMistypedEventName(t *testing.T) {
+	got, err := hostio.Read(hostio.HostClaude, strings.NewReader(`{"hook_event_name": [1], "session_id": "abc"}`))
+	if err != nil {
+		t.Fatalf("a mistyped event name is not damage: %v", err)
+	}
+	if got.Event != "" || got.SessionID != "abc" {
+		t.Fatalf("unexpected payload: %+v", got)
 	}
 }
 
