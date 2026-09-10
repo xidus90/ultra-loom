@@ -14,6 +14,7 @@ import (
 
 	"github.com/xidus90/ultra-loom/internal/answers"
 	"github.com/xidus90/ultra-loom/internal/detect"
+	"github.com/xidus90/ultra-loom/internal/settings"
 	"github.com/xidus90/ultra-loom/internal/vendoring"
 )
 
@@ -171,20 +172,39 @@ func TestTheHookCommandsCallTheBinaryOnPath(t *testing.T) {
 // The generated SessionStart entry names the Go binary and the host. The
 // Python entry point it replaces stays in pyproject.toml for the agent flow,
 // so both names exist and only the one written here decides which runs.
+//
+// The whole string and not a substring of it, and with a timeout, because this
+// is the one place the branch pins what the entry has to say. This project's
+// own .claude/settings.json was changed to exactly this command by hand rather
+// than by regenerating it, so nothing downstream would catch a drift between
+// the two: this test is the generator's half of that agreement.
+//
+// A bare name and no runtime, which is the difference from the three history
+// hooks beside it. Those still call `ultraloom` through `uv run --project`,
+// and `which ultraloom` on the machine this was written on answers a path
+// inside one checkout's .venv -- a name that resolves only while that
+// environment is active. `ulguard` is an installed binary on PATH and needs no
+// Python at all.
 func TestHookEntriesSessionStartIsTheGoBinary(t *testing.T) {
 	entries := hookEntries(detect.Facts{HasGit: true}, false)
 
-	var found string
+	var found settings.Entry
 	for _, entry := range entries {
 		if entry.Event == "SessionStart" {
-			found = entry.Command
+			found = entry
 		}
 	}
-	if !strings.Contains(found, "ulguard hook session-start") {
-		t.Fatalf("SessionStart runs the Go binary, got %q", found)
+	want := `ulguard hook session-start --host claude --root "${CLAUDE_PROJECT_DIR}"`
+	if found.Command != want {
+		t.Fatalf("SessionStart runs %q, want %q", found.Command, want)
 	}
-	if !strings.Contains(found, "--host claude") {
-		t.Fatalf("and it names the host, got %q", found)
+	if found.Timeout != 20 {
+		t.Fatalf("SessionStart keeps its timeout of 20, got %d", found.Timeout)
+	}
+	// No matcher: SessionStart carries no tool to match on, and a matcher here
+	// would give the merge a second slot instead of rewriting this entry.
+	if found.Matcher != "" {
+		t.Fatalf("SessionStart takes no matcher, got %q", found.Matcher)
 	}
 }
 
