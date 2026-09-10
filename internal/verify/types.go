@@ -31,6 +31,16 @@ type Runner func(argv ...string) Run
 // The first two stay because they belong to the same condition, arrive the same
 // way for the other dmypy actions, and cost a string comparison. They are not
 // what this was built for.
+//
+// All three are Windows text, and the third one is Windows-only by
+// construction: mypy/ipc.py raises it from inside `if sys.platform ==
+// "win32"`. On POSIX the same IPC is an AF_UNIX socket and connect() raises a
+// bare FileNotFoundError, which mypy's main() catches as any other exception --
+// traceback printed, exit 2, none of these strings in it. So the heal does not
+// fire on POSIX, and it is not repaired by guessing: the marker there would be
+// a traceback's last line, and nothing on this machine can run the branch to
+// find out which. Recorded rather than invented; the same gap this repository
+// already tracks for process.py's POSIX arm.
 var daemonGone = []string{
 	"Daemon has died",
 	"Invalid status file",
