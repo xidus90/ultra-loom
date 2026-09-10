@@ -102,10 +102,16 @@ gemergt mit `be16705`.
 > außerhalb dieses Repos. `ultraloom` benutzt seinen eigenen Spiegel also nicht.
 > Das ist eine offene Entscheidung, kein Defekt.
 
-- [ ] **Die zweite Hälfte von Task 7 steht aus:** der Eintrag in der globalen
-      `settings.json`. Vom Nutzer freigegeben, aber bis nach dem Schlussreview
-      zurückgehalten, weil der Hook ein maschinenweites `ulguard` braucht und
-      dieses Binary aus geprüftem Code kommen soll.
+- [x] **Die zweite Hälfte von Task 7 ist getan — am 2026-09-10 gefunden, nicht
+      gebaut.** Die globale `~/.claude/settings.json` trägt
+      `ulguard worktree-link --root "${CLAUDE_PROJECT_DIR}"` auf `SessionStart`
+      und `worktree-unlink` auf `SessionEnd`, beide mit `timeout: 20`. Die
+      Vorbedingung ist auch erfüllt: `ulguard` und `ulinit` liegen maschinenweit
+      in `~/go/bin` (samt Bash-Shim ohne `.exe`), und
+      `ulguard worktree-link --root <dieses Repo>` läuft mit Exit 0.
+      **Warum dieses Dokument es nicht sehen konnte:** `~/.claude` ist ein
+      eigenes Git-Repo, und der Eintrag lag dort uncommittet im Arbeitsbaum.
+      Committet ist er seit `f5ece34` in jenem Repo — nicht in diesem.
 - [ ] `.claude/settings.json` dieses Repos trägt **keinen** `worktree-link`-Hook
       (nur `ulguard` als PreToolUse und `ulguard post-edit`). Solange das so
       ist, heilt hier kein Sitzungsstart irgendwelche Junctions.
@@ -346,6 +352,22 @@ ist ein leeres Paket.
       Abschnitt 6 nicht unindiziert ist: der Katalog existiert, er liegt nur
       ungetrackt am falschen Ort. **Offen: ob der Indexer nach `docs/wiki/`
       umgelenkt wird und ob `.obsidian/` in die `.gitignore` gehört.**
+
+### Zwei Binärstände, die driften
+
+- [ ] **Der Checkout und der PATH tragen verschiedene Binärstände.** Die
+      `config.toml` ruft `./ulinit`, die Hooks rufen das `ulinit` aus
+      `~/go/bin`. Am 2026-09-10 kannte das PATH-Binär `check types` noch nicht,
+      während der Checkout es hatte — ein Hook wäre an einem Unterbefehl
+      gescheitert, der existiert. Beide sind jetzt gebaut, aber die Drift ist
+      strukturell: **es gibt keinen Schritt, der beide zusammenhält.**
+- [ ] **`go install` ist hier die falsche Waffe** und hat am 2026-09-10 zwei
+      Streuner erzeugt. Es benennt das Ergebnis nach dem Paketverzeichnis, also
+      `init.exe` und `guard.exe`, nicht `ulinit.exe` und `ulguard.exe`, die die
+      Hooks rufen — exitet dabei mit 0 und lässt die alten Binäre unberührt.
+      `go build -o <zielname>` ist der Weg; die Streuner sind entfernt. Offen:
+      ob ein `Makefile`- oder `ulinit`-Schritt das übernimmt, statt es in einer
+      Anweisungsdatei zu erklären.
 
 ### Zwei halbe Go-Formen in der `check`-Familie
 
