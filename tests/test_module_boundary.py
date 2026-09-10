@@ -216,8 +216,10 @@ def test_subagent_stop_pulls_in_neither_the_harness_nor_the_check_chain(tmp_path
     """It compares git refs; paying for the check chain would be absurd.
 
     The hook that used to stand here was `session-start`, and it is gone: the
-    Go binary answers that event now. `stop` is the one hook that legitimately
-    carries the check chain, so this is the boundary for the hooks that do not.
+    Go binary answers that event now. This one stands in for both subagent
+    hooks -- `subagent_start` imports `subagent_stop`, so the two reach the
+    same modules -- and `stop` is the one hook that carries the check chain
+    on purpose, which is why it is not probed here.
     """
     code, leaked, output = _probe(
         RUN_SUBAGENT_STOP, "hook", "subagent-stop", "--root", str(tmp_path)
