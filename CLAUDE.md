@@ -21,10 +21,14 @@ until 2026-08-25, and the test does not work: from
 for the second — the same directory written two ways. Compared as text they
 differ, so the rule says "worktree" about a directory that shares the index.
 
-Real worktrees are what `git worktree add` creates. This repository has them in
-both places — `.worktrees/multi-provider-llm` and
-`.claude/worktrees/project-history-planning-cf98dc` — so the path is no
-evidence either way.
+Real worktrees are what `git worktree add` creates. This repository keeps them
+under `.worktrees/` today — as of 2026-09-10 `git worktree list` names
+`.worktrees/mcp-native` and `.worktrees/multi-provider-llm`, and
+`.claude/worktrees/` is empty. It has not always been so: a real worktree once
+stood at `.claude/worktrees/project-history-planning-cf98dc`, right beside the
+shared-index directories the section above warns about. So the path is no
+evidence either way, and the answer stays `git worktree list`, not the layout
+this paragraph happens to describe.
 
 ## Before every commit
 
