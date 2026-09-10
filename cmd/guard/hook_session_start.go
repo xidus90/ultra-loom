@@ -70,8 +70,9 @@ func runHookSessionStart(stdin io.Reader, stdout, stderr io.Writer, root, hostNa
 func recordBase(sessionID, root string) error {
 	if sessionID == "" {
 		// hostio.Read hands a missing id and a wrongly typed one over as the
-		// empty string alike (internal/hostio/claude.go:154-167), which is the
-		// `isinstance(session_id, str)` test of session_start.py:52 with the
+		// empty string alike -- the type assertion at
+		// internal/hostio/claude.go:60, and its reasoning at :31-37. That is
+		// the `isinstance(session_id, str)` test of session_start.py:52 with the
 		// one divergence that a literal `"session_id": ""` files nothing here
 		// while Python files it under `unnamed` (state.py:75).
 		return nil

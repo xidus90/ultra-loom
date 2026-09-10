@@ -14,7 +14,7 @@ import (
 )
 
 // A journal line carrying all ten of Entry's keys, because internal/journal
-// reads a missing or an unknown key as damage (internal/journal/journal.go:43-47).
+// reads a missing or an unknown key as damage (internal/journal/journal.go:45-48).
 const waitingRun = `{"delta":{},"detail":"which colour?","effort":null,"input_hash":"h1","kind":"gate","node":"ask","outcome":"paused","seconds":0.1,"tokens":0,"tools":null}`
 
 const finishedRun = `{"delta":{},"detail":null,"effort":null,"input_hash":"h1","kind":"node","node":"work","outcome":"ok","seconds":0.1,"tokens":0,"tools":null}`
@@ -69,7 +69,7 @@ func TestHookSessionStartSaysNothingNonASCII(t *testing.T) {
 }
 
 // Nothing waiting writes no envelope at all, rather than one carrying an empty
-// additionalContext -- internal/hostio/claude.go:210-213 makes that decision
+// additionalContext -- internal/hostio/claude.go:80-83 makes that decision
 // and this only shows it reaching the hook's own output.
 func TestHookSessionStartIsSilentWithNothingWaiting(t *testing.T) {
 	root := project(t)
