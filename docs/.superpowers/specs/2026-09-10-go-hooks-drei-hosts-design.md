@@ -151,10 +151,17 @@ Das Flag ist auch kein zweiter Ort für dieselbe Wahrheit: `ulinit` schreibt
 den Host in dem Moment, in dem es das Kommando bildet. Und es ist der einzige
 Weg, der schon vor der Messung von Antigravitys Stop-Nutzlast trägt.
 
-Die Wurzel: `${CLAUDE_PROJECT_DIR}` ist auf Antigravity nie gesetzt, und das
-Arbeitsverzeichnis ist das Verzeichnis der `hooks.json`, also `.agents/`
-(`MIGRATION.md:157`). Ohne `--root` wird von dort aufwärts bis zur ersten
-`.ultraloom/config.toml` gesucht; ein gegebenes `--root` schlägt das.
+Die Wurzel: das Arbeitsverzeichnis eines Hooks ist auf Antigravity nicht die
+Projektwurzel, sondern das Verzeichnis der `hooks.json`, also `.agents/`
+(`MIGRATION.md:157`, am 2026-09-10 nachgemessen). Ohne `--root` wird von dort
+aufwärts bis zur ersten `.ultraloom/config.toml` gesucht; ein gegebenes
+`--root` schlägt das.
+
+Eine frühere Fassung dieses Absatzes behauptete, `${CLAUDE_PROJECT_DIR}` sei
+dort nie gesetzt. Das war falsch abgeschrieben: die Doku sagt
+`${CLAUDE_PLUGIN_ROOT}`, und über `CLAUDE_PROJECT_DIR` sagt sie nichts. Ob
+Antigravity die Variable setzt, ist ungemessen — die Wurzelsuche ruht allein
+auf dem Arbeitsverzeichnis.
 
 Unterbefehle in `cmd/guard/`, nach dem Muster der sechs vorhandenen in
 `cmd/guard/main.go`: `hook session-start`, `hook subagent-start`,
