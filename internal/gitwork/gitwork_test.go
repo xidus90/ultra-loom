@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xidus90/ultra-loom/internal/gitenv"
@@ -74,10 +75,13 @@ func TestHeadCommitOfARepositoryWithoutACommit(t *testing.T) {
 	}
 }
 
-// The one refusal that has to come first. An ignored directory *is* inside a
-// repository, so rev-parse answers readily with the surrounding repository's
-// HEAD -- and measuring against that is worse than not measuring, because
-// every file of the parked copy then reads as somebody's change.
+// The one refusal that is not git's own. An ignored directory *is* inside a
+// repository, so rev-parse would answer readily -- with the surrounding
+// repository's HEAD -- and this is the case where a successful call is the
+// wrong one: measuring against that outer HEAD is worse than not measuring,
+// because every file of the parked copy then reads as somebody's change. So
+// what the refusal buys is an error where there would otherwise be an answer,
+// and that, not its position among two calls, is what this pins.
 func TestHeadCommitRefusesAnIgnoredRoot(t *testing.T) {
 	outer := repo(t)
 	commit(t, outer, "first")
@@ -123,7 +127,9 @@ func revParse(t *testing.T, root string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(out[:len(out)-1])
+	// Trimmed the way HeadCommit trims, so the comparison is about the SHA and
+	// not about how many bytes of line ending git happened to write.
+	return strings.TrimSpace(string(out))
 }
 
 func run(t *testing.T, root string, args ...string) {
