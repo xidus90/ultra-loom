@@ -93,15 +93,30 @@ den Vorschlag überstimmt, bei `ultraloom` wurde er genommen. Der Defekt ist
 damit die **Vorgabe**, nicht ein Zwang — und daher genau die Sorte, die in
 einem unbeaufsichtigten `--yes`-Lauf durchgeht.
 
-Dazu: `gather` (`cmd/init/main.go:161`) weist das Ergebnis **bedingungslos** zu
-und verwirft damit, was `Detect` im Repo selbst gefunden hat — auch mit
-`"", ""`, wenn kein Nachbar passt.
+Eine erste Fassung sagte hier, `gather` weise das Ergebnis **bedingungslos**
+zu. Das war falsch gelesen: `gather` (`cmd/init/main.go`) fragt den Nachbarn
+nur, wenn `Detect` keine Mode gefunden hat (`if facts.WikiMode != "" {
+return facts, nil }`). Die Lücke liegt eine Ebene tiefer, in `readWiki`
+(`internal/detect/detect.go`): es liest nur `.brain.toml`. `ultraloom` trägt
+`.ultra-brain/config.toml` — den Namen, den brain selbst **zuerst** sucht
+(`manifestNames` in `ultra-brain/pkg/config/manifest.go`) — mit `wiki = true`,
+und sein `docs/wiki/index.md` hat den Marker `okf_version` nicht. `Detect`
+findet also nichts, meldet eine Unklarheit, und erst dann kommt
+`NeighbourWiki` zum Zug.
 
 Bemerkenswert und für den Entwurf entscheidend: für `iam_backend`,
-`iam_frontend` und `iam_workers` ist `iam_wiki/` **richtig**, obwohl keines
-`iam_backend_wiki` heißt. Die lose Prüfung ist das, was iam funktionieren lässt.
-Eine strengere Erkennung braucht deshalb einen Ausnahmeweg — und der ist die
-verzeichnete Antwort, die `bundle = "iam_wiki/"` schon trägt.
+`iam_design`, `iam_docs`, `iam_frontend` und `iam_workers` ist `iam_wiki/`
+**richtig**, obwohl keines `iam_backend_wiki` heißt. Die gelebte Konvention
+ist nicht `<projekt>_wiki`, sondern `<familie>_wiki`: ein Wiki gehört den
+Geschwistern, die `<familie>` heißen oder mit `<familie>_` beginnen.
+`ultraloom` und `space` beginnen nicht mit `iam_`. Das ist der Unterscheider,
+und er braucht keine neue Datenquelle.
+
+Ein Abgleich gegen brains Registry, den eine erste Fassung von Stufe 0
+vorschlug, **kann nicht unterscheiden**: `iam_wiki` ist dort ein eigener
+Bereich (`project/iam-wiki`), und kein Eintrag verbindet ihn mit
+`iam_backend`. Die Registry sagt über den falschen Fall (`ultraloom`) und den
+richtigen (`iam_backend`) dasselbe.
 
 **D3 — `configure_agent_hooks` löscht fremde Hookeinträge.**
 `ultra-brain/src/brain/init.py:234` weist zu statt anzuhängen:
@@ -303,7 +318,7 @@ Pflegeschleife sich schließt. Die Kette, in dieser Reihenfolge:
 
 | Stufe | Inhalt | Hängt an |
 |---|---|---|
-| 0 | D2 reparieren (`NeighbourWiki` verlangt `<projekt>_wiki` **und** gleicht gegen brains Registry ab, die für jedes Repo schon sagt, welchem Scope es gehört und ob es readonly ist; `gather` weist nicht mehr bedingungslos zu), und `ultraloom`s eigene `answers.toml` auf `brain` / `docs/wiki/` setzen | c0s Zweig `claude/go-hooks-stufe-0-1`, bis er gemergt ist |
+| 0 | D2 reparieren: `readWiki` liest `.ultra-brain/config.toml` vor `.brain.toml`, wie brain selbst; `NeighbourWiki` nimmt nur ein Wiki der eigenen Familie (`<familie>_wiki` für `<familie>` oder `<familie>_*`). Dazu `ultraloom`s eigene `answers.toml` auf `brain` / `docs/wiki/`. Plan: `docs/.superpowers/plans/2026-09-11-wiki-flottenstandard-stufe-0.md` | — (die Sperre durch den Go-Hooks-Zweig ist mit `6168ef2` gefallen) |
 | 1 | Teil 1: `answers.Answers` erweitern, `.brain.toml` generieren, `vault` als vierte Mode | Stufe 0 |
 | 2 | Teil 3: die drei Hookeinträge, `.agents/hooks.json` als zweiter Schreiber | Stufe 1 |
 | 3 | Teil 2: das Preset | Stufe 1 |
