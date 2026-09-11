@@ -145,24 +145,40 @@ func TestAFullRunWritesTheWholeSetAndSaysSo(t *testing.T) {
 }
 
 // The hook commands land in a file the project commits, so none of them may
-// carry a path that exists only on this machine -- and none of them names a
-// runtime directory inside the project either: the hooks look their binary up
-// on PATH, the way the ulguard and brain entries beside them do. SessionStart
-// is the ulguard binary now, the three history hooks are still the Python one.
-func TestTheHookCommandsCallTheBinaryOnPath(t *testing.T) {
+// carry a path that exists only on this machine, and none of them may name a
+// runtime directory inside the project -- `.ultraloom/vendor` is not in git,
+// so a fresh worktree has none of it.
+//
+// Every one of them names the project it was called for, but in two forms,
+// and the kind of program decides which. SessionStart is the compiled ulguard
+// binary: it has no source tree it could be wrong about, so it is called by
+// name and takes the project as `--root`. The three history hooks are the
+// Python entry point, and those carry `--project "${CLAUDE_PROJECT_DIR}"` as
+// well, for a reason measured on 2026-09-11. A bare `ultraloom` resolves
+// through `~/.local/bin/ultraloom.exe`, which is a `uv tool install` in
+// editable mode: its `_editable_impl_ultraloom.pth` holds a single absolute
+// line naming the main checkout's `src`. The name therefore imports the main
+// checkout from every worktree -- a hook that runs, against the wrong tree,
+// and says nothing. `uv run --project` pointed at the same worktree answered
+// `.worktrees/multi-provider-llm/src/ultraloom/__init__.py` instead.
+// TestWithGitTheHistoryHooksAreInstalled holds those three to that form.
+//
+// The project root, not a directory below it: measured against `space`, which
+// carries no pyproject.toml at all, the form still resolves with no venv on
+// PATH. One spelling therefore serves a Python project and a Godot one.
+func TestTheHookCommandsRunAgainstTheProjectTheyWereCalledFor(t *testing.T) {
 	root := t.TempDir()
 	mustRun(t, answered(root))
 	body := read(t, root, ".claude/settings.json")
-	// The whole command, not a substring of it: the vendored form ended in
-	// exactly these words, so a Contains check would pass against it too.
+	// The whole command, not a search of the file for it: anything put in front
+	// of these words -- a runtime path, a wrapper -- would leave a Contains
+	// check satisfied.
 	want := `ulguard hook session-start --host claude --root "${CLAUDE_PROJECT_DIR}"`
 	if got := commandFor(t, body, "SessionStart", ""); got != want {
 		t.Fatalf("SessionStart runs %q, want %q", got, want)
 	}
-	for _, gone := range []string{"uv run", "--project", ".ultraloom/vendor"} {
-		if strings.Contains(body, gone) {
-			t.Fatalf("%q still reaches settings.json:\n%s", gone, body)
-		}
+	if strings.Contains(body, ".ultraloom/vendor") {
+		t.Fatalf("the vendored runtime still reaches settings.json:\n%s", body)
 	}
 	if strings.Contains(body, root) || strings.Contains(body, filepath.ToSlash(root)) {
 		t.Fatalf("a machine path reached settings.json:\n%s", body)
@@ -195,10 +211,12 @@ func TestTheHookCommandsCallTheBinaryOnPath(t *testing.T) {
 // says what it must emit.
 //
 // The contrast with SubagentStart, SubagentStop and Stop is the kind of
-// program, not the shape of the command -- `hookCommand` writes those as bare
-// names too (run.go:799), and TestTheHookCommandsCallTheBinaryOnPath above
-// holds every one of the four to a name with no directory in it. Those three
-// generate the Python entry point and cross to Go in a later stage.
+// program, and here it does decide the shape of the command: `hookCommand`
+// writes those three as `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom
+// ...`, because the Python entry point is an editable install pinned to one
+// source tree, while this one is a compiled binary called by name.
+// TestTheHookCommandsRunAgainstTheProjectTheyWereCalledFor above carries the
+// measurement behind the difference. Those three cross to Go in a later stage.
 func TestHookEntriesSessionStartIsTheGoBinary(t *testing.T) {
 	entries := hookEntries(detect.Facts{HasGit: true}, false)
 
@@ -293,9 +311,9 @@ func TestWithGitTheHistoryHooksAreInstalled(t *testing.T) {
 	// The whole command per event, not the subcommand name alone: the name
 	// says the hook is installed, the command says what will run it.
 	for _, c := range []struct{ event, want string }{
-		{"SubagentStart", `ultraloom hook subagent-start --root "${CLAUDE_PROJECT_DIR}"`},
-		{"SubagentStop", `ultraloom hook subagent-stop --root "${CLAUDE_PROJECT_DIR}"`},
-		{"Stop", `ultraloom hook stop --root "${CLAUDE_PROJECT_DIR}"`},
+		{"SubagentStart", `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook subagent-start --root "${CLAUDE_PROJECT_DIR}"`},
+		{"SubagentStop", `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook subagent-stop --root "${CLAUDE_PROJECT_DIR}"`},
+		{"Stop", `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook stop --root "${CLAUDE_PROJECT_DIR}"`},
 	} {
 		if got := commandFor(t, body, c.event, ""); got != c.want {
 			t.Fatalf("%s runs %q, want %q", c.event, got, c.want)
