@@ -35,9 +35,11 @@ Das Füllen des Wikis ist selbst ein offener Punkt — siehe Abschnitt 6.
 | **Audit-Nacharbeit (Tore, Multi-Marker, Aufräumen)** | `feat/audit-nacharbeit` (gelöscht) | — (kein Worktree) | ✅ **erledigt** | Beide Commits am 2026-09-10 auf `master` übernommen: `e2c4911` als `94e2c2b` (Spec) und `90d3e50` als `d941d26` (`cmd/init`), danach `ultraloom check all` mit Exit 0. Ein früheres Urteil, `90d3e50` sei zu verwerfen, war falsch begründet — der Commit ergänzt `cmd/init` und fasst keine `.gitignore` dieses Repos an. Am 2026-09-11 vor dem Abbau nachgemessen: `git cherry -v master feat/audit-nacharbeit` markiert beide Commits mit `-`, also inhaltsgleich auf `master`. Weil Cherry-Picks keine Vorfahren sind, lief der Abbau mit `git branch -D` (Nutzerentscheidung; die Spitze war `90d3e50`) | keine — der Strang ist geschlossen |
 | **Mehrere LLM-Anbieter** | `feature/multi-provider-llm` | — (Worktree am 2026-09-11 entfernt) | 🟠 **weit veraltet** | **155 eigene** Commits, **446 hinter** master (gemessen 2026-09-11), letzter Stand 2026-08-24. Vor dem Abbau war der Arbeitsbaum sauber, auch ohne ungetrackte oder ignorierte Dateien außer `.venv` und Caches, und kein Prozess arbeitete darin. Der Zweig bleibt mit allen Commits | Entscheiden, was davon noch trägt. Der Entwurf lebt nur auf dem Zweig; ein Rebase über 446 Commits ist kein Selbstläufer. Zum Weiterarbeiten `git worktree add .worktrees/multi-provider-llm feature/multi-provider-llm` |
 | **Go-Hooks für drei Hosts, Stufe 0 und 1** (parallele Sitzung `ultraloom-c0`) | `claude/go-hooks-stufe-0-1` (gelöscht) | `.worktrees/go-hooks` (entfernt) | ✅ **gemergt** | Mit `6168ef2` am 2026-09-11 nach master, als Fast-Forward über einen Merge; Zweig und Worktree danach abgebaut. 23 eigene Commits. SessionStart läuft seither über `ulguard hook session-start --host claude`, `session_start.py` ist gefallen; die drei Verlaufshooks bleiben Python bis zu ihren Stufen. Die drei Konflikte mit `6d87253` (`cmd/init/run_test.go`, `docs/hooks.md`, `docs/hooks.de.md`) und die zwei Kommentare, die still falsch gemergt hätten, sind im Merge aufgelöst. Spec `docs/.superpowers/specs/2026-09-10-go-hooks-drei-hosts-design.md` | Stufen 2 bis 5 sind laut Spec absichtlich noch nicht geplant. Die offenen Nachläufer stehen in Abschnitt 8 |
-| **Wiki-Flottenstandard** | `master` | — | 🟡 **Stufe 0 umgesetzt** | Spec `b208c36`, berichtigt in `8614c8c`: `answers.toml` wird die eine Entscheidungsdatei für ultraloom und brain, `.brain.toml` fällt daraus, ein Flottenpreset liefert die Standardantworten, vier Wiki-Arten (`brain`, `neighbour_repo`, `vault`, `none`). Siehe Abschnitt 6 | Stufe 1 planen: `answers.Answers` um brains Entscheidungen erweitern und `.brain.toml` daraus erzeugen. Stufe 0 (Erkennung und die eigene Antwort) ist umgesetzt, siehe Abschnitt 6 |
+| **Wiki-Flottenstandard** | `master` | — | 🟢 **Stufe 0 gemergt** | Spec `b208c36`, berichtigt in `8614c8c`: `answers.toml` wird die eine Entscheidungsdatei für ultraloom und brain, `.brain.toml` fällt daraus, ein Flottenpreset liefert die Standardantworten, vier Wiki-Arten (`brain`, `neighbour_repo`, `vault`, `none`). Siehe Abschnitt 6 | Stufe 1 planen: `answers.Answers` um brains Entscheidungen erweitern und `.brain.toml` daraus erzeugen. Stufe 0 (Erkennung und die eigene Antwort) ist am 2026-09-11 als `eb0e5f6`..`7485f63` per Fast-Forward nach master gegangen, die PATH-Binaries sind danach neu gebaut, siehe Abschnitt 5 und 6 |
 | **Agent-Harness** | `feature/agent-harness` | `.worktrees/agent-harness` | ❔ **unbelegt** | **0 eigene** Commits, Spitze `fa3dd38`, 29 hinter master. Der Arbeitsbaum trägt **vier ungetrackte Specs, die nur dort liegen** (2026-09-10 15:21–17:28, zusammen rund 105 KB): `2026-09-10-agent-harness-design.md`, `-knotenkatalog.md`, `-graph.html` und `-graph.standalone.html`. Am 2026-09-11 arbeitete kein Prozess darin. Die Sitzung `ultraloom-49` hat ihn nicht angelegt; `ultraloom-bd` ist die naheliegende Urheberin, belegt ist das nicht | **Stehen lassen, entschieden am 2026-09-11.** Nicht mit `git worktree remove --force` abbauen, das nähme die vier Specs wortlos mit. Vor einem Abbau die Specs committen oder in den Hauptcheckout verschieben |
 | **`wentletrap`** | `wentletrap` | `~/orca/workspaces/ultraloom/wentletrap`, **außerhalb** des Repos | 🔵 **fremdverwaltet, in Gebrauch** | **0 eigene** Commits, Spitze `b95c187`, 36 hinter master, Arbeitsbaum sauber. Liegt im Werkzeugverzeichnis `orca`, nicht unter `.worktrees/`. Am 2026-09-11 vormittags zeigte `ListAgents` zwei Sitzungen `wentletrap-fd` und `wentletrap-79`, beide rund eine Stunde alt. Ein zweiter orca-Eintrag (`.orca-preparing/…`, detached HEAD, `locked`) stand am selben Vormittag in `git worktree list` und war kurz darauf von selbst verschwunden | Nicht anfassen: orca verwaltet es. Abbauen nur über orca, oder wenn keine `wentletrap`-Sitzung mehr läuft |
+| **`fix-audit-scheibe5`** | `fix-audit-scheibe5` | `~/orca/workspaces/ultraloom/fix-audit-scheibe5`, **außerhalb** des Repos | 🔵 **fremdverwaltet** | **1 eigener** Commit `02f10c3` „docs: fix incorrect placeholder in wiki/audit.md", Arbeitsbaum sauber (gemessen 2026-09-11 12:05). Gehört zum offenen Punkt in Abschnitt 6, dass `docs/wiki/audit.md` auf eine „Scheibe 5" verweist, die es hier nicht gibt | Nicht anfassen: orca verwaltet es. Den Commit übernehmen, wenn die zugehörige Sitzung fertig ist, und dann den Punkt in Abschnitt 6 abhaken |
+| **`fix-benchmarks-de-heading`** | `fix-benchmarks-de-heading` | `~/orca/workspaces/ultraloom/fix-benchmarks-de-heading`, **außerhalb** des Repos | 🔵 **fremdverwaltet** | **0 eigene** Commits, Spitze `e165d6d`, Arbeitsbaum sauber (gemessen 2026-09-11 12:05). Der Name passt zum offenen Punkt in Abschnitt 6, dass `docs/benchmarks.de.md` eine Überschrift doppelt trägt; eine Änderung liegt dort noch nicht | Nicht anfassen: orca verwaltet es |
 
 > [!IMPORTANT]
 > **Zu parallelen Sitzungen — die Falle dieses Repos ist eine andere als in `space`.**
@@ -384,10 +386,25 @@ ist ein leeres Paket.
       Gate-Läufen des Vortags; bei `multi-provider-llm` blieb ein leeres
       Verzeichnis, die Ursache ist nicht gemessen. Beide Reste sind von Hand
       entfernt. `.worktrees/agent-harness` bleibt stehen (vier ungetrackte
-      Specs), `wentletrap` liegt außerhalb des Repos und gehört orca. Neu seit
-      2026-09-11 vormittags ist `.worktrees/wiki-stufe-0` auf
-      `claude/wiki-stufe-0`, angelegt von der parallelen Sitzung für Stufe 0
-      des Flottenstandards (beim Anlegen 0 eigene Commits, Spitze `a4c0be8`).
+      Specs), `wentletrap` liegt außerhalb des Repos und gehört orca.
+      `.worktrees/wiki-stufe-0` (Zweig `claude/wiki-stufe-0`, Stufe 0 des
+      Flottenstandards, angelegt bei `a4c0be8`) ist nach dem Fast-Forward-Merge
+      auf `7485f63` am 2026-09-11 ebenfalls abgebaut, der Zweig gelöscht und
+      nicht gepusht. Neu unter orca sind `fix-audit-scheibe5` und
+      `fix-benchmarks-de-heading`, siehe Matrix.
+- [ ] **`dmypy`-Daemons blockieren das Abbauen jedes Worktrees, in dem ein
+      Gate lief — drei Fälle am 2026-09-11.** Nach `go-hooks` scheiterte auch
+      `git worktree remove .worktrees/wiki-stufe-0` mit `Invalid argument`:
+      zwei `python.exe … -m mypy.dmypy --status-file .dmypy.json daemon` aus dem
+      `.venv` des Worktrees hielten das Verzeichnis offen (gemessen über die
+      Kommandozeilen der Prozesse). `git` hatte den Eintrag da schon
+      ausgetragen; übrig blieb ein Verzeichnis mit allen ausgecheckten Dateien
+      und einem 32-MB-`.venv`. Aufgeräumt wurde es, nachdem geprüft war, dass
+      keine Datei darin fehlt, die `master` nicht trackt: die Daemons per PID
+      beendet, dann gelöscht. Die Ursache ist strukturell: `ulinit check types`
+      startet den Daemon im Worktree, und nichts beendet ihn, wenn der Worktree
+      geht. Offen: ob das Abbauen einen Schritt „Daemon im Worktree stoppen"
+      bekommt, oder ob die `types`-Bahn in einem Worktree ohne Daemon läuft.
 - [ ] **Untrackt und ungestaged im Baum, nachgesehen 2026-09-11.** Drei
       Befunde dieses Punktes vom Vortag waren falsch oder sind überholt. Der
       Stand jetzt:
@@ -427,8 +444,18 @@ ist ein leeres Paket.
       und nahmen das Commit-Gate mit). Damit prüft jede Bahn mit dem
       installierten Binär, nicht mit dem gebauten. Zwischen 2026-09-10 16:38 und
       2026-09-11 10:13 stammten `~/go/bin/ulguard.exe` und `ulinit.exe` aus dem
-      damals ungemergten Zweig `claude/go-hooks-stufe-0-1`; seit 10:13 sind
-      beide über `scripts/install.ps1` von master gebaut (`6168ef2`). Der Punkt
+      damals ungemergten Zweig `claude/go-hooks-stufe-0-1`; von 10:13 bis 12:05
+      waren beide über `scripts/install.ps1` von master bei `6168ef2` gebaut.
+      **Seit 2026-09-11 12:05 stammen sie von `7485f63`**, also mit Stufe 0 des
+      Flottenstandards, gebaut über `scripts/install.ps1` bei sauberen
+      Go-Quellen im Hauptcheckout. Das Skript überschreibt ohne Sicherung; die
+      vorigen Stände liegen deshalb von Hand gesichert als
+      `ulguard.exe.old-20260911-1205` und `ulinit.exe.old-20260911-1205`
+      daneben. Nach dem Neubau gemessen: `ulinit --detect-only` antwortet für
+      dieses Repo `brain` / `docs/wiki/`, für ein `ultraloom` neben `iam_wiki`
+      kein Wiki mehr (vorher `neighbour_repo` / `iam_wiki/`) und für
+      `iam_backend` neben `iam_wiki` weiter `neighbour_repo` / `iam_wiki/`;
+      `ulguard status` endet mit 0. Der Punkt
       bleibt offen, weil nichts die zwei Stände zusammenhält: jede Änderung an
       `cmd/` braucht einen Neubau, und kein Gate merkt, wenn er fehlt.
 - [x] **Der richtige Bauweg existiert schon: `scripts/install.ps1` und
@@ -578,17 +605,24 @@ Projekt darauf verweisen. Umgesetzt ist davon nichts.
       `readWiki` liest `.ultra-brain/config.toml` vor `.brain.toml`,
       `NeighbourWiki` nimmt nur ein Wiki der eigenen Familie, und
       `.ultraloom/answers.toml` sagt `mode = "brain"`, `bundle = "docs/wiki/"`.
-      Die Commits sind `9f620a9`, `564956d` und `a62f791`.
+      Die Commits sind `eb0e5f6`, `9930cf4` und `15124cb`, dazu die
+      Berichtigung dieses Punktes in `7485f63`; alle vier kamen am 2026-09-11
+      per Fast-Forward nach master. Die Commit-Nachricht von `7485f63` nennt
+      noch die Namen derselben Commits von vor dem Aufsetzen auf `a547bfb`
+      (`9f620a9`, `564956d`, `a62f791`); auf master gibt es diese Hashes nicht.
       Die brain-Einträge in den Hooks entstehen erst mit dem nächsten
       `ulinit`-Lauf, und der gehört zu Stufe 2. `ulguard` dagegen liest
       `bundle` live: findet `Detect` keinen Wikipfad, fällt `runPostEdit` auf
       `resolveWikiDir` (`cmd/guard/post_edit.go:384`) zurück, das
-      `answers.toml` bei jedem Aufruf liest. Ein vor `9f620a9` gebautes
+      `answers.toml` bei jedem Aufruf liest. Ein vor `eb0e5f6` gebautes
       `ulguard` kennt `.ultra-brain/config.toml` nicht, findet hier keinen
       Wikipfad und nimmt deshalb gleich nach dem Merge `docs/wiki/` statt
       `iam_wiki/`; ein danach gebautes findet `docs/wiki/` schon über die
       Erkennung. Schaden richtet der Wechsel nicht an, weil `isWikiPath`
       `docs/wiki/` unabhängig vom eingestellten Verzeichnis zum Wiki zählt.
+      Die Binaries auf dem PATH sind seit 2026-09-11 12:05 von `7485f63`
+      gebaut, es gilt also schon der zweite Fall (siehe Abschnitt 5,
+      „Zwei Binärstände").
 - [ ] **Mit richtiger Mode schlösse sich die Pflegeschleife trotzdem nicht von
       selbst.** Gemessen: der MCP-Server von `brain` bietet nur Lesewerkzeuge
       (`catalog`, `read`, `neighbors`, `search`, `status`); Fälle entstehen in
