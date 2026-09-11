@@ -96,6 +96,7 @@ UltraLoom folgt einer klaren Hierarchie:
 1. **UltraBrain (`.ultra-brain/config.toml`, sonst `.brain.toml`):**
    * Definiert, ob das Repository ein Brain-Bereich mit Wiki-Ebene ist (`[area] wiki = true`) und legt das Layout fest.
    * Die zwei Namen sind brains eigene Suchreihenfolge: die erste lesbare Datei entscheidet, die zweite wird dann nicht gelesen.
+   * `ulinit` schreibt `.brain.toml` aus `[gates.wiki]` in `.ultraloom/answers.toml`, wenn der Modus `brain` ist und noch keine der beiden Dateien existiert; ein vorhandenes Manifest bleibt, wie es ist.
    * Erklärt die entscheidende Datei nicht `wiki = true`, bleiben Wiki-Hooks standardmäßig deaktiviert.
 2. **UltraLoom-Konfiguration (`.ultraloom/config.toml` & `.ultraloom/answers.toml`):**
    * Verwaltet Policies, geschützte Dateipfade, Ziel-Agenten (`claude`, `gemini`) und Schwellenwerte.

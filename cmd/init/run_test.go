@@ -1637,3 +1637,51 @@ func TestEnsureGitignoreSeparatesFromAnUnterminatedLine(t *testing.T) {
 		t.Fatalf("entry glued onto the last line:\n%s", string(data))
 	}
 }
+
+// A project that answers brain and carries no manifest gets the one brain
+// reads, built from its answers and the defaults brain init would propose.
+func TestABrainProjectGetsItsManifest(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "docs/wiki/index.md", "---\nokf_version: 1\n---\n")
+	o := Options{Root: root, Yes: true, CommitLanguage: "en", DocsLanguage: "de",
+		Look: notOnPath, Getenv: noEnv}
+	mustRun(t, o)
+	body := read(t, root, ".brain.toml")
+	for _, want := range []string{
+		"scope = \"project/" + filepath.Base(root) + "\"",
+		"wiki  = true",
+		"sources = \"docs\"",
+		"wiki    = \"docs/wiki\"",
+		"include = [\"docs/*.md\", \"docs/**/*.md\", \"README*.md\"]",
+		"mode = \"manual_cloud\"",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf(".brain.toml lacks %q:\n%s", want, body)
+		}
+	}
+}
+
+// brain reads .ultra-brain/config.toml first and never looks at .brain.toml
+// beside it, so a second manifest there would be a file nothing reads.
+func TestAnUltraBrainConfigKeepsTheManifestOut(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".ultra-brain/config.toml", "[area]\nscope = \"project/x\"\nwiki = true\n")
+	makeFile(t, root, "docs/wiki/index.md", "# Katalog\n")
+	o := Options{Root: root, Yes: true, CommitLanguage: "en", DocsLanguage: "de",
+		Look: notOnPath, Getenv: noEnv}
+	report := mustRun(t, o)
+	if _, err := os.Stat(filepath.Join(root, ".brain.toml")); !os.IsNotExist(err) {
+		t.Fatalf(".brain.toml was written beside .ultra-brain/config.toml (stat: %v)", err)
+	}
+	if !strings.Contains(report, ".ultra-brain/config.toml already declares this area") {
+		t.Fatalf("the report does not say why no manifest was written:\n%s", report)
+	}
+}
+
+func TestAProjectWithoutAWikiGetsNoManifest(t *testing.T) {
+	root := t.TempDir()
+	mustRun(t, answered(root))
+	if _, err := os.Stat(filepath.Join(root, ".brain.toml")); !os.IsNotExist(err) {
+		t.Fatalf("a project answering mode none got a .brain.toml (stat: %v)", err)
+	}
+}

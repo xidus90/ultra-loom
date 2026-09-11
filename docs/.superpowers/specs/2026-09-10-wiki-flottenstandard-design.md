@@ -319,7 +319,7 @@ Pflegeschleife sich schließt. Die Kette, in dieser Reihenfolge:
 | Stufe | Inhalt | Hängt an |
 |---|---|---|
 | 0 | D2 reparieren: `readWiki` liest `.ultra-brain/config.toml` vor `.brain.toml`, wie brain selbst; `NeighbourWiki` nimmt nur ein Wiki der eigenen Familie (`<familie>_wiki` für `<familie>` oder `<familie>_*`). Dazu `ultraloom`s eigene `answers.toml` auf `brain` / `docs/wiki/`. Plan: `docs/.superpowers/plans/2026-09-11-wiki-flottenstandard-stufe-0.md` | — (die Sperre durch den Go-Hooks-Zweig ist mit `6168ef2` gefallen) |
-| 1 | Teil 1: `answers.Answers` erweitern, `.brain.toml` generieren, `vault` als vierte Mode | Stufe 0 |
+| 1 | Teil 1: `answers.Answers` erweitern, `.brain.toml` generieren, `vault` als vierte Mode — `vault` zunächst nur als gültiger Wert, ohne eigenes Manifest. Plan: `docs/.superpowers/plans/2026-09-11-wiki-flottenstandard-stufe-1.md` | Stufe 0 |
 | 2 | Teil 3: die drei Hookeinträge, `.agents/hooks.json` als zweiter Schreiber | Stufe 1 |
 | 3 | Teil 2: das Preset | Stufe 1 |
 | 4 | D1 und D3 in `ultra-brain` — Glob-Parität und `configure_agent_hooks`, das anhängt statt zuzuweisen. Vorlage ist `internal/settings/merge.go` | eigene Runde, anderes Repo |

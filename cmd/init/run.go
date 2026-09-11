@@ -38,6 +38,14 @@ const settingsPath = ".claude/settings.json"
 
 const mcpPath = ".mcp.json"
 
+// brainManifestPath is the manifest ulinit writes for a brain area, and
+// ultraBrainConfigPath the one brain itself looks for first. brain reads the
+// first of the two that exists and never both.
+const (
+	brainManifestPath    = ".brain.toml"
+	ultraBrainConfigPath = ".ultra-brain/config.toml"
+)
+
 const installedPath = ".ultraloom/installed.toml"
 
 // answersPath names the file the installed hash is taken over: the hash
@@ -122,6 +130,13 @@ func run(opts Options) (int, string) {
 		return exitOwn, err.Error()
 	}
 
+	// The brain decisions a recorded answers.toml does not hold yet -- every
+	// project answered before these keys existed -- come from brain init's own
+	// defaults, so the manifest rendered below is never written with empty
+	// values. A recorded answer stays as it is.
+	filled.Gates.Wiki = filled.Gates.Wiki.WithBrainDefaults(
+		projectName(opts.Root), isDir(opts.Root, "docs"))
+
 	// Read once and used twice: it decides whether a coverage check is
 	// installed, and it decides what the user is told about why.
 	enforced := coverage.Enforced(
@@ -137,6 +152,15 @@ func run(opts Options) (int, string) {
 	var notes []string
 	notes = append(notes, ignored...)
 	notes = append(notes, coverageNote(filled, enforced)...)
+	// A project that already carries .ultra-brain/config.toml is declared, and
+	// brain would never read a .brain.toml beside it. An existing .brain.toml
+	// needs no such care: like every existing file it is skipped when the plan
+	// is prepared.
+	if _, rendered := files[brainManifestPath]; rendered && readOr(opts.Root, ultraBrainConfigPath) != nil {
+		delete(files, brainManifestPath)
+		notes = append(notes, ultraBrainConfigPath+" already declares this area: no "+
+			brainManifestPath+" was written")
+	}
 	mcp, wikiHooks, brainNote := brainEntry(filled, opts)
 	if mcp != "" {
 		files[mcpPath] = mcp
@@ -1067,6 +1091,25 @@ func readOr(root, name string) []byte {
 		return nil
 	}
 	return body
+}
+
+// projectName is the directory name brain init takes an area's scope from.
+//
+// Abs fails only when the working directory itself cannot be read, which no
+// test can arrange from inside the process; the branch is uncovered for that
+// reason and handled anyway, the same as in gather.
+func projectName(root string) string {
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return filepath.Base(root)
+	}
+	return filepath.Base(absolute)
+}
+
+// isDir says whether name is a directory below root.
+func isDir(root, name string) bool {
+	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(name)))
+	return err == nil && info.IsDir()
 }
 
 // hashOf is what tells an edited output from an edited source apart later: a
