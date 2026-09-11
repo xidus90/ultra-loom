@@ -59,6 +59,33 @@ type view struct {
 	// can turn that check red, a lane that only ever reports green is the one
 	// failure this whole tool exists to prevent.
 	CoverageLane bool
+	// Brain is what .brain.toml needs beyond the answers themselves, worked
+	// out here so the template stays a list of keys. It is zero for every
+	// mode but brain, which is also the only mode that renders the file.
+	Brain brainView
+}
+
+type brainView struct {
+	// Wiki is the bundle as brain's layout names it: without the trailing
+	// slash the answers carry.
+	Wiki    string
+	Include []string
+}
+
+// brainInclude is the index glob list for a sources root.
+//
+// For docs, `docs/*.md` stands beside `docs/**/*.md` on purpose. brain's Go
+// indexer compiles `docs/**/*.md` into a pattern that requires a directory
+// below docs, and its Python indexer does not, so the two binaries index
+// different files: measured on 2026-09-10 in ultraloom, 68 entries against 72,
+// the four missing ones being the Markdown files directly under docs. With
+// both globs the two agree. For any other root brain init writes `**/*.md`,
+// which both indexers read alike.
+func brainInclude(sources string) []string {
+	if sources == "docs" {
+		return []string{"docs/*.md", "docs/**/*.md", "README*.md"}
+	}
+	return []string{"**/*.md"}
 }
 
 // Render turns the answers into files.
@@ -94,6 +121,15 @@ func Render(a answers.Answers, coverageLane bool) (map[string]string, error) {
 			fileTarget{"skills/verify-until-green.SKILL.md.tmpl", ".agents/skills/verify-until-green/SKILL.md"},
 			fileTarget{"skills/session-handover.SKILL.md.tmpl", ".agents/skills/session-handover/SKILL.md"},
 		)
+	}
+
+	// No [maintenance] table in it: brain init writes `on_merge = true`, which
+	// promises a merge hook that nothing installs (brain init's own install_hook
+	// is never used), and brain's two readers even disagree on the branch key
+	// -- `merge_branch` in what brain init writes, `branch` in what
+	// read_manifest reads.
+	if a.Gates.Wiki.Mode == "brain" {
+		targetsList = append(targetsList, fileTarget{"brain.toml.tmpl", ".brain.toml"})
 	}
 
 	out := make(map[string]string, len(targetsList))
@@ -137,6 +173,12 @@ func newView(a answers.Answers, coverageLane bool) view {
 	data.PrecommitKinds = []string{"lint", "types", "test"}
 	if coverageLane {
 		data.PrecommitKinds = append(data.PrecommitKinds, "coverage")
+	}
+	if a.Gates.Wiki.Mode == "brain" {
+		data.Brain = brainView{
+			Wiki:    strings.TrimSuffix(a.Gates.Wiki.Bundle, "/"),
+			Include: brainInclude(a.Gates.Wiki.Sources),
+		}
 	}
 	return data
 }

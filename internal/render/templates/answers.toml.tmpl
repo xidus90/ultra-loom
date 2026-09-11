@@ -14,7 +14,10 @@ types_in_stop      = {{ .Answers.Gates.TypesInStop }}
 [gates.wiki]
 mode   = {{ quote .Answers.Gates.Wiki.Mode }}
 bundle = {{ quote .Answers.Gates.Wiki.Bundle }}
-
+{{ if .Answers.Gates.Wiki.Scope }}scope   = {{ quote .Answers.Gates.Wiki.Scope }}
+{{ end }}{{ if .Answers.Gates.Wiki.Sources }}sources = {{ quote .Answers.Gates.Wiki.Sources }}
+{{ end }}{{ if .Answers.Gates.Wiki.Privacy }}privacy = {{ quote .Answers.Gates.Wiki.Privacy }}
+{{ end }}
 # An empty list is an answer -- the interview asked and was told no. A missing
 # key is a question it still owes, and the next run asks it again.
 [policy]

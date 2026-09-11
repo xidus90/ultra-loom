@@ -35,17 +35,47 @@ func fixture() answers.Answers {
 	return a
 }
 
+// brainFixture is fixture with a wiki in brain mode and every brain decision
+// answered, the shape WithBrainDefaults leaves behind for a docs project.
+func brainFixture() answers.Answers {
+	a := fixture()
+	a.Gates.Wiki = answers.Wiki{Mode: "brain", Bundle: "docs/wiki/",
+		Scope: "project/ultraloom", Sources: "docs", Privacy: "manual_cloud"}
+	return a
+}
+
+// brainManifest is the part of .brain.toml that brain's readers use.
+type brainManifest struct {
+	Area struct {
+		Scope string `toml:"scope"`
+		Wiki  bool   `toml:"wiki"`
+	} `toml:"area"`
+	Layout struct {
+		Sources string `toml:"sources"`
+		Wiki    string `toml:"wiki"`
+	} `toml:"layout"`
+	Index struct {
+		Include []string `toml:"include"`
+	} `toml:"index"`
+	Privacy struct {
+		Mode string `toml:"mode"`
+	} `toml:"privacy"`
+}
+
 func TestEveryGeneratedFileSaysWhereItCameFrom(t *testing.T) {
-	files, err := Render(fixture(), true)
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	for name, body := range files {
-		if name == ".ultraloom/answers.toml" || strings.HasSuffix(name, ".md") {
-			continue // the source itself and markdown docs do not carry this comment
+	// Both fixtures: only the brain one renders .brain.toml.
+	for _, a := range []answers.Answers{fixture(), brainFixture()} {
+		files, err := Render(a, true)
+		if err != nil {
+			t.Fatalf("Render: %v", err)
 		}
-		if !strings.Contains(body, "generated from .ultraloom/answers.toml") {
-			t.Fatalf("%s has no provenance header", name)
+		for name, body := range files {
+			if name == ".ultraloom/answers.toml" || strings.HasSuffix(name, ".md") {
+				continue // the source itself and markdown docs do not carry this comment
+			}
+			if !strings.Contains(body, "generated from .ultraloom/answers.toml") {
+				t.Fatalf("%s has no provenance header", name)
+			}
 		}
 	}
 }
@@ -222,19 +252,22 @@ func TestRenderNamesEveryFileItWrites(t *testing.T) {
 func TestEveryRenderedFileIsValidToml(t *testing.T) {
 	// Both shapes: the branch that leaves [verify.coverage] out puts a comment
 	// block where a section stood, and a stray line there would be a file the
-	// generated project cannot read at all.
-	for _, coverageLane := range []bool{true, false} {
-		files, err := Render(fixture(), coverageLane)
-		if err != nil {
-			t.Fatalf("Render: %v", err)
-		}
-		for name, body := range files {
-			if strings.HasSuffix(name, ".md") {
-				continue
+	// generated project cannot read at all. Both fixtures, so .brain.toml is
+	// among the files checked.
+	for _, a := range []answers.Answers{fixture(), brainFixture()} {
+		for _, coverageLane := range []bool{true, false} {
+			files, err := Render(a, coverageLane)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
 			}
-			var parsed map[string]any
-			if _, err := toml.Decode(body, &parsed); err != nil {
-				t.Fatalf("%s is not valid TOML: %v\n%s", name, err, body)
+			for name, body := range files {
+				if strings.HasSuffix(name, ".md") {
+					continue
+				}
+				var parsed map[string]any
+				if _, err := toml.Decode(body, &parsed); err != nil {
+					t.Fatalf("%s is not valid TOML: %v\n%s", name, err, body)
+				}
 			}
 		}
 	}
@@ -481,5 +514,83 @@ func TestOneReturnsErrorOnMissingTemplate(t *testing.T) {
 	_, err := one("does_not_exist.tmpl", view{})
 	if err == nil {
 		t.Fatal("expected error for nonexistent template, got nil")
+	}
+}
+
+func TestABrainAnswerRendersTheManifestBrainReads(t *testing.T) {
+	files, err := Render(brainFixture(), true)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	body, ok := files[".brain.toml"]
+	if !ok {
+		t.Fatal("no .brain.toml was rendered for a brain answer")
+	}
+	var got brainManifest
+	if _, err := toml.Decode(body, &got); err != nil {
+		t.Fatalf(".brain.toml is not valid TOML: %v\n%s", err, body)
+	}
+	if got.Area.Scope != "project/ultraloom" || !got.Area.Wiki {
+		t.Fatalf("[area] = %+v, want scope project/ultraloom and wiki = true", got.Area)
+	}
+	// The bundle is answered with a trailing slash; brain's layout path has none.
+	if got.Layout.Sources != "docs" || got.Layout.Wiki != "docs/wiki" {
+		t.Fatalf("[layout] = %+v, want sources docs and wiki docs/wiki", got.Layout)
+	}
+	wantInclude := []string{"docs/*.md", "docs/**/*.md", "README*.md"}
+	if !reflect.DeepEqual(got.Index.Include, wantInclude) {
+		t.Fatalf("[index] include = %v, want %v", got.Index.Include, wantInclude)
+	}
+	if got.Privacy.Mode != "manual_cloud" {
+		t.Fatalf("[privacy] mode = %q, want manual_cloud", got.Privacy.Mode)
+	}
+	// No [maintenance]: nothing installs the merge hook it would promise.
+	if strings.Contains(body, "[maintenance]") {
+		t.Fatalf(".brain.toml promises a maintenance hook nothing installs:\n%s", body)
+	}
+}
+
+func TestAnAreaWithoutDocsIndexesEveryMarkdownFile(t *testing.T) {
+	a := brainFixture()
+	a.Gates.Wiki.Sources, a.Gates.Wiki.Bundle = ".", "wiki/"
+	files, err := Render(a, true)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	var got brainManifest
+	if _, err := toml.Decode(files[".brain.toml"], &got); err != nil {
+		t.Fatalf(".brain.toml is not valid TOML: %v", err)
+	}
+	if got.Layout.Wiki != "wiki" || !reflect.DeepEqual(got.Index.Include, []string{"**/*.md"}) {
+		t.Fatalf("layout wiki %q, include %v; want wiki and [**/*.md]", got.Layout.Wiki, got.Index.Include)
+	}
+}
+
+func TestOnlyTheBrainModeRendersAManifest(t *testing.T) {
+	for _, mode := range []string{"none", "neighbour_repo", "vault"} {
+		a := fixture()
+		a.Gates.Wiki.Mode = mode
+		files, err := Render(a, true)
+		if err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		if _, ok := files[".brain.toml"]; ok {
+			t.Fatalf("mode %s rendered a .brain.toml", mode)
+		}
+	}
+}
+
+func TestTheBrainDecisionsReadBackFromTheAnswers(t *testing.T) {
+	want := brainFixture()
+	files, err := Render(want, true)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	back, err := answers.Load([]byte(files[".ultraloom/answers.toml"]))
+	if err != nil {
+		t.Fatalf("the rendered answers do not load: %v", err)
+	}
+	if back.Gates.Wiki != want.Gates.Wiki {
+		t.Fatalf("wiki = %+v, want %+v", back.Gates.Wiki, want.Gates.Wiki)
 	}
 }
