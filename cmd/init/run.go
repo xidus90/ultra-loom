@@ -791,13 +791,36 @@ func mergeSettings(opts Options, facts detect.Facts, filled answers.Answers, wik
 	return out, exitDone, note
 }
 
-// hookCommand builds what a generated hook runs: a bare name, looked up on
-// PATH, exactly as the ulguard and brain entries in the same list are written.
-// A name has no directory that a working tree could be missing. The one this
-// used to carry, `.ultraloom/vendor/ultraloom`, is not in git, so a fresh
-// `git worktree` had no runtime and these four hooks did nothing there.
+// hookCommand builds what a generated hook runs, and it names the project
+// rather than only the program.
+//
+// The bare name it carried until 2026-09-11 was reasoned from the ulguard and
+// brain entries beside it -- "a name has no directory that a working tree could
+// be missing" -- and that reason holds for those two. They are compiled
+// binaries on PATH: there is no source tree they could be wrong about. It does
+// not hold here, and the difference was measured.
+//
+// A bare `ultraloom` resolves through `~/.local/bin/ultraloom.exe`, a
+// `uv tool install` in editable mode whose `_editable_impl_ultraloom.pth` is a
+// single absolute line naming the main checkout's `src`. So the name imports
+// the main checkout from every worktree: not a hook that fails, which would be
+// noticed, but one that runs against another tree's code and reports success.
+// `uv run --project` pointed at a worktree answered that worktree's own
+// `src/ultraloom/__init__.py`.
+//
+// What it must not go back to is the form before the bare name,
+// `${CLAUDE_PROJECT_DIR}/.ultraloom/vendor/ultraloom`: that directory is not in
+// git, so a fresh worktree had no runtime and these hooks did nothing there.
+// The project root is the fix for both -- it is tracked wherever the project
+// is, and the host substitutes the tree the session actually stands in.
+//
+// The root twice, and neither is redundant: `--project` tells uv which
+// environment to resolve, `--root` tells ultraloom which project to read. A
+// project with no pyproject.toml is served by the same spelling -- measured
+// against `space`, where it resolves with no venv on PATH.
 func hookCommand(argv string) string {
-	return `ultraloom ` + argv + ` --root "${CLAUDE_PROJECT_DIR}"`
+	return `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom ` + argv +
+		` --root "${CLAUDE_PROJECT_DIR}"`
 }
 
 // hookEntries is the minimal set that makes a fresh project work. Which

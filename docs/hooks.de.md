@@ -51,7 +51,7 @@ flowchart TD
   * **Null-Overhead-Bypass:** Nicht-Code-Dateien (`.json`, `.yaml`, `.toml`, Bilder) sowie Markdown-Dateien außerhalb des Wikis beenden sofort in $0\text{ ms}$ ohne Prozess-Start.
 
 ### 3. `SessionStart` — Initialisierung & Kontext-Injektion
-* **Hook-Befehl:** `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+* **Hook-Befehl:** `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"` — genannt wird das Projekt, nicht nur das Programm: ein nacktes `ultraloom` löst auf ein editable install auf, das an einem Checkout festgenagelt ist, und ließe einen Worktree gegen den Code eines anderen Baums laufen (gemessen 2026-09-11). Die lebende `settings.json` dieses Repos fährt stattdessen `ulguard hook session-start --host claude`, dem Generator voraus, während der Go-Port dieses Hooks läuft.
 * **Aufgaben:** Injiziert zu Beginn jeder Session den aktuellen Projektstatus, die letzten Wiki-Logeinträge und Git-Informationen in den Agenten-Kontext.
 
 ### 4. `SubagentStart` & `SubagentStop` — Multi-Agenten-Synchronisation

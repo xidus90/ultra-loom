@@ -1247,7 +1247,7 @@ die Arbeit.
         "hooks": [
           {
             "type": "command",
-            "command": "ultraloom hook stop --root \"${CLAUDE_PROJECT_DIR}\"",
+            "command": "uv run --project \"${CLAUDE_PROJECT_DIR}\" ultraloom hook stop --root \"${CLAUDE_PROJECT_DIR}\"",
             "timeout": 300
           }
         ]

@@ -144,23 +144,34 @@ func TestAFullRunWritesTheWholeSetAndSaysSo(t *testing.T) {
 }
 
 // The hook commands land in a file the project commits, so none of them may
-// carry a path that exists only on this machine -- and none of them names a
-// runtime directory inside the project either: the four ultraloom hooks look
-// the binary up on PATH, the way the ulguard and brain entries beside them do.
-func TestTheHookCommandsCallTheBinaryOnPath(t *testing.T) {
+// carry a path that exists only on this machine, and none of them may name a
+// runtime directory inside the project -- `.ultraloom/vendor` is not in git,
+// so a fresh worktree has none of it.
+//
+// What they do carry is `--project "${CLAUDE_PROJECT_DIR}"`, and the reason was
+// measured on 2026-09-11. A bare `ultraloom` resolves through
+// `~/.local/bin/ultraloom.exe`, which is a `uv tool install` in editable mode:
+// its `_editable_impl_ultraloom.pth` holds a single absolute line naming the
+// main checkout's `src`. The name therefore imports the main checkout from
+// every worktree -- a hook that runs, against the wrong tree, and says nothing.
+// `uv run --project` pointed at the same worktree answered
+// `.worktrees/multi-provider-llm/src/ultraloom/__init__.py` instead.
+//
+// The project root, not a directory below it: measured against `space`, which
+// carries no pyproject.toml at all, the form still resolves with no venv on
+// PATH. One spelling therefore serves a Python project and a Godot one.
+func TestTheHookCommandsRunAgainstTheProjectTheyWereCalledFor(t *testing.T) {
 	root := t.TempDir()
 	mustRun(t, answered(root))
 	body := read(t, root, ".claude/settings.json")
-	// The whole command, not a substring of it: the vendored form ended in
-	// exactly these words, so a Contains check would pass against it too.
-	want := `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+	// The whole command, not a substring of it: the vendored form ends in
+	// exactly the same words, so a Contains check would pass against it too.
+	want := `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
 	if got := commandFor(t, body, "SessionStart", ""); got != want {
 		t.Fatalf("SessionStart runs %q, want %q", got, want)
 	}
-	for _, gone := range []string{"uv run", "--project", ".ultraloom/vendor"} {
-		if strings.Contains(body, gone) {
-			t.Fatalf("%q still reaches settings.json:\n%s", gone, body)
-		}
+	if strings.Contains(body, ".ultraloom/vendor") {
+		t.Fatalf("the vendored runtime still reaches settings.json:\n%s", body)
 	}
 	if strings.Contains(body, root) || strings.Contains(body, filepath.ToSlash(root)) {
 		t.Fatalf("a machine path reached settings.json:\n%s", body)
@@ -203,7 +214,7 @@ func TestTheVendoredCommandIsRewrittenAndNotDuplicated(t *testing.T) {
 			`ultraloom hook session-start --root \"${CLAUDE_PROJECT_DIR}\"","timeout":20}]}]}}`)
 	mustRun(t, answered(root))
 	body := read(t, root, ".claude/settings.json")
-	want := `ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
+	want := `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook session-start --root "${CLAUDE_PROJECT_DIR}"`
 	if got := commandFor(t, body, "SessionStart", ""); got != want {
 		t.Fatalf("SessionStart runs %q, want %q", got, want)
 	}
@@ -238,9 +249,9 @@ func TestWithGitTheHistoryHooksAreInstalled(t *testing.T) {
 	// The whole command per event, not the subcommand name alone: the name
 	// says the hook is installed, the command says what will run it.
 	for _, c := range []struct{ event, want string }{
-		{"SubagentStart", `ultraloom hook subagent-start --root "${CLAUDE_PROJECT_DIR}"`},
-		{"SubagentStop", `ultraloom hook subagent-stop --root "${CLAUDE_PROJECT_DIR}"`},
-		{"Stop", `ultraloom hook stop --root "${CLAUDE_PROJECT_DIR}"`},
+		{"SubagentStart", `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook subagent-start --root "${CLAUDE_PROJECT_DIR}"`},
+		{"SubagentStop", `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook subagent-stop --root "${CLAUDE_PROJECT_DIR}"`},
+		{"Stop", `uv run --project "${CLAUDE_PROJECT_DIR}" ultraloom hook stop --root "${CLAUDE_PROJECT_DIR}"`},
 	} {
 		if got := commandFor(t, body, c.event, ""); got != c.want {
 			t.Fatalf("%s runs %q, want %q", c.event, got, c.want)
