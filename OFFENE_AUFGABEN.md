@@ -559,28 +559,36 @@ Projekt darauf verweisen. Umgesetzt ist davon nichts.
 | [`docs/wiki/audit.md`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki/audit.md) | „Gefüllt wird es ab Scheibe 5; bis dahin bleibt es leer" |
 | [`docs/wiki/_identities.tsv`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki/_identities.tsv) | nur die Kopfzeile |
 
-- [x] **Warum hier nichts ins Wiki geschrieben wird, gefunden am
-      2026-09-10.** Nicht die Mechanik fehlt, sondern eine Zeile ist falsch:
-      `.ultraloom/answers.toml` sagt `mode = "neighbour_repo"`,
+- [x] **Warum hier nichts ins Wiki geschrieben wurde, gefunden am
+      2026-09-10.** Nicht die Mechanik fehlte, sondern eine Zeile war falsch:
+      bis Stufe 0 sagte `.ultraloom/answers.toml` `mode = "neighbour_repo"`,
       `bundle = "iam_wiki/"`. `brainEntry` (`cmd/init/run.go:704`) schreibt die
-      brain-Einträge nur bei `mode == "brain"`, also nie. Und `iam_wiki` ist
-      ein **anderes Projekt** (Registry: `project/iam-wiki`, `readonly`);
-      hätte `ulinit` darauf `brain wiki-gate` installiert, hätte das Gate ein
-      fremdes Bündel geprüft und grün gemeldet. Ursache ist `NeighbourWiki`
-      (`internal/detect/edges.go:37`): es nimmt jedes Schwesterverzeichnis auf
-      `_wiki` mit `.git` und prüft nie, dass es `<projekt>_wiki` heißt. Die
-      Erkennung **schlägt vor**, sie erzwingt nicht: `space` wurde zwei Tage
-      später mit gleichem Code aufgesetzt und trägt `brain`, weil ein Mensch
-      überstimmt hat. Hier eingetragen seit `e84df9e` (2026-08-29).
+      brain-Einträge nur bei `mode == "brain"`, schrieb sie hier also nie. Und
+      `iam_wiki` ist ein **anderes Projekt** (Registry: `project/iam-wiki`,
+      `readonly`); hätte `ulinit` darauf `brain wiki-gate` installiert, hätte
+      das Gate ein fremdes Bündel geprüft und grün gemeldet. Ursache war
+      `NeighbourWiki` (`internal/detect/edges.go:37` vor Stufe 0): es nahm
+      jedes Schwesterverzeichnis auf `_wiki` mit `.git` und prüfte nie, dass es
+      `<projekt>_wiki` heißt. Die Erkennung **schlägt vor**, sie erzwingt
+      nicht: `space` wurde zwei Tage später mit gleichem Code aufgesetzt und
+      trägt `brain`, weil ein Mensch überstimmt hat. Hier eingetragen war der
+      falsche Wert seit `e84df9e` (2026-08-29).
       **Behoben in Stufe 0 des Flottenstandards**, nach
       `docs/.superpowers/plans/2026-09-11-wiki-flottenstandard-stufe-0.md`:
       `readWiki` liest `.ultra-brain/config.toml` vor `.brain.toml`,
       `NeighbourWiki` nimmt nur ein Wiki der eigenen Familie, und
       `.ultraloom/answers.toml` sagt `mode = "brain"`, `bundle = "docs/wiki/"`.
-      Die Commits nennt
-      `git log --oneline -- internal/detect/detect.go internal/detect/edges.go .ultraloom/answers.toml`.
-      Wirksam wird die Antwort erst mit dem nächsten `ulinit`-Lauf, und der
-      gehört zu Stufe 2.
+      Die Commits sind `9f620a9`, `564956d` und `a62f791`.
+      Die brain-Einträge in den Hooks entstehen erst mit dem nächsten
+      `ulinit`-Lauf, und der gehört zu Stufe 2. `ulguard` dagegen liest
+      `bundle` live: findet `Detect` keinen Wikipfad, fällt `runPostEdit` auf
+      `resolveWikiDir` (`cmd/guard/post_edit.go:384`) zurück, das
+      `answers.toml` bei jedem Aufruf liest. Ein vor `9f620a9` gebautes
+      `ulguard` kennt `.ultra-brain/config.toml` nicht, findet hier keinen
+      Wikipfad und nimmt deshalb gleich nach dem Merge `docs/wiki/` statt
+      `iam_wiki/`; ein danach gebautes findet `docs/wiki/` schon über die
+      Erkennung. Schaden richtet der Wechsel nicht an, weil `isWikiPath`
+      `docs/wiki/` unabhängig vom eingestellten Verzeichnis zum Wiki zählt.
 - [ ] **Mit richtiger Mode schlösse sich die Pflegeschleife trotzdem nicht von
       selbst.** Gemessen: der MCP-Server von `brain` bietet nur Lesewerkzeuge
       (`catalog`, `read`, `neighbors`, `search`, `status`); Fälle entstehen in
