@@ -25,6 +25,11 @@ var KnownAgents = []string{"claude", "gemini"}
 type Wiki struct {
 	Mode   string `toml:"mode"`
 	Bundle string `toml:"bundle"`
+	// The three below are brain's decisions about this area. ulinit writes
+	// .brain.toml from them; for every mode but brain they stay empty.
+	Scope   string `toml:"scope"`
+	Sources string `toml:"sources"`
+	Privacy string `toml:"privacy"`
 }
 
 // Gates carries CoverageThreshold as a number nothing here reads: the
@@ -50,7 +55,18 @@ type Answers struct {
 
 // WikiModes is the whole set. A mode outside it is a typo, and a typo that
 // silently disables the wiki gate is the expensive kind.
-var WikiModes = []string{"brain", "neighbour_repo", "none"}
+//
+// vault is a project whose wiki lives in the vault rather than in the
+// repository, registered read-only -- the shape space has. Stage 1 of the
+// fleet wiki standard only accepts it; what a vault project's manifest must
+// say is left to a later stage.
+var WikiModes = []string{"brain", "neighbour_repo", "vault", "none"}
+
+// PrivacyModes is brain's own set: read_manifest in ultra-brain's
+// src/brain/manifest.py and ReadManifest in pkg/config/manifest.go both refuse
+// anything else. Checked here, a typo is reported where it was typed rather
+// than when brain first reads the manifest.
+var PrivacyModes = []string{"automatic_cloud", "local_only", "manual_cloud"}
 
 // Defaults is what the interview starts from: the facts, plus the
 // conventions of this repo for everything a tree cannot say.
@@ -90,17 +106,22 @@ func Load(data []byte) (Answers, error) {
 	if _, err := toml.Decode(string(data), &loaded); err != nil {
 		return Answers{}, fmt.Errorf("answers.toml: %w", err)
 	}
-	if loaded.Gates.Wiki.Mode != "" && !valid(loaded.Gates.Wiki.Mode) {
+	if loaded.Gates.Wiki.Mode != "" && !contains(WikiModes, loaded.Gates.Wiki.Mode) {
 		return Answers{}, fmt.Errorf(
 			"answers.toml: [gates.wiki].mode is %q, must be one of %v",
 			loaded.Gates.Wiki.Mode, WikiModes)
 	}
+	if loaded.Gates.Wiki.Privacy != "" && !contains(PrivacyModes, loaded.Gates.Wiki.Privacy) {
+		return Answers{}, fmt.Errorf(
+			"answers.toml: [gates.wiki].privacy is %q, must be one of %v",
+			loaded.Gates.Wiki.Privacy, PrivacyModes)
+	}
 	return loaded, nil
 }
 
-func valid(mode string) bool {
-	for _, known := range WikiModes {
-		if known == mode {
+func contains(all []string, value string) bool {
+	for _, known := range all {
+		if known == value {
 			return true
 		}
 	}
@@ -112,4 +133,37 @@ func modeOr(detected, fallback string) string {
 		return fallback
 	}
 	return detected
+}
+
+// WithBrainDefaults fills what a brain area needs and the answers do not say,
+// with the values `brain init` proposes (detect_defaults in ultra-brain's
+// src/brain/init.py): scope project/<directory>, sources docs when the project
+// has a docs folder and the repository root otherwise, the bundle one level
+// below the sources, privacy manual_cloud. A project that meets both tools is
+// then told the same thing by each.
+//
+// A recorded answer is never replaced, and every mode but brain comes back
+// unchanged: those modes write no manifest, and a scope filled in for them
+// would be an answer nobody gave.
+func (w Wiki) WithBrainDefaults(projectName string, hasDocs bool) Wiki {
+	if w.Mode != "brain" {
+		return w
+	}
+	sources, bundle := ".", "wiki/"
+	if hasDocs {
+		sources, bundle = "docs", "docs/wiki/"
+	}
+	if w.Scope == "" {
+		w.Scope = "project/" + projectName
+	}
+	if w.Sources == "" {
+		w.Sources = sources
+	}
+	if w.Bundle == "" {
+		w.Bundle = bundle
+	}
+	if w.Privacy == "" {
+		w.Privacy = "manual_cloud"
+	}
+	return w
 }

@@ -478,3 +478,16 @@ func TestAskToolsReaderError(t *testing.T) {
 		t.Fatal("expected error on broken path reader")
 	}
 }
+
+func TestTheVaultModeIsAnAnswer(t *testing.T) {
+	var out bytes.Buffer
+	start := answered()
+	start.Gates.Wiki.Mode = ""
+	got, err := Run(strings.NewReader("vault\n"), &out, true, start)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Gates.Wiki.Mode != "vault" {
+		t.Fatalf("mode = %q, want vault (output: %s)", got.Gates.Wiki.Mode, out.String())
+	}
+}

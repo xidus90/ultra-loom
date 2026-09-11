@@ -111,3 +111,64 @@ func TestTheSeededRelevanceReindexesTheWiki(t *testing.T) {
 		t.Fatalf("the row that was already there is gone: %v", got)
 	}
 }
+
+func TestLoadReadsTheBrainDecisions(t *testing.T) {
+	loaded, err := Load([]byte("[gates.wiki]\nmode    = \"brain\"\nbundle  = \"docs/wiki/\"\n" +
+		"scope   = \"project/x\"\nsources = \"docs\"\nprivacy = \"local_only\"\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := Wiki{Mode: "brain", Bundle: "docs/wiki/", Scope: "project/x", Sources: "docs", Privacy: "local_only"}
+	if loaded.Gates.Wiki != want {
+		t.Fatalf("wiki = %+v, want %+v", loaded.Gates.Wiki, want)
+	}
+}
+
+// vault is the fourth kind of wiki: the project's wiki lives in the vault, and
+// the area is registered read-only. Stage 1 only has to accept the answer.
+func TestLoadAcceptsTheVaultMode(t *testing.T) {
+	if _, err := Load([]byte("[gates.wiki]\nmode = \"vault\"\n")); err != nil {
+		t.Fatalf("Load refused vault: %v", err)
+	}
+}
+
+// brain refuses a privacy mode outside its set when it reads the manifest.
+// Refused here, the typo is reported where it was made.
+func TestLoadRefusesAPrivacyModeBrainWouldRefuse(t *testing.T) {
+	_, err := Load([]byte("[gates.wiki]\nmode = \"brain\"\nprivacy = \"public\"\n"))
+	if err == nil || !strings.Contains(err.Error(), "privacy") {
+		t.Fatalf("err = %v, want a refusal that names privacy", err)
+	}
+}
+
+func TestBrainDefaultsFollowBrainInitWithADocsFolder(t *testing.T) {
+	got := Wiki{Mode: "brain"}.WithBrainDefaults("ultraloom", true)
+	want := Wiki{Mode: "brain", Bundle: "docs/wiki/", Scope: "project/ultraloom", Sources: "docs", Privacy: "manual_cloud"}
+	if got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestBrainDefaultsFollowBrainInitWithoutADocsFolder(t *testing.T) {
+	got := Wiki{Mode: "brain"}.WithBrainDefaults("tool", false)
+	want := Wiki{Mode: "brain", Bundle: "wiki/", Scope: "project/tool", Sources: ".", Privacy: "manual_cloud"}
+	if got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestBrainDefaultsKeepEveryRecordedAnswer(t *testing.T) {
+	recorded := Wiki{Mode: "brain", Bundle: "notes/", Scope: "project/other", Sources: "src", Privacy: "local_only"}
+	if got := recorded.WithBrainDefaults("ultraloom", true); got != recorded {
+		t.Fatalf("got %+v, want the recorded answers unchanged", got)
+	}
+}
+
+func TestBrainDefaultsLeaveEveryOtherModeAlone(t *testing.T) {
+	for _, mode := range []string{"none", "neighbour_repo", "vault"} {
+		w := Wiki{Mode: mode, Bundle: "iam_wiki/"}
+		if got := w.WithBrainDefaults("iam_backend", true); got != w {
+			t.Fatalf("mode %s: got %+v, want %+v", mode, got, w)
+		}
+	}
+}
