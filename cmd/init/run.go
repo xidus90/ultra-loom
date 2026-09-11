@@ -40,7 +40,7 @@ const mcpPath = ".mcp.json"
 
 // brainManifestPath is the manifest ulinit writes for a brain area, and
 // ultraBrainConfigPath the one brain itself looks for first. brain reads the
-// first of the two that exists and never both.
+// first of the two that can be read and never both.
 const (
 	brainManifestPath    = ".brain.toml"
 	ultraBrainConfigPath = ".ultra-brain/config.toml"
@@ -130,12 +130,17 @@ func run(opts Options) (int, string) {
 		return exitOwn, err.Error()
 	}
 
-	// The brain decisions a recorded answers.toml does not hold yet -- every
-	// project answered before these keys existed -- come from brain init's own
-	// defaults, so the manifest rendered below is never written with empty
-	// values. A recorded answer stays as it is.
-	filled.Gates.Wiki = filled.Gates.Wiki.WithBrainDefaults(
-		projectName(opts.Root), isDir(opts.Root, "docs"))
+	// A manifest brain already reads declares the area, and its values are the
+	// project's: none of the brain decisions is invented into the answers beside
+	// it. Only an undeclared area is filled -- a fresh project without an
+	// answers.toml, or one answered before these keys existed -- with brain
+	// init's own defaults, so the manifest rendered below is never written with
+	// empty values. A recorded answer stays as it is.
+	declared := declaredManifest(opts.Root)
+	if declared == "" {
+		filled.Gates.Wiki = filled.Gates.Wiki.WithBrainDefaults(
+			projectName(opts.Root), isDir(opts.Root, "docs"))
+	}
 
 	// Read once and used twice: it decides whether a coverage check is
 	// installed, and it decides what the user is told about why.
@@ -152,14 +157,16 @@ func run(opts Options) (int, string) {
 	var notes []string
 	notes = append(notes, ignored...)
 	notes = append(notes, coverageNote(filled, enforced)...)
-	// A project that already carries .ultra-brain/config.toml is declared, and
-	// brain would never read a .brain.toml beside it. An existing .brain.toml
-	// needs no such care: like every existing file it is skipped when the plan
-	// is prepared.
-	if _, rendered := files[brainManifestPath]; rendered && readOr(opts.Root, ultraBrainConfigPath) != nil {
+	// A declared area gets no manifest from this run: beside
+	// .ultra-brain/config.toml brain would never read a .brain.toml, and an
+	// existing .brain.toml belongs to the project. Dropped from files rather
+	// than left for the plan to skip, so installed.toml -- built from files
+	// below -- does not claim it either. "is written", because a dry run
+	// reports the same note.
+	if _, rendered := files[brainManifestPath]; rendered && declared != "" {
 		delete(files, brainManifestPath)
-		notes = append(notes, ultraBrainConfigPath+" already declares this area: no "+
-			brainManifestPath+" was written")
+		notes = append(notes, declared+" already declares this area: no "+
+			brainManifestPath+" is written")
 	}
 	mcp, wikiHooks, brainNote := brainEntry(filled, opts)
 	if mcp != "" {
@@ -1093,11 +1100,27 @@ func readOr(root, name string) []byte {
 	return body
 }
 
+// declaredManifest names the manifest brain would read here -- the first of
+// its two names that can be read, in brain's own search order -- or "" where
+// neither can. An .ultra-brain/ directory without its config.toml declares
+// nothing.
+func declaredManifest(root string) string {
+	for _, name := range []string{ultraBrainConfigPath, brainManifestPath} {
+		if readOr(root, name) != nil {
+			return name
+		}
+	}
+	return ""
+}
+
 // projectName is the directory name brain init takes an area's scope from.
 //
 // Abs fails only when the working directory itself cannot be read, which no
-// test can arrange from inside the process; the branch is uncovered for that
-// reason and handled anyway, the same as in gather.
+// test can arrange from inside the process -- the reason gather's Abs branch
+// is uncovered, and this one with it. The two do not fail alike: gather
+// returns the error and the run stops, while this falls back to the last
+// element of root as given, which for a relative root is not the project's
+// directory name ("." for the working directory itself).
 func projectName(root string) string {
 	absolute, err := filepath.Abs(root)
 	if err != nil {

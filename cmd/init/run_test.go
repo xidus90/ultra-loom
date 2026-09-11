@@ -1673,7 +1673,7 @@ func TestAnUltraBrainConfigKeepsTheManifestOut(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".brain.toml")); !os.IsNotExist(err) {
 		t.Fatalf(".brain.toml was written beside .ultra-brain/config.toml (stat: %v)", err)
 	}
-	if !strings.Contains(report, ".ultra-brain/config.toml already declares this area") {
+	if !strings.Contains(report, ".ultra-brain/config.toml already declares this area: no .brain.toml is written") {
 		t.Fatalf("the report does not say why no manifest was written:\n%s", report)
 	}
 }
@@ -1683,5 +1683,75 @@ func TestAProjectWithoutAWikiGetsNoManifest(t *testing.T) {
 	mustRun(t, answered(root))
 	if _, err := os.Stat(filepath.Join(root, ".brain.toml")); !os.IsNotExist(err) {
 		t.Fatalf("a project answering mode none got a .brain.toml (stat: %v)", err)
+	}
+}
+
+// The fleet's most common first run: a project brain already knows through its
+// .brain.toml, and no answers.toml yet. The manifest is the declaration, so
+// the answers record none of the brain decisions it would otherwise invent,
+// the manifest stays as it is, and init does not claim it as its own.
+func TestADeclaredBrainManifestIsNeitherFilledNorClaimed(t *testing.T) {
+	root := t.TempDir()
+	manifest := "[area]\nscope = \"project/ultra-brain\"\nwiki = true\n\n" +
+		"[index]\ninclude = [\"**/*.md\"]\n"
+	makeFile(t, root, ".brain.toml", manifest)
+	makeFile(t, root, "docs/notes.md", "# Notes\n")
+	if err := os.MkdirAll(filepath.Join(root, ".ultra-brain"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o := Options{Root: root, Yes: true, CommitLanguage: "en", DocsLanguage: "de",
+		Look: notOnPath, Getenv: noEnv}
+	report := mustRun(t, o)
+
+	recorded := read(t, root, ".ultraloom/answers.toml")
+	for _, line := range strings.Split(recorded, "\n") {
+		key := strings.TrimSpace(strings.SplitN(line, "=", 2)[0])
+		if strings.Contains(line, "=") && (key == "scope" || key == "sources" || key == "privacy") {
+			t.Fatalf("answers.toml records %q, which the manifest never said:\n%s", key, recorded)
+		}
+	}
+	if got := read(t, root, ".brain.toml"); got != manifest {
+		t.Fatalf(".brain.toml changed:\n%s", got)
+	}
+	if !strings.Contains(report, ".brain.toml already declares this area: no .brain.toml is written") {
+		t.Fatalf("the report does not say why no manifest was written:\n%s", report)
+	}
+	if installed := read(t, root, ".ultraloom/installed.toml"); strings.Contains(installed, "\".brain.toml\"") {
+		t.Fatalf("installed.toml claims the project's own manifest:\n%s", installed)
+	}
+}
+
+// A fresh brain project without a manifest: the filled decisions reach the
+// decision file, not only the manifest derived from it.
+func TestAFreshBrainProjectRecordsTheFilledDecisions(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, "docs/wiki/index.md", "---\nokf_version: 1\n---\n")
+	o := Options{Root: root, Yes: true, CommitLanguage: "en", DocsLanguage: "de",
+		Look: notOnPath, Getenv: noEnv}
+	mustRun(t, o)
+	recorded := read(t, root, ".ultraloom/answers.toml")
+	for _, want := range []string{
+		"scope   = \"project/" + filepath.Base(root) + "\"",
+		"sources = \"docs\"",
+		"privacy = \"manual_cloud\"",
+	} {
+		if !strings.Contains(recorded, want) {
+			t.Fatalf("answers.toml lacks %q:\n%s", want, recorded)
+		}
+	}
+}
+
+// A project answered before these keys existed says only its mode. Its
+// manifest still gets the scope brain init would propose.
+func TestAnAnswerRecordedBeforeTheBrainKeysStillGetsAScope(t *testing.T) {
+	root := t.TempDir()
+	makeFile(t, root, ".ultraloom/answers.toml", "[gates.wiki]\nmode = \"brain\"\n")
+	makeFile(t, root, "docs/wiki/index.md", "# Katalog\n")
+	o := Options{Root: root, Yes: true, CommitLanguage: "en", DocsLanguage: "de",
+		Look: notOnPath, Getenv: noEnv}
+	mustRun(t, o)
+	body := read(t, root, ".brain.toml")
+	if want := "scope = \"project/" + filepath.Base(root) + "\""; !strings.Contains(body, want) {
+		t.Fatalf(".brain.toml lacks %q:\n%s", want, body)
 	}
 }

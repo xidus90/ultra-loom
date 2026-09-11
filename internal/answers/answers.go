@@ -7,6 +7,7 @@ package answers
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/xidus90/ultra-loom/internal/detect"
@@ -25,8 +26,10 @@ var KnownAgents = []string{"claude", "gemini"}
 type Wiki struct {
 	Mode   string `toml:"mode"`
 	Bundle string `toml:"bundle"`
-	// The three below are brain's decisions about this area. ulinit writes
-	// .brain.toml from them; for every mode but brain they stay empty.
+	// The three below are brain's decisions about this area, and ulinit writes
+	// .brain.toml from them. ulinit fills them only for mode brain, and only
+	// where it writes that manifest; Load keeps whatever a file records under
+	// any mode.
 	Scope   string `toml:"scope"`
 	Sources string `toml:"sources"`
 	Privacy string `toml:"privacy"`
@@ -140,7 +143,13 @@ func modeOr(detected, fallback string) string {
 // src/brain/init.py): scope project/<directory>, sources docs when the project
 // has a docs folder and the repository root otherwise, the bundle one level
 // below the sources, privacy manual_cloud. A project that meets both tools is
-// then told the same thing by each.
+// then told the same thing by each -- up to the bundle's trailing slash, which
+// is ultraloom's: docs/wiki/ where brain init proposes docs/wiki.
+//
+// A bundle that is already set decides the sources instead of the docs
+// folder: docs for a bundle below docs/, the repository root for any other.
+// Detection tries wiki before docs/wiki, so a root wiki/ may stand beside a
+// docs folder, and sources of docs would index everything but that wiki.
 //
 // A recorded answer is never replaced, and every mode but brain comes back
 // unchanged: those modes write no manifest, and a scope filled in for them
@@ -152,6 +161,12 @@ func (w Wiki) WithBrainDefaults(projectName string, hasDocs bool) Wiki {
 	sources, bundle := ".", "wiki/"
 	if hasDocs {
 		sources, bundle = "docs", "docs/wiki/"
+	}
+	if w.Bundle != "" {
+		sources = "."
+		if strings.HasPrefix(w.Bundle, "docs/") {
+			sources = "docs"
+		}
 	}
 	if w.Scope == "" {
 		w.Scope = "project/" + projectName

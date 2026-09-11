@@ -172,3 +172,20 @@ func TestBrainDefaultsLeaveEveryOtherModeAlone(t *testing.T) {
 		}
 	}
 }
+
+// A bundle that is already set decides where the sources are: a root wiki/
+// beside some docs/ folder is not a docs area, and an include list under docs
+// would never reach it.
+func TestBrainDefaultsTakeTheSourcesFromARootBundle(t *testing.T) {
+	got := Wiki{Mode: "brain", Bundle: "wiki/"}.WithBrainDefaults("x", true)
+	if got.Sources != "." {
+		t.Fatalf("got sources %q, want \".\" for bundle wiki/", got.Sources)
+	}
+}
+
+func TestBrainDefaultsTakeTheSourcesFromADocsBundle(t *testing.T) {
+	got := Wiki{Mode: "brain", Bundle: "docs/wiki/"}.WithBrainDefaults("x", false)
+	if got.Sources != "docs" {
+		t.Fatalf("got sources %q, want \"docs\" for bundle docs/wiki/", got.Sources)
+	}
+}

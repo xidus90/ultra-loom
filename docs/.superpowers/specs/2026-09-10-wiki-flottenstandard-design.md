@@ -321,9 +321,9 @@ Pflegeschleife sich schließt. Die Kette, in dieser Reihenfolge:
 | 0 | D2 reparieren: `readWiki` liest `.ultra-brain/config.toml` vor `.brain.toml`, wie brain selbst; `NeighbourWiki` nimmt nur ein Wiki der eigenen Familie (`<familie>_wiki` für `<familie>` oder `<familie>_*`). Dazu `ultraloom`s eigene `answers.toml` auf `brain` / `docs/wiki/`. Plan: `docs/.superpowers/plans/2026-09-11-wiki-flottenstandard-stufe-0.md` | — (die Sperre durch den Go-Hooks-Zweig ist mit `6168ef2` gefallen) |
 | 1 | Teil 1: `answers.Answers` erweitern, `.brain.toml` generieren, `vault` als vierte Mode — `vault` zunächst nur als gültiger Wert, ohne eigenes Manifest. Plan: `docs/.superpowers/plans/2026-09-11-wiki-flottenstandard-stufe-1.md` | Stufe 0 |
 | 2 | Teil 3: die drei Hookeinträge, `.agents/hooks.json` als zweiter Schreiber | Stufe 1 |
-| 3 | Teil 2: das Preset | Stufe 1 |
+| 3 | Teil 2: das Preset. Vorher muss `Load` `bundle` prüfen — relativ, mit Vorwärtsschrägstrichen —, denn ein Bundle mit Backslashes oder ein absolutes wird gerendert, aber brains `wiki_layout` weist es ab (Schlussreview Stufe 1) | Stufe 1 |
 | 4 | D1 und D3 in `ultra-brain` — Glob-Parität und `configure_agent_hooks`, das anhängt statt zuzuweisen. Vorlage ist `internal/settings/merge.go` | eigene Runde, anderes Repo |
-| 5 | Ausrollen: die drei iam-Coderepos aufnehmen, `space`s Riss zwischen Registry und Manifest entscheiden | Stufen 1 bis 4 |
+| 5 | Ausrollen: die drei iam-Coderepos aufnehmen, `space`s Riss zwischen Registry und Manifest entscheiden. Vorbedingung: `scope` muss aus dem Verzeichnisnamen des Hauptcheckouts kommen, nicht aus dem eines verlinkten Worktrees — `projectName` nimmt `filepath.Base` der Wurzel, ein erster Lauf in `.worktrees/<name>` hält also `project/<name>` fest (Schlussreview Stufe 1, Important 4) | Stufen 1 bis 4 |
 
 D4 und D5 sind benannt und nicht eingeplant: D4 ist ein Befund für
 `ultra-brain`, D5 (`ultraloom sync`) ist eigene Arbeit und begrenzt bis dahin
