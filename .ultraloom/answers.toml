@@ -12,8 +12,8 @@ tests_in_stop      = true
 types_in_stop      = true
 
 [gates.wiki]
-mode   = "neighbour_repo"
-bundle = "iam_wiki/"
+mode   = "brain"
+bundle = "docs/wiki/"
 
 # An empty list is an answer -- the interview asked and was told no. A missing
 # key is a question it still owes, and the next run asks it again.
