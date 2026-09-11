@@ -29,11 +29,17 @@ func HooksPath(run Runner, dir string) (string, error) {
 
 // NeighbourWiki looks beside the project rather than inside it.
 //
-// The iam repositories keep their wiki as a sibling repository named
-// `<project>_wiki`; that lies outside the project root and is therefore
-// invisible to Detect. The parent directory is taken as an fs.FS for the same
-// testability, and projectDir names the project within it so a repository
-// called `x_wiki` does not find itself.
+// A family of repositories can keep one wiki as a sibling repository named
+// `<family>_wiki`: iam_backend, iam_frontend and iam_workers all keep theirs
+// in iam_wiki. That wiki belongs to `<family>` and to every `<family>_*`
+// sibling, and to nobody else. Until 2026-09-11 the suffix alone decided, and
+// ultraloom, which merely stands in the same parent directory, had iam_wiki
+// recorded as its own.
+//
+// The wiki lies outside the project root and is therefore invisible to
+// Detect. The parent directory is taken as an fs.FS for the same testability,
+// and projectDir names the project within it so a repository called `x_wiki`
+// does not find itself.
 func NeighbourWiki(parent fs.FS, projectDir string) (mode string, wikiPath string) {
 	entries, err := fs.ReadDir(parent, ".")
 	if err != nil {
@@ -41,7 +47,8 @@ func NeighbourWiki(parent fs.FS, projectDir string) (mode string, wikiPath strin
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if !entry.IsDir() || name == projectDir || !strings.HasSuffix(name, "_wiki") {
+		family, isWiki := strings.CutSuffix(name, "_wiki")
+		if !entry.IsDir() || name == projectDir || !isWiki || !ofFamily(projectDir, family) {
 			continue
 		}
 		// A directory of notes is not a wiki repository; the commit duty
@@ -52,4 +59,12 @@ func NeighbourWiki(parent fs.FS, projectDir string) (mode string, wikiPath strin
 		return "neighbour_repo", name + "/"
 	}
 	return "", ""
+}
+
+// ofFamily says whether projectDir belongs to the family a wiki is named for:
+// the family itself, or a sibling joined to it by an underscore. The
+// underscore is the whole test -- iamx shares three letters with iam and is
+// not a member.
+func ofFamily(projectDir, family string) bool {
+	return projectDir == family || strings.HasPrefix(projectDir, family+"_")
 }

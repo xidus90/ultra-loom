@@ -72,6 +72,27 @@ func TestDetectOnlyFindsTheNeighbourWiki(t *testing.T) {
 	}
 }
 
+// The end-to-end form of the 2026-09-10 finding: a project that only shares a
+// parent directory with another family's wiki must not be told it is its own.
+func TestDetectOnlyLeavesAnotherFamilysWikiAlone(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "ultraloom")
+	mkdir(t, root)
+	mkdir(t, filepath.Join(parent, "iam_wiki", ".git"))
+
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	if code := cli([]string{"--detect-only", "--root", root}, nothing(), stdout, stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	var facts detect.Facts
+	if err := json.Unmarshal(stdout.Bytes(), &facts); err != nil {
+		t.Fatalf("stdout is not JSON: %v", err)
+	}
+	if facts.WikiMode != "" || facts.WikiPath != "" {
+		t.Fatalf("wiki = %q %q, want none: iam_wiki belongs to the iam family", facts.WikiMode, facts.WikiPath)
+	}
+}
+
 // A tree with a .git in it reaches the one subprocess this program starts.
 func TestDetectOnlyAsksGitAboutItsHooksPath(t *testing.T) {
 	requireGit(t)
