@@ -124,8 +124,19 @@ class Completed:
     output_abandoned: bool = False
 
 
-def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
-    """Run one command to completion, or kill it when the timeout runs out."""
+def run(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: float,
+    extra_env: Mapping[str, str] | None = None,
+) -> Completed:
+    """Run one command to completion, or kill it when the timeout runs out.
+
+    `extra_env` is laid over the inherited environment *before* `child_env`
+    shapes it, so what that function forces stays forced -- a caller can add a
+    variable, not undo the utf-8 decoding or bring git's pointers back.
+    """
     # The overloads cannot express "which kwargs these are depends on the
     # platform"; spawn_kwargs is where that decision is made, and tested.
     # Annotated because the ignore below would otherwise make `process` Any and
@@ -135,7 +146,7 @@ def run(argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
         cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=child_env(os.environ),
+        env=child_env({**os.environ, **(extra_env or {})}),
         **spawn_kwargs(sys.platform),
     )
     try:

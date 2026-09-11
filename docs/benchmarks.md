@@ -47,6 +47,24 @@ The tables below summarize the latest performance measurements across all 5 benc
 
 ## Chronological Benchmark Log
 
+### 2026-09-11 11:47 CEST — The Commit Gate: One Suite Run per Pass Instead of Two
+
+* **Repository:** `ultraloom` on `master` at `e165d6d` plus the uncommitted fix, Windows 11, Go 1.27, Python 3.13.15. Baseline: the same commit without the fix, in a throwaway `git worktree`.
+* **Objective:** `[verify.test]` is configured, so ultraloom handed `coverage` no measuring step, and `hooks/coverage-check.py` ran pytest and `go test` a second time on every `check all` — the `.githooks/pre-commit` gate — and every `precommit` profile. Now `test` measures, ultraloom exports `ULTRALOOM_ALONGSIDE` to every check process, and the script only reports when `test` ran in the same pass.
+* **Method:** Wall clock around `uv run ultraloom check all` via `date +%s%N` in Git Bash, back to back, one run at a time. The Go test cache was warm in both trees. Another Claude session shared the machine and ran its own gates at times, so the single runs carry that noise; the difference is far above it.
+* **Findings:**
+
+| Scenario | Baseline (`e165d6d`) | With the fix | Difference |
+| :--- | :---: | :---: | :---: |
+| `ultraloom check all`, first run | Cold: 158.8 s *(fresh `uv sync`)* | Cold: not measured cleanly — the one first run (81.1 s) had `checks.py` edited under it and went red | — |
+| `ultraloom check all`, warm | Warm: **136.2 s** | Warm: **66.4 s** and **63.7 s** | 🚀 **~70 s saved per commit** (about half) |
+| pytest alone (`test` without `coverage`) | Warm: 52.5 s | Warm: 62.5 s *(under `coverage run`)* | ⚠️ +10 s — the price of `test` measuring on its own |
+| `go test ./... -count=1` | Warm: 26.5 s / 23.7 s | Warm: 26.0 s / 21.9 s *(with `-coverprofile`)* | no measurable price |
+
+* **Not a timing, but found in the same work:** in the window where the script already read and `[verify.test]` did not yet measure, another session's stop gate read a `.coverage` its pass had never written and went red at 87%. Red that time; with older data from fully covered code it would have been green. That is why the script now removes both files after every report: they can only exist when a `test` since then wrote them.
+
+---
+
 ### 2026-09-10 CEST — The `types` Lane: Which Wrapper Pays for dmypy, and What Full Coverage Does to a Floor
 
 * **Repository:** `ultraloom` on `master` at `298b473`, Windows 11, Go 1.27, Python 3.13.15.

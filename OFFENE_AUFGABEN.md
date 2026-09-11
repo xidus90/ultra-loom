@@ -483,14 +483,21 @@ durchweg `ok`, Python-Coverage **100 %**, Go-Coverage **98,5 %**.
 |---|---|---|
 | `lint` | `uv run ruff check .`, `ulinit check gofmt cmd internal`, `go vet ./...` | nebenläufig; `gofmt -l` exitet auch bei Befund mit 0, deshalb der Umweg über `ulinit check` |
 | `types` | `ulinit check types` | Seit 2026-09-10 (`67a9f2b`) der Go-Shim, seit `5a61634` beim Namen gerufen, statt `uv run dmypy run --` unmittelbar; er trägt die zwei mypy-Flags und räumt eine Statusdatei weg, die ihren Daemon überlebt hat. Daemon statt mypy: warm 1400 → 988 ms, kalt 9,6 → 9,1 s (A/B am 2026-08-27) |
-| `test` | `uv run pytest`, `go test ./...` | nebenläufig |
-| `coverage` | `uv run --script hooks/coverage-check.py 98.0` | Python über `fail_under`, Go-Boden **98,0** |
+| `test` | `uv run coverage run -m pytest -q --tb=short --no-header`, `go test ./... -covermode=set -coverprofile=coverage.out` | nebenläufig; misst seit 2026-09-11 mit, damit `coverage` nur noch berichtet |
+| `coverage` | `uv run --script hooks/coverage-check.py 98.0` | Python über `fail_under`, Go-Boden **98,0**; liest die Messdaten nur, wenn `ULTRALOOM_ALONGSIDE` `test` nennt, sonst misst es selbst, und löscht sie nach jedem Bericht |
 | Profile | `edit` = lint+types; `precommit` = lint+types+test+coverage | |
 
-- [ ] **`precommit` fährt pytest zweimal.** Weil `test` konfiguriert ist, liest
+- [x] **`precommit` fährt pytest zweimal.** Weil `test` konfiguriert ist, liest
       `coverage` nicht mehr, was die Suite hinterlassen hat, sondern misst
       selbst. Kosten bekannt und angenommen — ein grüner Bericht über alten
       Daten ist das eine, was nicht passieren darf.
+      **Erledigt am 2026-09-11.** `test` misst jetzt mit. ultraloom reicht
+      jedem Check-Prozess `ULTRALOOM_ALONGSIDE`, und `hooks/coverage-check.py`
+      liest die Daten nur, wenn `test` im selben Durchgang lief. Sonst misst es
+      selbst, und nach jedem Bericht löscht es die Daten. `ultraloom check all`
+      warm: **136,2 s → 63,7–66,4 s**. Dafür zahlt ein alleiniges `test` den
+      Messaufschlag, pytest 52,5 → 62,5 s. Die Messung steht in
+      `docs/benchmarks.md`.
 - [ ] **Der Go-Boden ist eine Stolperdrahtgrenze, kein Ziel.** Gemessen am
       2026-08-28: 745 Anweisungen, 11 in zehn unerreichbaren Blöcken = 98,5 %.
       **Am 2026-09-10 zweimal nachgemessen: 98,4 % nach `d941d26`** (57

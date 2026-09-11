@@ -47,6 +47,24 @@ Die folgenden Tabellen fassen die aktuellsten Performance-Messungen über alle 5
 
 ## Chronologisches Benchmark-Protokoll
 
+### 11.09.2026 11:47 MESZ — Das Commit-Gate: ein Suitelauf pro Durchgang statt zwei
+
+* **Repository:** `ultraloom` auf `master` bei `e165d6d` plus der uncommittete Fix, Windows 11, Go 1.27, Python 3.13.15. Baseline: derselbe Commit ohne Fix, in einem Wegwerf-`git worktree`.
+* **Ziel:** `[verify.test]` ist konfiguriert, also gab ultraloom `coverage` keinen Messschritt mit, und `hooks/coverage-check.py` fuhr pytest und `go test` bei jedem `check all` — dem Gate in `.githooks/pre-commit` — und jedem `precommit`-Profil ein zweites Mal. Jetzt misst `test`, ultraloom reicht jedem Check-Prozess `ULTRALOOM_ALONGSIDE`, und das Skript berichtet nur noch, wenn `test` im selben Durchgang lief.
+* **Methode:** Wanduhr um `uv run ultraloom check all` per `date +%s%N` in Git Bash, direkt hintereinander, immer nur ein Lauf. Der Go-Testcache war in beiden Bäumen warm. Eine andere Claude-Sitzung teilte die Maschine und fuhr zeitweise eigene Gates, die Einzelläufe tragen also dieses Rauschen; der Unterschied liegt weit darüber.
+* **Ergebnisse:**
+
+| Szenario | Baseline (`e165d6d`) | Mit Fix | Unterschied |
+| :--- | :---: | :---: | :---: |
+| `ultraloom check all`, erster Lauf | Kalt: 158,8 s *(frisches `uv sync`)* | Kalt: nicht sauber gemessen — der eine erste Lauf (81,1 s) hatte eine Änderung an `checks.py` unter sich und wurde rot | — |
+| `ultraloom check all`, warm | Warm: **136,2 s** | Warm: **66,4 s** und **63,7 s** | 🚀 **~70 s pro Commit gespart** (etwa die Hälfte) |
+| pytest allein (`test` ohne `coverage`) | Warm: 52,5 s | Warm: 62,5 s *(unter `coverage run`)* | ⚠️ +10 s — der Preis dafür, dass `test` allein mitmisst |
+| `go test ./... -count=1` | Warm: 26,5 s / 23,7 s | Warm: 26,0 s / 21,9 s *(mit `-coverprofile`)* | kein messbarer Preis |
+
+* **Keine Zeitmessung, aber bei derselben Arbeit gefunden:** In dem Fenster, in dem das Skript schon las und `[verify.test]` noch nicht maß, las das Stop-Gate einer anderen Sitzung eine `.coverage`, die sein Durchgang nie geschrieben hatte, und wurde bei 87 % rot. Diesmal rot; mit älteren Daten aus voll gedecktem Code wäre es grün gewesen. Deshalb löscht das Skript beide Dateien jetzt nach jedem Bericht: Es kann sie nur geben, wenn seitdem ein `test` sie geschrieben hat.
+
+---
+
 ### 10.09.2026 MESZ — Die `types`-Bahn: welche Verpackung dmypy bezahlt, und was volle Deckung mit einem Boden macht
 
 * **Repository:** `ultraloom` auf `master` bei `298b473`, Windows 11, Go 1.27, Python 3.13.15.

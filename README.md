@@ -355,6 +355,14 @@ A project that configures `test` itself has no measuring variant ultraloom
 knows about, so `coverage` falls back to measuring for itself. ultraloom does
 not guess whether somebody else's test command measures.
 
+A command of its own can decide that for itself: every check process finds the
+kinds of its pass, comma-separated, in `ULTRALOOM_ALONGSIDE` — set on every
+run, empty when a check runs alone. A configured `[verify.coverage].report` may
+read what its own `[verify.test]` measured when `test` is named there, because
+`test` then ran before it and was green. That `test` actually measured is still
+the project's promise to keep. This repository does it that way, in
+`hooks/coverage-check.py`.
+
 ### Why a check is red
 
 Besides a tool that simply found something, a red result carries a source:

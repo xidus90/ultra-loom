@@ -9,12 +9,16 @@ the command that reports against it, so the table has `report` and no
 `commands` list. One slot, two languages: this script is that slot, and it runs
 both arms and fails on either.
 
-The Python arm measures before it reports. `test` is configured in this
-repository, so ultraloom no longer hands the coverage check a measuring step,
-and a `coverage report` over whatever `.coverage` happened to lie around would
-be a green line over stale data -- the one failure this whole system is built
-to prevent. The price is the suite running twice per `precommit`, which is the
-same price the configured `test` entry already pays and is written down there.
+Both arms report what `test` measured -- when, and only when, `test` ran in
+the same pass. `test` is configured in this repository, so ultraloom hands the
+coverage check no measuring step, and a report over whatever `.coverage`
+happened to lie around would be a green line over stale data -- the one failure
+this whole system is built to prevent. So the script asks ultraloom which kinds
+run in its pass (`ULTRALOOM_ALONGSIDE`). `test` among them means it ran before
+this check and was green: the preset orders `coverage` after `test`, and a red
+`test` blocks it. Anything else -- `coverage` on its own, a run outside
+ultraloom, data that is missing -- and the arm measures for itself, at the
+price of a second suite run.
 
 The Go arm needs a floor at all: `go test` has no `fail_under`, so without this
 the Go tree's coverage is measured by nobody and reported by nobody.
@@ -22,6 +26,8 @@ the Go tree's coverage is measured by nobody and reported by nobody.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 import shutil
 import subprocess
@@ -38,6 +44,18 @@ TERSE_PYTEST = ("-q", "--tb=short", "--no-header")
 TOTAL = re.compile(r"^total:\s+\(statements\)\s+([0-9.]+)%", re.MULTILINE)
 
 _WINDOWS_GO = Path(r"C:\Program Files\Go\bin\go.exe")
+
+# What ultraloom tells every check process about its pass, and the kind whose
+# measurement this script may take over. Spelled out rather than imported -- a
+# PEP-723 script has no ultraloom on its path -- so `checks.ALONGSIDE_ENV` and
+# this line have to change together.
+ALONGSIDE_ENV = "ULTRALOOM_ALONGSIDE"
+MEASURER = "test"
+
+# Where `[verify.test]` in `.ultraloom/config.toml` leaves its data: coverage.py's
+# default file, and the profile `go test -coverprofile` is pointed at there.
+PYTHON_DATA = Path(".coverage")
+GO_PROFILE = Path("coverage.out")
 
 
 def _resolve_go() -> str:
@@ -60,33 +78,76 @@ def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, capture_output=True, text=True, check=False)
 
 
+def measured_in_this_pass(data: Path) -> bool:
+    """Whether `test` ran in this pass and left `data` behind for this check.
+
+    The file is asked for as well because the kind alone says only that `test`
+    ran, not that the configured command measured anything. A report must then
+    fall back on measuring, never on reading nothing.
+    """
+    kinds = os.environ.get(ALONGSIDE_ENV, "").split(",")
+    return MEASURER in kinds and data.is_file()
+
+
+def forget_measurements() -> None:
+    """Remove what this check read, whichever arm measured it.
+
+    The file check in `measured_in_this_pass` proves that data exists, not that
+    this pass wrote it. Removed after every report, a file can only be there
+    when a `test` since the last report put it there -- so a `[verify.test]`
+    that stops measuring leaves this check measuring for itself instead of
+    reading the last run that did. A file another process still holds stays;
+    the next report then measures, which costs time and nothing else.
+    """
+    for data in (PYTHON_DATA, GO_PROFILE):
+        with contextlib.suppress(OSError):
+            data.unlink(missing_ok=True)
+
+
 def python_arm() -> tuple[bool, str]:
-    """Measure the suite, then let the project's own fail_under judge it."""
+    """Measure the suite unless `test` just did, then let fail_under judge it."""
     try:
-        measured = run(["uv", "run", "coverage", "run", "-m", "pytest", *TERSE_PYTEST])
+        if not measured_in_this_pass(PYTHON_DATA):
+            measured = run(["uv", "run", "coverage", "run", "-m", "pytest", *TERSE_PYTEST])
+            if measured.returncode != 0:
+                # A red suite leaves a partial measurement, and a report over it
+                # would name files nobody reached rather than files nobody covered.
+                return False, "the suite failed under measurement:\n" + tail(measured)
+        reported = run(["uv", "run", "coverage", "report", "--skip-covered", "--skip-empty", "-m"])
     except OSError as error:
         # A missing toolchain is not a coverage verdict and must not pass as one.
         return False, f"coverage could not be run: {error}"
-    if measured.returncode != 0:
-        # A red suite leaves a partial measurement, and a report over it would
-        # name files nobody reached rather than files nobody covered.
-        return False, "the suite failed under measurement:\n" + tail(measured)
-    reported = run(["uv", "run", "coverage", "report", "--skip-covered", "--skip-empty", "-m"])
     return reported.returncode == 0, tail(reported)
 
 
 def go_arm(floor: float) -> tuple[bool, str]:
-    """Measure the Go tree and hold it to a floor `go test` cannot hold itself."""
+    """Measure the Go tree unless `test` just did, and hold it to a floor."""
     go = _resolve_go()
     with tempfile.TemporaryDirectory() as workspace:
         profile = str(Path(workspace) / "cover.out")
         try:
-            measured = run([go, "test", "./...", "-covermode=set", f"-coverprofile={profile}"])
+            summary: subprocess.CompletedProcess[str] | None = None
+            if measured_in_this_pass(GO_PROFILE):
+                summary = run([go, "tool", "cover", f"-func={GO_PROFILE}"])
+                if summary.returncode != 0:
+                    # The profile sits at a fixed path in the checkout, and two
+                    # gates in one checkout write it at once -- measured on
+                    # 2026-09-11 as an interleaved file `go tool cover` refused.
+                    # That says nothing about the tree, so it ends the shortcut
+                    # rather than the arm.
+                    print(
+                        f"go: {GO_PROFILE} from this pass is unreadable, measuring again:\n"
+                        + tail(summary),
+                        file=sys.stderr,
+                    )
+                    summary = None
+            if summary is None:
+                measured = run([go, "test", "./...", "-covermode=set", f"-coverprofile={profile}"])
+                if measured.returncode != 0:
+                    return False, "go test failed:\n" + tail(measured)
+                summary = run([go, "tool", "cover", f"-func={profile}"])
         except OSError as error:
             return False, f"go could not be run: {error}"
-        if measured.returncode != 0:
-            return False, "go test failed:\n" + tail(measured)
-        summary = run([go, "tool", "cover", f"-func={profile}"])
     if summary.returncode != 0:
         return False, "go tool cover failed:\n" + tail(summary)
     found = TOTAL.search(summary.stdout)
@@ -115,8 +176,11 @@ def main(argv: list[str]) -> int:
     except ValueError:
         print(f"{argv[0]!r} is not a percentage", file=sys.stderr)
         return 1
-    python_ok, python_said = python_arm()
-    go_ok, go_said = go_arm(floor)
+    try:
+        python_ok, python_said = python_arm()
+        go_ok, go_said = go_arm(floor)
+    finally:
+        forget_measurements()
     for language, ok, said in (("python", python_ok, python_said), ("go", go_ok, go_said)):
         stream = sys.stdout if ok else sys.stderr
         print(f"{language}: {said}", file=stream)

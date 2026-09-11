@@ -61,6 +61,10 @@ _TERSE_PYTEST = ("-q", "--tb=short", "--no-header")
 _PYTEST = ("uv", "run", "pytest", *_TERSE_PYTEST)
 _COVERAGE_RUN = ("uv", "run", "coverage", "run", "-m", "pytest", *_TERSE_PYTEST)
 
+# The variable every check process finds the kinds of its pass in, comma-joined
+# and sorted. Named once: `hooks/coverage-check.py` reads the same name.
+ALONGSIDE_ENV = "ULTRALOOM_ALONGSIDE"
+
 # marker file -> check kind -> the preset for it
 PRESETS: Mapping[str, Mapping[str, Preset]] = {
     "pyproject.toml": {
@@ -366,7 +370,10 @@ def _measures_for(kind: str, marker: str | None, config: Config, alongside: froz
     reporting on the previous run. `blocked` does not catch it, because the
     predecessor is green. That is the one accepted way to green over stale data;
     it is written up in the backlog under "Der eine verbliebene Weg zu Grün über
-    alte Daten".
+    alte Daten". Since 2026-09-11 every check process finds its pass in
+    `ALONGSIDE_ENV`, so such a report can at least tell whether `test` ran; that
+    it measured is still for the project to guarantee -- as this repository's
+    own `[verify.test]` does for `hooks/coverage-check.py`.
 
     `kind in alongside` means *requested*, not *finished*, and nothing here can
     upgrade it: this runs while the pass is being planned, before any command
@@ -446,7 +453,7 @@ def run_check(
     unready = _unready(command, config)
     if unready is not None:
         return unready
-    return _run_command(command, config, gate)
+    return _run_command(command, config, gate, alongside)
 
 
 def _unready(command: Command, config: Config) -> CheckResult | None:
@@ -507,12 +514,23 @@ def _preset_godot_binary(config: Config) -> str | None:
     return shlex.join((*config.exec_prefix, PRESETS["project.godot"]["test"].argv[0]))
 
 
-def _run_command(command: Command, config: Config, gate: Semaphore | None = None) -> CheckResult:
+def _run_command(
+    command: Command,
+    config: Config,
+    gate: Semaphore | None = None,
+    alongside: frozenset[str] = frozenset(),
+) -> CheckResult:
     """Every command of one kind, and one verdict out of them.
 
     `gate` is the cap on running *processes*. It is passed in rather than made
     here so that the levels above -- stages, and the kinds within a stage --
     can share one instead of each handing out the whole budget again.
+
+    `alongside` reaches every process as `ULTRALOOM_ALONGSIDE`. A command the
+    project configured itself is opaque to ultraloom -- `_measures_for` refuses
+    to guess what it measures -- so the one thing that can still decide whether
+    a report may read this pass's data is the command itself, and it can only
+    decide that if it is told who else runs.
 
     The contract that comes with it: the cap is acquired at the process and
     nowhere else. Whoever passes this cap on does not acquire it -- the levels
@@ -525,8 +543,12 @@ def _run_command(command: Command, config: Config, gate: Semaphore | None = None
         # `is None` and not `or`: a Semaphore is always truthy, so `or` would
         # work by an accident of a class this module does not own.
         gate = BoundedSemaphore(config.max_parallel)
+    # Set even when empty: a check started from inside another pass -- the
+    # suite runs `ultraloom check` on itself -- would otherwise inherit the
+    # outer pass's kinds and believe them.
+    env = {ALONGSIDE_ENV: ",".join(sorted(alongside))}
     if command.measure:
-        measured = _run(command.measure, command.kind, config, command.source, gate)
+        measured = _run(command.measure, command.kind, config, command.source, gate, env)
         if not measured.ok:
             # Through _warned rather than returned bare: this is the path where
             # the output most needs the warning that explains it.
@@ -540,13 +562,14 @@ def _run_command(command: Command, config: Config, gate: Semaphore | None = None
         with ThreadPoolExecutor(max_workers=workers) as pool:
             results = tuple(
                 pool.map(
-                    lambda argv: _run(argv, command.kind, config, command.source, gate),
+                    lambda argv: _run(argv, command.kind, config, command.source, gate, env),
                     command.argvs,
                 )
             )
     else:
         results = tuple(
-            _run(argv, command.kind, config, command.source, gate) for argv in command.argvs
+            _run(argv, command.kind, config, command.source, gate, env)
+            for argv in command.argvs
         )
     return _merged(command, results)
 
@@ -598,11 +621,16 @@ def _warned(command: Command, result: CheckResult) -> CheckResult:
 
 
 def _run(
-    argv: tuple[str, ...], kind: str, config: Config, source: str, gate: Semaphore
+    argv: tuple[str, ...],
+    kind: str,
+    config: Config,
+    source: str,
+    gate: Semaphore,
+    env: Mapping[str, str],
 ) -> CheckResult:
     try:
         with gate:
-            completed = process.run(argv, cwd=config.root, timeout=config.timeout)
+            completed = process.run(argv, cwd=config.root, timeout=config.timeout, extra_env=env)
     except OSError as error:
         # A tool that is not installed must read as a failed check, not as a
         # traceback that takes the whole chain down with it.

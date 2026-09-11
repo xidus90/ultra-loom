@@ -20,8 +20,16 @@ GO_FUNC_OUTPUT = "cmd/init/run.go:90:\trun\t97.5%\ntotal:\t\t(statements)\t98.6%
 
 
 @pytest.fixture
-def wrapper() -> ModuleType:
-    """The script as a module, under a name nothing else claims."""
+def wrapper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
+    """The script as a module, under a name nothing else claims.
+
+    Outside any pass and outside the repository: this suite itself runs as the
+    `test` check, so without the delenv every test here would inherit a pass
+    that holds `test` -- and without the chdir the script would remove the
+    `.coverage` and `coverage.out` that very check is writing.
+    """
+    monkeypatch.delenv("ULTRALOOM_ALONGSIDE", raising=False)
+    monkeypatch.chdir(tmp_path)
     spec = importlib.util.spec_from_file_location("ultraloom_coverage_check", SCRIPT)
     # A readable .py file always yields a spec with a loader.
     assert spec is not None and spec.loader is not None
@@ -220,3 +228,133 @@ def test_a_floor_that_is_not_a_number_is_refused(
 ) -> None:
     assert wrapper.main(["a lot"]) == 1
     assert "is not a percentage" in capsys.readouterr().err
+
+
+def in_a_pass(
+    monkeypatch: pytest.MonkeyPatch, root: Path, kinds: str, *, data: bool = True
+) -> None:
+    """Stand in a project root, inside a pass of `kinds`, with or without its data."""
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("ULTRALOOM_ALONGSIDE", kinds)
+    if data:
+        (root / ".coverage").write_text("", encoding="utf-8")
+        (root / "coverage.out").write_text("mode: set\n", encoding="utf-8")
+
+
+def test_a_pass_that_ran_test_is_reported_not_measured_again(
+    wrapper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The point of the whole branch: one suite run per pass, not two."""
+    in_a_pass(monkeypatch, tmp_path, "coverage,lint,test,types")
+    seen = answers(monkeypatch, wrapper, GREEN)
+    assert wrapper.main(["98"]) == 0
+    assert "go coverage 98.6%" in capsys.readouterr().out
+    assert not [argv for argv in seen if argv[2:4] == ["coverage", "run"]]
+    assert not [argv for argv in seen if argv[1:2] == ["test"]]
+    assert [argv[1:] for argv in seen if argv[1:3] == ["tool", "cover"]] == [
+        ["tool", "cover", "-func=coverage.out"]
+    ]
+
+
+def test_a_pass_without_test_measures_itself(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Data lying around from an earlier `test` is exactly the stale data to refuse."""
+    in_a_pass(monkeypatch, tmp_path, "coverage")
+    seen = answers(monkeypatch, wrapper, GREEN)
+    assert wrapper.main(["98"]) == 0
+    assert [argv for argv in seen if argv[2:4] == ["coverage", "run"]]
+    assert [argv for argv in seen if argv[1:2] == ["test"]]
+
+
+def test_a_pass_with_test_but_no_data_measures_itself(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A `test` that measured nothing must not leave the report reading nothing."""
+    in_a_pass(monkeypatch, tmp_path, "coverage,test", data=False)
+    seen = answers(monkeypatch, wrapper, GREEN)
+    assert wrapper.main(["98"]) == 0
+    assert [argv for argv in seen if argv[2:4] == ["coverage", "run"]]
+    assert [argv for argv in seen if argv[1:2] == ["test"]]
+
+
+def test_a_kind_is_matched_whole_not_as_a_substring(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    in_a_pass(monkeypatch, tmp_path, "coverage,contest")
+    seen = answers(monkeypatch, wrapper, GREEN)
+    assert wrapper.main(["98"]) == 0
+    assert [argv for argv in seen if argv[2:4] == ["coverage", "run"]]
+
+
+def test_a_missing_toolchain_is_no_verdict_over_data_from_the_pass(
+    wrapper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Reading what `test` left behind still needs the tools that read it."""
+    in_a_pass(monkeypatch, tmp_path, "coverage,test")
+    answers(
+        monkeypatch,
+        wrapper,
+        GREEN,
+        raises={
+            "uv run coverage": FileNotFoundError(2, "no uv"),
+            "go tool cover": FileNotFoundError(2, "no go"),
+        },
+    )
+    assert wrapper.main(["98"]) == 1
+    said = capsys.readouterr().err
+    assert "coverage could not be run:" in said
+    assert "go could not be run:" in said
+
+
+@pytest.mark.parametrize("kinds", ["coverage,test", "coverage"])
+def test_a_measurement_is_read_once_and_then_forgotten(
+    wrapper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kinds: str
+) -> None:
+    """Data that outlives its pass is data the next pass could mistake for its own.
+
+    A `[verify.test]` that stopped measuring would otherwise leave this check
+    reading whatever the last measuring run wrote, for as long as nobody noticed.
+    """
+    in_a_pass(monkeypatch, tmp_path, kinds)
+    answers(monkeypatch, wrapper, GREEN)
+    assert wrapper.main(["98"]) == 0
+    assert not (tmp_path / ".coverage").exists()
+    assert not (tmp_path / "coverage.out").exists()
+
+
+def test_an_unreadable_profile_from_the_pass_is_measured_again(
+    wrapper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Measured on 2026-09-11: two gates in one checkout wrote one coverage.out.
+
+    `go tool cover` refused the interleaved file. That is no finding about the
+    tree, so it must not end the arm red -- it ends the shortcut, and the arm
+    measures the way it would have without one.
+    """
+    in_a_pass(monkeypatch, tmp_path, "coverage,test")
+    seen: list[list[str]] = []
+
+    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        seen.append(list(argv))
+        if argv[1:3] == ["tool", "cover"] and argv[3] == "-func=coverage.out":
+            return subprocess.CompletedProcess(argv, 1, "", "no required module provides\n")
+        if argv[1:3] == ["tool", "cover"]:
+            return subprocess.CompletedProcess(argv, 0, GO_FUNC_OUTPUT, "")
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    monkeypatch.setattr(wrapper.subprocess, "run", run)
+    assert wrapper.main(["98"]) == 0
+    said = capsys.readouterr()
+    assert "go coverage 98.6%" in said.out
+    assert "measuring again" in said.err
+    assert [argv for argv in seen if argv[1:2] == ["test"]]

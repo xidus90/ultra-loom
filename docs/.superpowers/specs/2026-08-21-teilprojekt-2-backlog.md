@@ -475,6 +475,11 @@ den vorigen Lauf und kann grün melden; `blocked` schützt hier nicht, weil der
 Vorgänger ja grün ist. Das ist die beschlossene Restlücke des Rulings zu Task 8
 und steht so im Docstring von `_measures_for`. Der Backlog nannte bisher nur die
 umgekehrte Nachlässigkeit — die Warnung, die zu oft käme —, nicht diese.
+*Nachtrag 2026-09-11:* Jeder Check-Prozess bekommt jetzt `ULTRALOOM_ALONGSIDE`
+mit den Kinds seines Durchgangs. Ein eigener Report kann damit wenigstens
+wissen, ob `test` lief; dass es gemessen hat, muss das Projekt weiter selbst
+zusichern. ultraloom tut das für sich mit einem messenden `[verify.test]` und
+`hooks/coverage-check.py`, das nur dann liest statt misst.
 
 **`brief` ist fast aus `report` ableitbar und geht trotzdem in den
 `input_hash`.** Fast, nicht ganz: `_render` klippt **je Befund**, während

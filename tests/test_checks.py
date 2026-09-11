@@ -11,6 +11,7 @@ import pytest
 
 from ultraloom import checks, process
 from ultraloom.checks import (
+    ALONGSIDE_ENV,
     BLOCKED,
     KINDS,
     PRESETS,
@@ -1453,3 +1454,29 @@ def test_a_project_local_tool_beats_the_one_on_path(tmp_path: Path) -> None:
     command = resolve_check("lint", load_config(tmp_path))
 
     assert command.argvs[0] == (str(tool), "gdlint", ".")
+
+
+_PRINT_ALONGSIDE = py(f"import os; print(repr(os.environ[{ALONGSIDE_ENV!r}]))")
+
+
+def test_every_command_learns_which_kinds_run_in_its_pass(tmp_path: Path) -> None:
+    """A configured report cannot be told who measured, so it is told who ran."""
+    python_project(tmp_path)
+    config = Config(root=tmp_path, commands={"lint": (_PRINT_ALONGSIDE,)})
+
+    result = run_check("lint", config, frozenset({"test", "lint", "coverage"}))
+
+    assert result.output.strip() == "'coverage,lint,test'"
+
+
+def test_a_lone_check_is_told_it_runs_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Set even when empty: a value inherited from an enclosing pass would lie."""
+    python_project(tmp_path)
+    monkeypatch.setenv(ALONGSIDE_ENV, "test,coverage")
+    config = Config(root=tmp_path, commands={"lint": (_PRINT_ALONGSIDE,)})
+
+    result = run_check("lint", config)
+
+    assert result.output.strip() == "''"

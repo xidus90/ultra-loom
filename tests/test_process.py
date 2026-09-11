@@ -844,3 +844,17 @@ def test_a_child_may_print_a_character_the_locale_cannot(tmp_path: Path) -> None
 
     assert completed.returncode == 0, completed.stderr
     assert "✓ für" in completed.stdout
+
+
+def test_run_hands_extra_variables_to_the_child(tmp_path: Path) -> None:
+    """Laid over the child's environment, so an inherited value cannot win."""
+    code = "import os; print(os.environ['ULTRALOOM_PROBE'], os.environ['PYTHONIOENCODING'])"
+    completed = run(
+        _python(code),
+        cwd=tmp_path,
+        timeout=30,
+        extra_env={"ULTRALOOM_PROBE": "handed", "PYTHONIOENCODING": "ignored"},
+    )
+    assert completed.returncode == 0
+    # PYTHONIOENCODING stays forced: the decoding on this side depends on it.
+    assert completed.stdout.split() == ["handed", "utf-8"]

@@ -4,11 +4,12 @@
 # pins -- the same ruff version the gates run, then.
 # `test` is named although the preset would get Python right on its own: since
 # 2026-08-28 the repository holds a second language, and a kind takes either the
-# preset or the configured list -- there is no appending to a preset. The cost is
-# known and accepted: with `test` configured, `coverage` no longer reads what the
-# suite left behind but falls back on its own measuring run, so `precommit` runs
-# pytest twice. A green report over stale data is the one thing this must not
-# buy, and it does not.
+# preset or the configured list -- there is no appending to a preset. With `test`
+# configured, ultraloom cannot know whether it measures, so `coverage` gets no
+# measuring step handed to it; `[verify.test]` below measures anyway, and
+# `hooks/coverage-check.py` reads that data only when `test` ran in the same
+# pass. Until 2026-09-11 it measured again every time, and a commit ran pytest
+# and `go test` twice each.
 #
 # `gofmt -l` prints the unformatted files and *exits 0* even then, so it cannot
 # be a gate entry by itself; `./ulinit check gofmt` turns that output into an
@@ -80,8 +81,29 @@ commands = [
 ]
 threaded = true
 
+# Both suites measure while they run, so that `coverage` in the same pass only
+# has to report: `.coverage` for Python, `coverage.out` for Go, both ignored by
+# git. `hooks/coverage-check.py` takes them over only when ultraloom names
+# `test` in `ULTRALOOM_ALONGSIDE` -- green, because a red `test` blocks
+# `coverage` -- and measures for itself otherwise, so a lone
+# `ultraloom check coverage` never reads what an earlier run left behind. It
+# removes both files after every report, so they can only exist when a `test`
+# since then wrote them: were this list to stop measuring, the report would go
+# back to measuring rather than read the last run that did. The paths are
+# fixed, so two gates in one checkout share them: on 2026-09-11 that left an
+# interleaved coverage.out, and an unreadable profile now sends the Go arm back
+# to measuring as well, instead of turning the lane red.
+# That rests on the preset order `coverage` after `test`: a `[verify.after]`
+# entry that moved `coverage` elsewhere would let it start before `test` wrote
+# anything. The terse pytest flags mirror checks.py's `_TERSE_PYTEST`.
+# Measured on 2026-09-11 (docs/benchmarks.md): `ultraloom check all` warm went
+# from 136.2 s to 63.7-66.4 s. The price is a `test` run on its own, which now
+# measures too: pytest 52.5 s plain against 62.5 s under coverage.
 [verify.test]
-commands = ["uv run pytest", "go test ./..."]
+commands = [
+  "uv run coverage run -m pytest -q --tb=short --no-header",
+  "go test ./... -covermode=set -coverprofile=coverage.out",
+]
 threaded = true
 
 # Two languages, one slot. `[verify.coverage]` takes `report` and no `commands`
@@ -90,8 +112,9 @@ threaded = true
 # Until 2026-08-28 that meant `go test` ran with no threshold at all while the
 # report claimed a coverage lane, which is the one shape of green this project
 # exists to prevent.
-# `hooks/coverage-check.py` is that one command: it measures and reports Python
-# -- fail_under in pyproject.toml still passes the verdict -- and holds the Go
+# `hooks/coverage-check.py` is that one command: it reports Python -- measuring
+# first unless `test` did in this pass; fail_under in pyproject.toml still
+# passes the verdict -- and holds the Go
 # tree to the floor named here, because `go test` has no fail_under of its own.
 # The number, measured on 2026-08-28: 745 statements, 11 of them in ten blocks
 # that no test can reach, which is 98.5%. Each block carries its justification

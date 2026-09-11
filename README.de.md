@@ -379,6 +379,14 @@ Ein Projekt, das `test` selbst konfiguriert, hat keine messende Variante,
 die ultraloom kennt; `coverage` fällt also darauf zurück, selbst zu messen.
 ultraloom rät nicht, ob der Test-Befehl eines anderen nebenbei misst.
 
+Ein eigener Befehl kann das selbst entscheiden: Jeder Prüfprozess findet die
+Arten seines Durchgangs, durch Kommas getrennt, in `ULTRALOOM_ALONGSIDE`. Die
+Variable ist bei jedem Lauf gesetzt und leer, wenn eine Prüfung allein läuft.
+Ein konfiguriertes `[verify.coverage].report` darf lesen, was das eigene
+`[verify.test]` gemessen hat, wenn dort `test` steht: `test` lief dann vorher
+und war grün. Dass `test` wirklich gemessen hat, muss das Projekt weiter selbst
+zusichern. Dieses Repository macht es so, in `hooks/coverage-check.py`.
+
 ### Warum eine Prüfung rot ist
 
 Neben einem Werkzeug, das schlicht etwas gefunden hat, trägt ein rotes
