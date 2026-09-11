@@ -379,3 +379,29 @@ func TestGodotAtTheRootNamesNoDirectory(t *testing.T) {
 		t.Fatalf("GodotDir = %q, want empty", facts.GodotDir)
 	}
 }
+
+// brain looks for .ultra-brain/config.toml before .brain.toml, and a project
+// set up by `brain init` carries only the first. Detection that read only the
+// second found no wiki in ultraloom and fell through to a neighbour.
+func TestUltraBrainConfigDeclaresTheWikiLikeBrainToml(t *testing.T) {
+	facts := Detect(fstest.MapFS{
+		".ultra-brain/config.toml": {Data: []byte("[area]\nscope = \"project/ultraloom\"\nwiki = true\n")},
+		"docs/wiki/index.md":       {Data: []byte("# Katalog\n")},
+	})
+	if facts.WikiMode != "brain" || facts.WikiPath != "docs/wiki/" {
+		t.Fatalf("got %q %q, want \"brain\" \"docs/wiki/\"", facts.WikiMode, facts.WikiPath)
+	}
+}
+
+// Where both names exist, brain reads the first and never the second. So must
+// detection, or the two tools would answer the same repository differently.
+func TestUltraBrainConfigWinsOverBrainToml(t *testing.T) {
+	facts := Detect(fstest.MapFS{
+		".ultra-brain/config.toml": {Data: []byte("[area]\nscope = \"project/x\"\n")},
+		".brain.toml":              {Data: []byte("[area]\nwiki = true\n")},
+		"docs/wiki/index.md":       {Data: []byte("# Katalog\n")},
+	})
+	if facts.WikiMode != "" {
+		t.Fatalf("mode = %q: .brain.toml was read although .ultra-brain/config.toml exists", facts.WikiMode)
+	}
+}

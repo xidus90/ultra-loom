@@ -93,9 +93,10 @@ flowchart TD
 
 UltraLoom folgt einer klaren Hierarchie:
 
-1. **UltraBrain (`.brain.toml`):**
+1. **UltraBrain (`.ultra-brain/config.toml`, sonst `.brain.toml`):**
    * Definiert, ob das Repository ein Brain-Bereich mit Wiki-Ebene ist (`[area] wiki = true`) und legt das Layout fest.
-   * Fehlt die `.brain.toml` oder ist `wiki = false`, bleiben Wiki-Hooks standardmäßig deaktiviert.
+   * Die zwei Namen sind brains eigene Suchreihenfolge: die erste lesbare Datei entscheidet, die zweite wird dann nicht gelesen.
+   * Erklärt die entscheidende Datei nicht `wiki = true`, bleiben Wiki-Hooks standardmäßig deaktiviert.
 2. **UltraLoom-Konfiguration (`.ultraloom/config.toml` & `.ultraloom/answers.toml`):**
    * Verwaltet Policies, geschützte Dateipfade, Ziel-Agenten (`claude`, `gemini`) und Schwellenwerte.
 3. **Claude Code Settings (`.claude/settings.json`):**

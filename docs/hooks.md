@@ -93,9 +93,10 @@ flowchart TD
 
 UltraLoom adheres to a strict hierarchy of configuration sources:
 
-1. **UltraBrain (`.brain.toml`):**
+1. **UltraBrain (`.ultra-brain/config.toml`, else `.brain.toml`):**
    * Declares whether the repository has an active wiki layer (`[area] wiki = true`) and specifies the layout directory.
-   * If `.brain.toml` is absent or `wiki = false`, all wiki gates remain disabled by default.
+   * The two names are brain's own search order: the first file that can be read decides, and the second is then not consulted.
+   * If the deciding file does not declare `wiki = true`, all wiki gates remain disabled by default.
 2. **UltraLoom Config (`.ultraloom/config.toml` & `.ultraloom/answers.toml`):**
    * Configures policy rules, protected files, allowed agents (`claude`, `gemini`), and gate thresholds.
 3. **Claude Code Settings (`.claude/settings.json`):**

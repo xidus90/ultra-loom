@@ -70,34 +70,16 @@ func Detect(root fs.FS) Facts {
 // documentation under wiki/ would otherwise be told it has a brain bundle,
 // and everything downstream would act on it.
 func (facts *Facts) readWiki(root fs.FS) {
-	if brainToml, err := fs.ReadFile(root, ".brain.toml"); err == nil {
-		lines := strings.Split(string(brainToml), "\n")
-		hasWikiDeclared := false
-		for _, l := range lines {
-			trimmed := strings.TrimSpace(l)
-			if strings.HasPrefix(trimmed, "wiki") && strings.Contains(trimmed, "=") {
-				val := strings.TrimSpace(strings.TrimPrefix(trimmed, "wiki"))
-				val = strings.TrimPrefix(val, "=")
-				val = strings.TrimSpace(val)
-				if val == "true" {
-					hasWikiDeclared = true
-				}
-			}
-			if strings.HasPrefix(trimmed, "[wiki]") {
-				hasWikiDeclared = true
+	if manifest, ok := firstManifest(root); ok && declaresWiki(manifest) {
+		facts.WikiMode = "brain"
+		facts.WikiPath = "wiki/"
+		for _, cand := range []string{"docs/wiki", "wiki"} {
+			if _, err := fs.Stat(root, cand); err == nil {
+				facts.WikiPath = cand + "/"
+				break
 			}
 		}
-		if hasWikiDeclared {
-			facts.WikiMode = "brain"
-			facts.WikiPath = "wiki/"
-			for _, cand := range []string{"docs/wiki", "wiki"} {
-				if _, err := fs.Stat(root, cand); err == nil {
-					facts.WikiPath = cand + "/"
-					break
-				}
-			}
-			return
-		}
+		return
 	}
 
 	for _, cand := range []string{"wiki", "docs/wiki"} {
@@ -118,6 +100,42 @@ func (facts *Facts) readWiki(root fs.FS) {
 		facts.Ambiguous = append(facts.Ambiguous, wikiNote)
 		return
 	}
+}
+
+// manifestNames is brain's own search order (ultra-brain/pkg/config/manifest.go).
+// The first file that can be read decides, and the second is then never
+// consulted -- a repository carrying both is answered from the first alone.
+var manifestNames = []string{".ultra-brain/config.toml", ".brain.toml"}
+
+// firstManifest returns the text of the first manifest brain would read.
+func firstManifest(root fs.FS) (string, bool) {
+	for _, name := range manifestNames {
+		if data, err := fs.ReadFile(root, name); err == nil {
+			return string(data), true
+		}
+	}
+	return "", false
+}
+
+// declaresWiki reads the one thing detection needs from a manifest: whether
+// it says this area has a wiki, as `wiki = true` or as a `[wiki]` table.
+// A `wiki = "docs/wiki"` under [layout] names a place and says nothing about
+// whether there is a wiki, so only the literal true counts.
+func declaresWiki(manifest string) bool {
+	for _, line := range strings.Split(manifest, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[wiki]") {
+			return true
+		}
+		if strings.HasPrefix(trimmed, "wiki") && strings.Contains(trimmed, "=") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "wiki"))
+			value = strings.TrimSpace(strings.TrimPrefix(value, "="))
+			if value == "true" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // doubts collects the questions the tree raises without answering.
