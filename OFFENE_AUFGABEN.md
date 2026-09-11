@@ -1,7 +1,7 @@
 # Offene Aufgaben, Spezifikationen und Pläne (Status-Tracker)
 
-**Stand:** 2026-09-11, nach dem zweiten Arbeitsdurchgang (Ursache des leeren
-Wikis, Flottenspec, `hookCommand`)
+**Stand:** 2026-09-11, nach dem Merge des Go-Hooks-Strangs und dem Aufräumen
+der Worktrees
 **Haupt-Checkout:** [`master`](file:///c:/Users/micro/Documents/%23GIT/ultraloom) — Basis ist `origin/master` = `d744a0c`; den Stand mit `git log --oneline origin/master..master` lesen. Eine Zahl an dieser Stelle veraltet mit dem Commit, der sie einträgt
 
 Diese Übersicht führt die aktiven Stränge, Zweige, Worktrees und offenen
@@ -32,12 +32,12 @@ Das Füllen des Wikis ist selbst ein offener Punkt — siehe Abschnitt 6.
 | **MCP-Server nativ statt über uv** | `claude/mcp-native` (gelöscht) | `.worktrees/mcp-native` (entfernt) | ✅ **erledigt** | **0 eigene Commits**, 35 hinter master — die Spitze `b82ab51` ist per `git merge-base --is-ancestor` als Vorfahr von `master` bestätigt. Worktree und Zweig am 2026-09-10 abgebaut | keine — der Strang ist geschlossen |
 | **GDScript-Bahn dort fahren, wo der Godot-Baum steht** | `claude/brain-lint-braucht-ziel` (gelöscht) | — (kein Worktree) | ✅ **erledigt** | **0 eigene Commits**, 38 hinter master — `3433e6f` ist per `git merge-base --is-ancestor` als Vorfahr von `master` bestätigt. Zweig am 2026-09-10 gelöscht | keine — der Strang ist geschlossen |
 | **Konsolenkodierung: Befunde, die cp1252 nicht schreiben kann** | `claude/jovial-panini-eedcc1` (existiert nicht mehr) | — (kein Worktree) | ✅ **erledigt** | **Am 2026-09-10 nachgemessen:** der Zweig ist weg (`git branch -a` kennt ihn nicht mehr), und der Inhalt liegt in `master`. `9032b14` ist **kein** Vorfahr von `master`, aber `d0780c5` trägt denselben Betreff, dasselbe Autordatum (2026-08-27 12:53 +0200) und dieselbe Änderung an `src/ultraloom/cli.py` (+19) und `tests/test_cli.py` (+51) — der Zweigcommit, auf `master` neu abgespielt. Beweis im Baum: [`src/ultraloom/cli.py:58`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/src/ultraloom/cli.py) sagt `stream.reconfigure(errors="replace")`, Zeile 52 begründet die Regel | keine. Der frühere Befund („der Fix ist nicht in master", `cli.py` kenne weder `reconfigure` noch `errors="replace"`) war zum damaligen Stand 2026-09-10 09:03 **richtig** und ist seit `d0780c5` überholt |
-| **Audit-Nacharbeit (Tore, Multi-Marker, Aufräumen)** | `feat/audit-nacharbeit` | — (kein Worktree) | ✅ **erledigt** | **Am 2026-09-10 beide Commits auf `master` übernommen:** `e2c4911` als `94e2c2b` (Spec, 394 Zeilen) und `90d3e50` als `d941d26` (`cmd/init/run.go` +57, `cmd/init/run_test.go` +74). Beide Cherry-Picks liefen ohne Konflikt (Auto-Merge). Danach `ultraloom check all`: Exit 0 — ruff, `ulinit check gofmt`, `go vet`, dmypy, 920 Python-Tests, `go test ./...`, Python-Coverage 100 %, Go-Coverage 98,4 %. **Das frühere Urteil, `90d3e50` sei zu verwerfen, war falsch begründet** — der Commit fasst keine `.gitignore` dieses Repos an, sondern ergänzt in `cmd/init` eine Behandlung, die `master` gar nicht hatte (`grep` nach `gitignore` in `cmd/init/*.go` fand dort nichts); die Ausnahme `!/.ultra-brain/config.toml` war unberührt | **Offen: der Zweig selbst.** Cherry-Picks sind keine Vorfahren, `git branch -d` verweigert also — der Abbau bräuchte `-D`, und das ist eine Nutzerentscheidung |
-| **Mehrere LLM-Anbieter** | `feature/multi-provider-llm` | [`.worktrees/multi-provider-llm`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/.worktrees/multi-provider-llm) | 🟠 **weit veraltet** | **155 eigene** Commits, **399 hinter** master, letzter Stand 2026-08-24 | Entscheiden, was davon noch trägt. Der Entwurf lebt nur auf dem Zweig; ein Rebase über 399 Commits ist kein Selbstläufer |
-| **Go-Hooks für drei Hosts, Stufe 0 und 1** (parallele Sitzung `ultraloom-c0`) | `claude/go-hooks-stufe-0-1` (gelöscht) | `.worktrees/go-hooks` (entfernt) | ✅ **gemergt** | Mit `6168ef2` am 2026-09-11 nach master, als Fast-Forward über einen Merge; Zweig und Worktree danach abgebaut. 23 eigene Commits. SessionStart läuft seither über `ulguard hook session-start --host claude`, `session_start.py` ist gefallen; die drei Verlaufshooks bleiben Python bis zu ihren Stufen. Die drei Konflikte mit `6d87253` (`cmd/init/run_test.go`, `docs/hooks.md`, `docs/hooks.de.md`) und die zwei Kommentare, die still falsch gemergt hätten, sind im Merge aufgelöst. Spec `docs/.superpowers/specs/2026-09-10-go-hooks-drei-hosts-design.md` | Stufen 2 bis 5 sind laut Spec absichtlich noch nicht geplant |
+| **Audit-Nacharbeit (Tore, Multi-Marker, Aufräumen)** | `feat/audit-nacharbeit` (gelöscht) | — (kein Worktree) | ✅ **erledigt** | Beide Commits am 2026-09-10 auf `master` übernommen: `e2c4911` als `94e2c2b` (Spec) und `90d3e50` als `d941d26` (`cmd/init`), danach `ultraloom check all` mit Exit 0. Ein früheres Urteil, `90d3e50` sei zu verwerfen, war falsch begründet — der Commit ergänzt `cmd/init` und fasst keine `.gitignore` dieses Repos an. Am 2026-09-11 vor dem Abbau nachgemessen: `git cherry -v master feat/audit-nacharbeit` markiert beide Commits mit `-`, also inhaltsgleich auf `master`. Weil Cherry-Picks keine Vorfahren sind, lief der Abbau mit `git branch -D` (Nutzerentscheidung; die Spitze war `90d3e50`) | keine — der Strang ist geschlossen |
+| **Mehrere LLM-Anbieter** | `feature/multi-provider-llm` | — (Worktree am 2026-09-11 entfernt) | 🟠 **weit veraltet** | **155 eigene** Commits, **446 hinter** master (gemessen 2026-09-11), letzter Stand 2026-08-24. Vor dem Abbau war der Arbeitsbaum sauber, auch ohne ungetrackte oder ignorierte Dateien außer `.venv` und Caches, und kein Prozess arbeitete darin. Der Zweig bleibt mit allen Commits | Entscheiden, was davon noch trägt. Der Entwurf lebt nur auf dem Zweig; ein Rebase über 446 Commits ist kein Selbstläufer. Zum Weiterarbeiten `git worktree add .worktrees/multi-provider-llm feature/multi-provider-llm` |
+| **Go-Hooks für drei Hosts, Stufe 0 und 1** (parallele Sitzung `ultraloom-c0`) | `claude/go-hooks-stufe-0-1` (gelöscht) | `.worktrees/go-hooks` (entfernt) | ✅ **gemergt** | Mit `6168ef2` am 2026-09-11 nach master, als Fast-Forward über einen Merge; Zweig und Worktree danach abgebaut. 23 eigene Commits. SessionStart läuft seither über `ulguard hook session-start --host claude`, `session_start.py` ist gefallen; die drei Verlaufshooks bleiben Python bis zu ihren Stufen. Die drei Konflikte mit `6d87253` (`cmd/init/run_test.go`, `docs/hooks.md`, `docs/hooks.de.md`) und die zwei Kommentare, die still falsch gemergt hätten, sind im Merge aufgelöst. Spec `docs/.superpowers/specs/2026-09-10-go-hooks-drei-hosts-design.md` | Stufen 2 bis 5 sind laut Spec absichtlich noch nicht geplant. Die offenen Nachläufer stehen in Abschnitt 8 |
 | **Wiki-Flottenstandard** | `master` | — | 📝 **entworfen** | Spec `b208c36`, berichtigt in `8614c8c`: `answers.toml` wird die eine Entscheidungsdatei für ultraloom und brain, `.brain.toml` fällt daraus, ein Flottenpreset liefert die Standardantworten, vier Wiki-Arten (`brain`, `neighbour_repo`, `vault`, `none`). Siehe Abschnitt 6 | Die Spec vom Nutzer abnehmen lassen, dann ein Plan für Stufe 0 (`NeighbourWiki` gegen die Registry, `answers.toml` dieses Repos auf `brain`). Die Sperre durch den Go-Hooks-Zweig ist mit `6168ef2` gefallen |
-| **Agent-Harness** | `feature/agent-harness` | `.worktrees/agent-harness` | ❔ **unbelegt** | **0 eigene** Commits, Spitze `fa3dd38`. Der Arbeitsbaum ist **nicht sauber**: vier Zeilen in `git status --short` am 2026-09-11, dort arbeitet jemand | Nicht anfassen. Zweck in dieser Datei nicht belegt |
-| **`wentletrap`** | `wentletrap` | `~/orca/workspaces/ultraloom/wentletrap`, **außerhalb** des Repos | ❔ **unbelegt** | **0 eigene** Commits, Spitze `b95c187`, Arbeitsbaum sauber. Liegt in einem Werkzeugverzeichnis namens `orca`, nicht unter `.worktrees/`; `git worktree list` ist die einzige Stelle, an der es auffällt | Klären, welches Werkzeug es angelegt hat. Abbaubar, wenn niemand es braucht |
+| **Agent-Harness** | `feature/agent-harness` | `.worktrees/agent-harness` | ❔ **unbelegt** | **0 eigene** Commits, Spitze `fa3dd38`, 29 hinter master. Der Arbeitsbaum trägt **vier ungetrackte Specs, die nur dort liegen** (2026-09-10 15:21–17:28, zusammen rund 105 KB): `2026-09-10-agent-harness-design.md`, `-knotenkatalog.md`, `-graph.html` und `-graph.standalone.html`. Am 2026-09-11 arbeitete kein Prozess darin. Die Sitzung `ultraloom-49` hat ihn nicht angelegt; `ultraloom-bd` ist die naheliegende Urheberin, belegt ist das nicht | **Stehen lassen, entschieden am 2026-09-11.** Nicht mit `git worktree remove --force` abbauen, das nähme die vier Specs wortlos mit. Vor einem Abbau die Specs committen oder in den Hauptcheckout verschieben |
+| **`wentletrap`** | `wentletrap` | `~/orca/workspaces/ultraloom/wentletrap`, **außerhalb** des Repos | 🔵 **fremdverwaltet, in Gebrauch** | **0 eigene** Commits, Spitze `b95c187`, 36 hinter master, Arbeitsbaum sauber. Liegt im Werkzeugverzeichnis `orca`, nicht unter `.worktrees/`. Am 2026-09-11 vormittags zeigte `ListAgents` zwei Sitzungen `wentletrap-fd` und `wentletrap-79`, beide rund eine Stunde alt. Ein zweiter orca-Eintrag (`.orca-preparing/…`, detached HEAD, `locked`) stand am selben Vormittag in `git worktree list` und war kurz darauf von selbst verschwunden | Nicht anfassen: orca verwaltet es. Abbauen nur über orca, oder wenn keine `wentletrap`-Sitzung mehr läuft |
 
 > [!IMPORTANT]
 > **Zu parallelen Sitzungen — die Falle dieses Repos ist eine andere als in `space`.**
@@ -369,15 +369,25 @@ ist ein leeres Paket.
 - [x] **Der Zweigabbau ist gelaufen.** Am 2026-09-10 sind
       `claude/mcp-native` und `claude/brain-lint-braucht-ziel` gelöscht, beide
       ohne eigene Commits und ihre Spitzen als Vorfahren von `master`
-      bestätigt. Der dritte Kandidat, `claude/jovial-panini-eedcc1`, war zu
-      diesem Zeitpunkt schon weg. Damit stehen **zwei Zweige neben `master`**:
-      `feat/audit-nacharbeit` und `feature/multi-provider-llm` — siehe Matrix
-      oben. `feat/audit-nacharbeit` ist inhaltlich erledigt (beide Commits am
-      2026-09-10 cherry-gepickt), aber als Cherry-Pick kein Vorfahr: sein
-      Abbau bräuchte `git branch -D` und steht noch aus.
-- [x] **Ein Worktree** mit sauberem Arbeitsbaum
-      (`.worktrees/multi-provider-llm`); `.worktrees/mcp-native` ist am
-      2026-09-10 mit dem Zweigabbau entfernt worden.
+      bestätigt; `claude/jovial-panini-eedcc1` war da schon weg. Am 2026-09-11
+      folgten `claude/go-hooks-stufe-0-1` nach dem Merge `6168ef2` und
+      `feat/audit-nacharbeit`, dieses mit `git branch -D`, nachdem
+      `git cherry` beide Commits als inhaltsgleich auf `master` markiert hatte.
+      Neben `master` stehen damit `feature/agent-harness`,
+      `feature/multi-provider-llm` und `wentletrap` — siehe Matrix oben.
+- [x] **Worktrees aufgeräumt am 2026-09-11.** `.worktrees/go-hooks` ist nach
+      dem Merge abgebaut, `.worktrees/multi-provider-llm` ebenfalls; dessen
+      Zweig bleibt. Beide Male trug `git worktree remove` den Eintrag aus und
+      scheiterte dann am Löschen des Verzeichnisses (`Invalid argument`
+      beziehungsweise `Permission denied`). Bei `go-hooks` hielten zwei
+      `dmypy`-Daemons aus dem `.venv` des Worktrees es fest, zurückgelassen von
+      Gate-Läufen des Vortags; bei `multi-provider-llm` blieb ein leeres
+      Verzeichnis, die Ursache ist nicht gemessen. Beide Reste sind von Hand
+      entfernt. `.worktrees/agent-harness` bleibt stehen (vier ungetrackte
+      Specs), `wentletrap` liegt außerhalb des Repos und gehört orca. Neu seit
+      2026-09-11 vormittags ist `.worktrees/wiki-stufe-0` auf
+      `claude/wiki-stufe-0`, angelegt von der parallelen Sitzung für Stufe 0
+      des Flottenstandards (beim Anlegen 0 eigene Commits, Spitze `a4c0be8`).
 - [ ] **Untrackt und ungestaged im Baum, nachgesehen 2026-09-11.** Drei
       Befunde dieses Punktes vom Vortag waren falsch oder sind überholt. Der
       Stand jetzt:
@@ -609,10 +619,57 @@ Projekt darauf verweisen. Umgesetzt ist davon nichts.
   Abstand der größte seither, hat keine.
 - [ ] Entscheiden, ob `handovers/` weitergeführt wird oder das Ausführungsledger
       diese Rolle übernimmt.
-- 23 Pläne und **28** Spezifikationen unter
+- 25 Pläne und **31** Spezifikationen (Markdown, gezählt 2026-09-11) unter
   [`docs/.superpowers/`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers),
   dazu **zwei** SDD-Verzeichnisse — `2026-08-28-installer-kern/` mit einem
   `crlf-fix-report.md` und seit 2026-09-10 `2026-09-07-worktree-mirror/` mit
   dem Ledger. Beide ungetrackt, `.gitignore:2` ignoriert `sdd/` als
   Arbeitsspur. Nach `AGENTS.md` sind Pläne und Specs Arbeitspapiere: einmal
   geschrieben, von einem Menschen gelesen, nie übersetzt.
+
+---
+
+## 8. Strang: Go-Hooks — Nachläufer aus Stufe 0 und 1
+
+* **Spezifikation:** [2026-09-10-go-hooks-drei-hosts-design.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers/specs/2026-09-10-go-hooks-drei-hosts-design.md)
+* **Durchführungsplan:** [2026-09-10-go-hooks-stufe-0-und-1.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers/plans/2026-09-10-go-hooks-stufe-0-und-1.md)
+* **Messprotokoll:** [2026-09-10-antigravity-hook-messung.md](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers/specs/2026-09-10-antigravity-hook-messung.md)
+
+Gemergt mit `6168ef2`. Das Schlussreview hat die Punkte unten als
+aufschiebbar eingeordnet; keiner hält den Betrieb auf. Das
+Ausführungsledger ist mit dem Worktree abgebaut worden, die Entscheidungen
+stehen in den Commit-Nachrichten des Strangs.
+
+- [ ] **Die drei Antigravity-Vertragsfragen sind offen**: liest der Host die
+      JSON-Hülle oder nur den Exit-Code, kann `PreInvocation` Kontext in das
+      Modell schreiben, und wo liegt die Zeitgrenze für Stop-Handler. Im
+      Print-Modus (`agy -p`) feuerte am 2026-09-10 kein Lebenszyklus-Hook,
+      mit Freigaberegeln endete der Lauf im 5-Minuten-Timeout. Messbar nur in
+      einer interaktiven agy-Sitzung. **Stufe 2 und 3 lassen sich erst danach
+      planen.**
+- [ ] **Dass `brain guard` auf Antigravity je gefeuert hat, ist unbelegt.** Die
+      Nachricht von `3e1c01a` sagt „on both hosts" und ist damit stärker als
+      die Messung; berichtigt steht es im Messprotokoll.
+- [ ] **`ulguard status` hat keine SessionStart-Zeile.** `cmd/guard/status.go`
+      prüft nur PreToolUse und PostToolUse, die Installation des Go-Hooks lässt
+      sich dort nicht ablesen.
+- [ ] **`knownLegacyHooks` erkennt den alten Python-Hook nicht.** Die Liste
+      kennt nur `.py`-Skriptnamen; mit `ultraloom hook session-start` in der
+      `settings.json` meldete der Audit „no legacy hooks found".
+- [ ] `findRoot` in `internal/hostio` nimmt ein **Verzeichnis** namens
+      `.ultraloom/config.toml` als Wurzel an: `os.Stat` gelingt, nichts prüft
+      `Mode().IsRegular()`.
+- [ ] Go liest zwei Formen des Sitzungszustands strenger als `state.py`:
+      `{"snapshots":{"a":1}}` und `{"blocks":true}`. Python schreibt keine von
+      beiden.
+- [ ] Ein wörtlich leeres `"session_id": ""` legt in Go keine Zustandsdatei
+      an, `state.py` legte `unnamed.json` an.
+- [ ] `ErrIgnoredRoot` trägt den betroffenen Pfad nur im Text der
+      umhüllenden Fehlermeldung; `errors.Is` erkennt den Fall, den Pfad
+      erreicht kein Aufrufer.
+- [ ] `WriteState` hat einen unerreichbaren Fehlerzweig nach `json.Marshal`;
+      er ist gemeldet, nicht ausgeschlossen.
+- [ ] Die Flag-Wache in `toolKey` ändert auch `ultraloom --root x` vom
+      Schlüssel `--root` auf `ultraloom`; keine Testzeile hält das fest.
+- [ ] Die Rückfallkopien `ulguard.exe.old-20260910-1407` und
+      `ulinit.exe.old-20260910-1407` in `~/go/bin` werden nicht mehr gebraucht.
