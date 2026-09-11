@@ -1,7 +1,7 @@
 # Offene Aufgaben, Spezifikationen und Pläne (Status-Tracker)
 
-**Stand:** 2026-09-10, nach dem Arbeitsdurchgang des Tages (Zweigabbau,
-Cherry-Picks, `ulinit check types`)
+**Stand:** 2026-09-11, nach dem zweiten Arbeitsdurchgang (Ursache des leeren
+Wikis, Flottenspec, `hookCommand`)
 **Haupt-Checkout:** [`master`](file:///c:/Users/micro/Documents/%23GIT/ultraloom) — Basis ist `origin/master` = `d744a0c`; den Stand mit `git log --oneline origin/master..master` lesen. Eine Zahl an dieser Stelle veraltet mit dem Commit, der sie einträgt
 
 Diese Übersicht führt die aktiven Stränge, Zweige, Worktrees und offenen
@@ -34,6 +34,10 @@ Das Füllen des Wikis ist selbst ein offener Punkt — siehe Abschnitt 6.
 | **Konsolenkodierung: Befunde, die cp1252 nicht schreiben kann** | `claude/jovial-panini-eedcc1` (existiert nicht mehr) | — (kein Worktree) | ✅ **erledigt** | **Am 2026-09-10 nachgemessen:** der Zweig ist weg (`git branch -a` kennt ihn nicht mehr), und der Inhalt liegt in `master`. `9032b14` ist **kein** Vorfahr von `master`, aber `d0780c5` trägt denselben Betreff, dasselbe Autordatum (2026-08-27 12:53 +0200) und dieselbe Änderung an `src/ultraloom/cli.py` (+19) und `tests/test_cli.py` (+51) — der Zweigcommit, auf `master` neu abgespielt. Beweis im Baum: [`src/ultraloom/cli.py:58`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/src/ultraloom/cli.py) sagt `stream.reconfigure(errors="replace")`, Zeile 52 begründet die Regel | keine. Der frühere Befund („der Fix ist nicht in master", `cli.py` kenne weder `reconfigure` noch `errors="replace"`) war zum damaligen Stand 2026-09-10 09:03 **richtig** und ist seit `d0780c5` überholt |
 | **Audit-Nacharbeit (Tore, Multi-Marker, Aufräumen)** | `feat/audit-nacharbeit` | — (kein Worktree) | ✅ **erledigt** | **Am 2026-09-10 beide Commits auf `master` übernommen:** `e2c4911` als `94e2c2b` (Spec, 394 Zeilen) und `90d3e50` als `d941d26` (`cmd/init/run.go` +57, `cmd/init/run_test.go` +74). Beide Cherry-Picks liefen ohne Konflikt (Auto-Merge). Danach `ultraloom check all`: Exit 0 — ruff, `ulinit check gofmt`, `go vet`, dmypy, 920 Python-Tests, `go test ./...`, Python-Coverage 100 %, Go-Coverage 98,4 %. **Das frühere Urteil, `90d3e50` sei zu verwerfen, war falsch begründet** — der Commit fasst keine `.gitignore` dieses Repos an, sondern ergänzt in `cmd/init` eine Behandlung, die `master` gar nicht hatte (`grep` nach `gitignore` in `cmd/init/*.go` fand dort nichts); die Ausnahme `!/.ultra-brain/config.toml` war unberührt | **Offen: der Zweig selbst.** Cherry-Picks sind keine Vorfahren, `git branch -d` verweigert also — der Abbau bräuchte `-D`, und das ist eine Nutzerentscheidung |
 | **Mehrere LLM-Anbieter** | `feature/multi-provider-llm` | [`.worktrees/multi-provider-llm`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/.worktrees/multi-provider-llm) | 🟠 **weit veraltet** | **155 eigene** Commits, **399 hinter** master, letzter Stand 2026-08-24 | Entscheiden, was davon noch trägt. Der Entwurf lebt nur auf dem Zweig; ein Rebase über 399 Commits ist kein Selbstläufer |
+| **Go-Hooks für drei Hosts, Stufe 0 und 1** (parallele Sitzung `ultraloom-c0`) | `claude/go-hooks-stufe-0-1` (gelöscht) | `.worktrees/go-hooks` (entfernt) | ✅ **gemergt** | Mit `6168ef2` am 2026-09-11 nach master, als Fast-Forward über einen Merge; Zweig und Worktree danach abgebaut. 23 eigene Commits. SessionStart läuft seither über `ulguard hook session-start --host claude`, `session_start.py` ist gefallen; die drei Verlaufshooks bleiben Python bis zu ihren Stufen. Die drei Konflikte mit `6d87253` (`cmd/init/run_test.go`, `docs/hooks.md`, `docs/hooks.de.md`) und die zwei Kommentare, die still falsch gemergt hätten, sind im Merge aufgelöst. Spec `docs/.superpowers/specs/2026-09-10-go-hooks-drei-hosts-design.md` | Stufen 2 bis 5 sind laut Spec absichtlich noch nicht geplant |
+| **Wiki-Flottenstandard** | `master` | — | 📝 **entworfen** | Spec `b208c36`, berichtigt in `8614c8c`: `answers.toml` wird die eine Entscheidungsdatei für ultraloom und brain, `.brain.toml` fällt daraus, ein Flottenpreset liefert die Standardantworten, vier Wiki-Arten (`brain`, `neighbour_repo`, `vault`, `none`). Siehe Abschnitt 6 | Die Spec vom Nutzer abnehmen lassen, dann ein Plan für Stufe 0 (`NeighbourWiki` gegen die Registry, `answers.toml` dieses Repos auf `brain`). Die Sperre durch den Go-Hooks-Zweig ist mit `6168ef2` gefallen |
+| **Agent-Harness** | `feature/agent-harness` | `.worktrees/agent-harness` | ❔ **unbelegt** | **0 eigene** Commits, Spitze `fa3dd38`. Der Arbeitsbaum ist **nicht sauber**: vier Zeilen in `git status --short` am 2026-09-11, dort arbeitet jemand | Nicht anfassen. Zweck in dieser Datei nicht belegt |
+| **`wentletrap`** | `wentletrap` | `~/orca/workspaces/ultraloom/wentletrap`, **außerhalb** des Repos | ❔ **unbelegt** | **0 eigene** Commits, Spitze `b95c187`, Arbeitsbaum sauber. Liegt in einem Werkzeugverzeichnis namens `orca`, nicht unter `.worktrees/`; `git worktree list` ist die einzige Stelle, an der es auffällt | Klären, welches Werkzeug es angelegt hat. Abbaubar, wenn niemand es braucht |
 
 > [!IMPORTANT]
 > **Zu parallelen Sitzungen — die Falle dieses Repos ist eine andere als in `space`.**
@@ -223,6 +227,22 @@ Zweiter Schub, 2026-09-10, aus dem Abarbeiten dieser Datei selbst:
       reparieren würde (`dcf8fca`)
 - [x] Task 7s zweite Hälfte schließen, die in einem Repo getan war, das diese
       Datei nicht sehen kann (`b95c187`)
+- [x] Den Wiki-Flottenstandard entwerfen (`b208c36`) und seinen Defekt D2
+      nachmessen statt behaupten (`8614c8c`). Ein Datum darin war die mtime
+      von `iam_wiki`, nicht seine Entstehung, und die Kausalbehauptung reichte
+      weiter als die Messung
+- [x] **Das Projekt im Hookkommando nennen, nicht nur das Programm
+      (`6d87253`)** — eine Codeänderung, und sie nimmt eine frühere dieses
+      Strangs zurück. `bd6feef` hatte die vier ultraloom-Hooks auf den nackten
+      Namen gestellt, begründet mit „a name has no directory that a working
+      tree could be missing". Für `ulguard` und `ulinit` trägt das, für den
+      Python-Einsprung nicht: `~/.local/bin/ultraloom.exe` ist ein editable
+      `uv tool install`, dessen `_editable_impl_ultraloom.pth` genau eine Zeile
+      auf das `src` des Hauptcheckouts enthält. Der nackte Name lief also aus
+      jedem Worktree gegen den Code des Hauptbaums und meldete Erfolg. Gefunden
+      hat es die parallele Sitzung, der Mechanismus ist hier gemessen. `space`
+      ohne `pyproject.toml` löst die neue Form ohne venv trotzdem auf, eine
+      Schreibweise reicht also für die Flotte
 
 ### Zwei dokumentierte Lücken, die als Befund stehen
 
@@ -358,52 +378,66 @@ ist ein leeres Paket.
 - [x] **Ein Worktree** mit sauberem Arbeitsbaum
       (`.worktrees/multi-provider-llm`); `.worktrees/mcp-native` ist am
       2026-09-10 mit dem Zweigabbau entfernt worden.
-- [ ] **Untrackt im Baum, Stand 2026-09-10 nach dem Ledgerumzug:** diese
-      Datei hier, das Ledger (jetzt unter `docs/.superpowers/sdd/`, dort per
-      `.gitignore:2` gewollt ungetrackt) — und dazu ein Satz Dateien, die
-      **keine Sitzung dieses Strangs geschrieben hat**. Am 2026-09-10
-      nachgesehen: es sind **zwei** Verursacher, nicht einer.
-      - Um **10:57** hat ein Wiki-Indexer über den Baum geschrieben, mit
-        `"scope": "project/ultraloom"` in `graph.json`: dazu `index.md` im
-        Wurzelverzeichnis und je eines in `docs/`, `docs/flows/`,
-        `docs/.superpowers/`, `docs/.superpowers/plans/`,
-        `docs/.superpowers/specs/`, sowie ein `_identities.tsv` im
-        Wurzelverzeichnis mit **68 Einträgen** in genau dem Schema, das
-        `docs/wiki/_identities.tsv` als Kopfzeile trägt
-        (`doc_id`, `pfad`, `content_hash`, `revision`). Er hat seinen Katalog
-        also **neben** `docs/wiki/` gelegt statt hinein.
-      - Um **11:04** hat Obsidian `docs/wiki/.obsidian/` angelegt — die
-        Vault-Konfiguration, die beim Öffnen des Verzeichnisses entsteht. Das
-        ist eine andere Ursache als die erste und hat mit dem Indexer nichts zu
-        tun.
-      Dasselbe Werkzeug hat auch `.agents/hooks.json` und
-      `.claude/settings.json` geändert, ohne dass eine Sitzung dieses Strangs
-      es anfasste: beide tragen jetzt einen `brain guard`-Hook, in
-      `.agents/hooks.json` unter Umbenennung des Wurzelschlüssels von `hooks`
-      auf `wiki-guard` und mit `run_command` aus dem Matcher entfernt. Diese
-      zwei Änderungen liegen am 2026-09-10 ungestaged im Baum und sind
-      **nicht** mit den Commits dieses Tages gegangen. **Offen: ob sie so
-      gewollt sind.**
-      Der Indexlauf ist zugleich der Beweis, dass das leere Wiki aus
-      Abschnitt 6 nicht unindiziert ist: der Katalog existiert, er liegt nur
-      ungetrackt am falschen Ort. **Offen: ob der Indexer nach `docs/wiki/`
-      umgelenkt wird und ob `.obsidian/` in die `.gitignore` gehört.**
+- [ ] **Untrackt und ungestaged im Baum, nachgesehen 2026-09-11.** Drei
+      Befunde dieses Punktes vom Vortag waren falsch oder sind überholt. Der
+      Stand jetzt:
+      - **Die Katalogartefakte gehören an die Repowurzel.** `index.md`,
+        `graph.json`, `_identities.tsv`, dazu seit dem 2026-09-10
+        `layout.json` und je ein `index.md` in fünf Dokumentordnern. Der Vortag
+        nannte das „neben `docs/wiki/` gelegt statt hinein" und führte es als
+        offene Frage. Nachgerechnet ist es Absicht: `ManifestDir`
+        (`ultra-brain/pkg/config/manifest.go:439`) gibt für einen schreibbaren
+        Bereich `area.Path` zurück, und `approve.go:422,427` liest
+        `_identities.tsv` von derselben Wurzel mit bereichswurzel-relativen
+        Pfaden. Der Katalog beschreibt den ganzen Bereich, nicht das Wiki.
+        `space` hat ihn nicht in der Wurzel, weil es `readonly` registriert
+        ist. **Offen ist nur: `.gitignore` oder einchecken.**
+      - **Die `brain guard`-Einträge waren gewollt** und sind seit `3e1c01a`
+        von der parallelen Sitzung committet. Die Frage des Vortags, ob sie so
+        gewollt sind, ist beantwortet.
+      - **`.gitignore` trägt ungestaged `/docs/wiki/.obsidian`**, angehängt von
+        einer fremden Sitzung am 2026-09-10 12:21. Die Obsidian-Frage ist damit
+        praktisch entschieden, nur nicht committet.
+      - **`.mcp.json` ist ungestaged von `brain` auf `brain-mcp` umgestellt**,
+        durch einen `brain init -y --no-reindex`-Lauf dieser Sitzung am
+        2026-09-10 14:26. `configure_mcp` schreibt `brain-mcp` und begründet
+        es damit, das Go-`brain` kenne kein `mcp`; das ist überholt,
+        `brain --help` listet `mcp`. Beide Werte funktionieren. **Offen:
+        welcher bleibt** — nach dem Flottenstandard gehört `.mcp.json` `ulinit`.
+      - `docs/wiki/log.md` zeigt als geändert, der Inhaltsdiff ist leer: nur
+        Zeilenenden.
 
 ### Zwei Binärstände, die driften
 
-- [ ] **Der Checkout und der PATH tragen verschiedene Binärstände.** Die
-      `config.toml` ruft `./ulinit`, die Hooks rufen das `ulinit` aus
-      `~/go/bin`. Am 2026-09-10 kannte das PATH-Binär `check types` noch nicht,
-      während der Checkout es hatte — ein Hook wäre an einem Unterbefehl
-      gescheitert, der existiert. Beide sind jetzt gebaut, aber die Drift ist
-      strukturell: **es gibt keinen Schritt, der beide zusammenhält.**
-- [ ] **`go install` ist hier die falsche Waffe** und hat am 2026-09-10 zwei
-      Streuner erzeugt. Es benennt das Ergebnis nach dem Paketverzeichnis, also
-      `init.exe` und `guard.exe`, nicht `ulinit.exe` und `ulguard.exe`, die die
-      Hooks rufen — exitet dabei mit 0 und lässt die alten Binäre unberührt.
-      `go build -o <zielname>` ist der Weg; die Streuner sind entfernt. Offen:
-      ob ein `Makefile`- oder `ulinit`-Schritt das übernimmt, statt es in einer
-      Anweisungsdatei zu erklären.
+- [ ] **Checkout und PATH tragen verschiedene Binärstände, und seit
+      `5a61634` zählt nur noch der PATH.** Die `config.toml` ruft
+      `ulinit check gofmt` und `ulinit check types` beim Namen statt als
+      `./ulinit`, weil `ulinit.exe` nicht in git ist und ein frischer Worktree
+      keins hat (am 2026-09-10 fielen beide Lanes dort mit `[WinError 2]` aus
+      und nahmen das Commit-Gate mit). Damit prüft jede Bahn mit dem
+      installierten Binär, nicht mit dem gebauten. Zwischen 2026-09-10 16:38 und
+      2026-09-11 10:13 stammten `~/go/bin/ulguard.exe` und `ulinit.exe` aus dem
+      damals ungemergten Zweig `claude/go-hooks-stufe-0-1`; seit 10:13 sind
+      beide über `scripts/install.ps1` von master gebaut (`6168ef2`). Der Punkt
+      bleibt offen, weil nichts die zwei Stände zusammenhält: jede Änderung an
+      `cmd/` braucht einen Neubau, und kein Gate merkt, wenn er fehlt.
+- [x] **Der richtige Bauweg existiert schon: `scripts/install.ps1` und
+      `install.sh`**, beide in git. Das Skript baut mit
+      `go build -o (Join-Path $goBin "ulguard.exe")` und legt zusätzlich die
+      Bash-Shims ohne `.exe` an, die Git Bash und WSL brauchen; ein nacktes
+      `go build -o` tut Letzteres nicht. **`go install` ist die falsche
+      Waffe:** es benennt nach dem Paketverzeichnis (`init.exe`, `guard.exe`),
+      exitet 0 und lässt die alten Binäre liegen, am 2026-09-10 in zwei
+      Sitzungen unabhängig voneinander aufgetreten. Die Frage des Vortags, ob
+      ein eigener Schritt das übernimmt, ist beantwortet: es gibt ihn.
+- [x] **Dieselbe Falle beim Python-Einsprung, gemessen 2026-09-11.**
+      `~/.local/bin/ultraloom.exe` ist ein `uv tool install` im
+      **editable**-Modus (`uv-receipt.toml`:
+      `editable = "C:/Users/micro/Documents/#GIT/ultraloom"`), sein `.pth`
+      zeigt auf `src` des Hauptcheckouts. Ein nackter `ultraloom`-Aufruf lädt
+      aus jedem Worktree den Hauptbaum. Für die generierten Hooks behoben mit
+      `6d87253`; wer `ultraloom` von Hand in einem Worktree ruft, hat das
+      Problem weiter und braucht `uv run`.
 
 ### Zwei halbe Go-Formen in der `check`-Familie
 
@@ -437,8 +471,8 @@ durchweg `ok`, Python-Coverage **100 %**, Go-Coverage **98,5 %**.
 
 | Bahn | Befehle | Anmerkung |
 |---|---|---|
-| `lint` | `uv run ruff check .`, `./ulinit check gofmt cmd internal`, `go vet ./...` | nebenläufig; `gofmt -l` exitet auch bei Befund mit 0, deshalb der Umweg über `ulinit check` |
-| `types` | `./ulinit check types` | Seit 2026-09-10 (`67a9f2b`) der Go-Shim statt `uv run dmypy run --` unmittelbar; er trägt die zwei mypy-Flags und räumt eine Statusdatei weg, die ihren Daemon überlebt hat. Daemon statt mypy: warm 1400 → 988 ms, kalt 9,6 → 9,1 s (A/B am 2026-08-27) |
+| `lint` | `uv run ruff check .`, `ulinit check gofmt cmd internal`, `go vet ./...` | nebenläufig; `gofmt -l` exitet auch bei Befund mit 0, deshalb der Umweg über `ulinit check` |
+| `types` | `ulinit check types` | Seit 2026-09-10 (`67a9f2b`) der Go-Shim, seit `5a61634` beim Namen gerufen, statt `uv run dmypy run --` unmittelbar; er trägt die zwei mypy-Flags und räumt eine Statusdatei weg, die ihren Daemon überlebt hat. Daemon statt mypy: warm 1400 → 988 ms, kalt 9,6 → 9,1 s (A/B am 2026-08-27) |
 | `test` | `uv run pytest`, `go test ./...` | nebenläufig |
 | `coverage` | `uv run --script hooks/coverage-check.py 98.0` | Python über `fail_under`, Go-Boden **98,0** |
 | Profile | `edit` = lint+types; `precommit` = lint+types+test+coverage | |
@@ -494,7 +528,7 @@ durchweg `ok`, Python-Coverage **100 %**, Go-Coverage **98,5 %**.
 
 ---
 
-## 6. Übergreifend: Das Wiki ist leer
+## 6. Übergreifend: Das Wiki ist leer — Ursache gefunden, Standard entworfen
 
 `AGENTS.md` legt fest, wohin welches Wissen gehört: Projektwissen nach
 [`docs/wiki/`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki),
@@ -508,18 +542,45 @@ Projekt darauf verweisen. Umgesetzt ist davon nichts.
 | [`docs/wiki/audit.md`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki/audit.md) | „Gefüllt wird es ab Scheibe 5; bis dahin bleibt es leer" |
 | [`docs/wiki/_identities.tsv`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/wiki/_identities.tsv) | nur die Kopfzeile |
 
-- [ ] **Das Wiki ist als Datei leer, aber nicht unindiziert.** Am 2026-09-10
-      um 10:57 hat ein Wiki-Indexer den ganzen Baum unter
-      `"scope": "project/ultraloom"` erfasst — 68 Dokumente mit `sha256` in
-      einem `_identities.tsv`, dazu `graph.json` und sechs `index.md`. Nur
-      schrieb er das alles ins **Wurzelverzeichnis** und in die
-      Dokumentordner, nicht nach `docs/wiki/`, und nichts davon ist getrackt.
-      Die Tabelle **oben** beschreibt also die Vorlagen, nicht den
-      Wissensstand. Siehe den Befund in Abschnitt 5.
-- [ ] **Entscheiden, ob das Wiki hier überhaupt gefüllt wird.** Das Wissen dieses
-      Repos steht heute in `README.md` (lang), `AGENTS.md`, `CLAUDE.md` und
-      `docs/flows/`. Entweder das Wiki wird der Ort und die Ablaufseiten ziehen
-      um, oder die drei Vorlagen sagen, was statt ihrer gilt.
+- [x] **Warum hier nichts ins Wiki geschrieben wird, gefunden am
+      2026-09-10.** Nicht die Mechanik fehlt, sondern eine Zeile ist falsch:
+      `.ultraloom/answers.toml` sagt `mode = "neighbour_repo"`,
+      `bundle = "iam_wiki/"`. `brainEntry` (`cmd/init/run.go:704`) schreibt die
+      brain-Einträge nur bei `mode == "brain"`, also nie. Und `iam_wiki` ist
+      ein **anderes Projekt** (Registry: `project/iam-wiki`, `readonly`);
+      hätte `ulinit` darauf `brain wiki-gate` installiert, hätte das Gate ein
+      fremdes Bündel geprüft und grün gemeldet. Ursache ist `NeighbourWiki`
+      (`internal/detect/edges.go:37`): es nimmt jedes Schwesterverzeichnis auf
+      `_wiki` mit `.git` und prüft nie, dass es `<projekt>_wiki` heißt. Die
+      Erkennung **schlägt vor**, sie erzwingt nicht: `space` wurde zwei Tage
+      später mit gleichem Code aufgesetzt und trägt `brain`, weil ein Mensch
+      überstimmt hat. Hier eingetragen seit `e84df9e` (2026-08-29). Die
+      Reparatur ist Stufe 0 des Flottenstandards.
+- [ ] **Mit richtiger Mode schlösse sich die Pflegeschleife trotzdem nicht von
+      selbst.** Gemessen: der MCP-Server von `brain` bietet nur Lesewerkzeuge
+      (`catalog`, `read`, `neighbors`, `search`, `status`); Fälle entstehen in
+      `reconcile._cases` nur für Seiten, die eine geänderte Quelle schon
+      zitieren, und `dependents()` überspringt das Gerüst. Ein Wiki aus nur
+      `_schema.md`, `index.md`, `log.md` und `audit.md` bekommt nie einen
+      Fall. Die erste Seite muss geschrieben werden, von einem Agenten unter
+      `brain guard`, wie `_schema.md` es vorsieht („Nur die KI schreibt hier").
+- [ ] **Go- und Python-`brain` indizieren verschieden** (Spec-Defekt D1).
+      `globToRegex` (`ultra-brain/pkg/index/walk.go:90`) macht aus
+      `docs/**/*.md` ein Muster mit Pflicht-Zwischenverzeichnis, Python
+      (`PurePosixPath.full_match`) nicht. Nachgemessen: Go-Reindex 68 Einträge
+      ohne `docs/benchmarks.md`, `docs/benchmarks.de.md`, `docs/hooks.md` und
+      `docs/hooks.de.md`; Python-Reindex 72 mit ihnen. Der Stand von
+      `_identities.tsv` hängt am zuletzt gelaufenen Binär, seit 2026-09-10
+      Python. Umweg ohne `ultra-brain`:
+      `include = ["docs/*.md", "docs/**/*.md", "README*.md"]`, auf acht
+      Testpfaden in beiden gleich.
+- [x] **Entschieden am 2026-09-10: das Wiki wird gefüllt, und zwar geteilt.**
+      Projektwissen nach `docs/wiki/`, übertragbares nach
+      `brain-knowledge/92 Engineering/*`, beide OKF-streng mit
+      Identitätsfeldern, damit die Pflegeschleife greift. Für die ganze Flotte
+      gleich, von `ulinit` aufgesetzt, und abwählbar. Ausgearbeitet in
+      [`2026-09-10-wiki-flottenstandard-design.md`](file:///c:/Users/micro/Documents/%23GIT/ultraloom/docs/.superpowers/specs/2026-09-10-wiki-flottenstandard-design.md)
+      (`b208c36`, berichtigt `8614c8c`).
 - [ ] `audit.md` verweist auf „Scheibe 5" — eine Nummerierung, die in diesem Repo
       sonst nirgends vorkommt. Der Satz stammt vermutlich aus `ultra-brain`.
 - [ ] **`docs/benchmarks.de.md` trägt eine Überschrift doppelt.**
